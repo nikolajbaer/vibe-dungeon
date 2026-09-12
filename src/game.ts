@@ -65,7 +65,13 @@ export function startGame(container: HTMLElement): void {
     getDoorStates: () =>
       Array.from(query(world, [Door])).map((eid) => ({ state: Door.state[eid], progress: Door.progress[eid] })),
     setYaw: (yaw: number) => { Rotation.yaw[player] = yaw; },
+    getCurrentSector: () => currentSector,
   };
+
+  // Tracks (and logs, on change) the sector the player currently occupies —
+  // authoring/tracking data from the tile occupancy index only (see
+  // README "Sectors"); no gameplay reads this yet.
+  let currentSector: string | undefined;
 
   const keyboard = new Keyboard();
   const pointerLook = new PointerLook(renderer.domElement);
@@ -95,6 +101,12 @@ export function startGame(container: HTMLElement): void {
 
     const interactPressed = keyboard.consumeJustPressed("KeyE") || touch.consumeInteractRequest();
     if (interactPressed) tryInteract(world, camera);
+
+    const sector = level.sectorAt(Position.x[player], Position.z[player]);
+    if (sector !== currentSector) {
+      currentSector = sector;
+      console.log(`[sector] entered "${currentSector ?? "(none)"}"`);
+    }
 
     syncSystem(world);
     renderer.render(scene, camera);
