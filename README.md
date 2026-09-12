@@ -63,3 +63,16 @@ Opening a door fires a **raycast straight out from the camera center**; the near
 - **Touch:** tap anywhere on screen outside both joystick pads.
 
 Doors only open (no auto-close, no "hold to open") — that's the full scope of this pass. The rest of the interaction system (issue #7 — picking up/using general items) should reuse this same "raycast from camera center, triggered by `E`/an outside-the-pads tap" convention for consistency, adding new interactable types rather than inventing a second trigger scheme.
+
+### Tile-based level system (design, not yet implemented — see tracking issue)
+
+Levels are composed from **tiles** on a uniform grid, replacing the hand-placed geometry in `src/level/level.ts`.
+
+- **Unit = 3m.** World grid is integer cells `(x, y, z)` (y-up), each cell a 3m cube.
+- **Tile type**: a footprint in cells `{w, d, h}` (width×depth×height) plus geometry and a **face map** — for every unit-cell segment on its perimeter, whether that segment is `wall`, `opening`, or `door`. E.g. a hallway is `1×1×3`; a great hall is `3×2×3` (3 wide, 2 tall, 3 long).
+- **Doors/openings are always centered on a single unit-cell face**, never spanning a whole multi-unit wall — so a 3-wide wall can have up to three independent connection points, one per unit segment.
+- **Tile instance**: `{tileTypeId, originCell, rotation}`, rotation in 90° steps around Y (footprint swaps w/d at 90°/270°).
+- **Occupancy index**: built at load time, `cell → tileInstance`, for O(1) "what tile am I in / what's adjacent" lookups. Also used to validate at load time that every pair of adjacent instances agrees at their shared face (both open, or both wall) — a level linter, useful for the future level editor (#14) too.
+- **Floors stay at a single baseline for v1** — a tile's height sets ceiling height, not floor offset. Multi-level/stairs is a separate, later feature (real traversal, not just box collision), not part of this pass.
+- **Sectors**: each tile instance declares a `sectorId` at authoring time (typically one sector = one room + its alcoves); the player's current sector is derived from the occupancy index every frame. For now this is authoring data only — no entity-activation/culling optimization is built on top of it yet. Add the actual "only simulate entities in/near the current sector" logic later, once enemy/entity counts are high enough for it to show up in profiling; with bitecs's flat typed arrays, iterating everything is cheap at the scale of a couple of rooms.
+- Tile types decompose into the same wall/floor/ceiling/door boxes (with `Collider`/`Solid`) that `level.ts` hand-places today, so this only replaces level *authoring* — the player/collision/door ECS systems don't change.
