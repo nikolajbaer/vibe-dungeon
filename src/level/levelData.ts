@@ -6,12 +6,13 @@ import type { TileInstance } from "./occupancy";
 // corridor, and a second room, with door interaction along the way.
 //
 // Room A (great_hall, unrotated) has its one door on its south face at grid
-// x=0; a 3-segment hallway corridor runs south from there; room-b
-// (great_hall, rotated 180 so its own door faces north) sits at the far
-// end. Because both rooms are the *same* tile type, each contributes a
-// door where it meets the corridor — two doors instead of the original
-// single hand-placed one, which is a fine, arguably nicer, consequence of
-// reusing one room type rather than a deviation to work around.
+// x=0; a single hallway instance (already 9m long, d=3) runs south from
+// there; room-b (great_hall, rotated 180 so its own door faces north) sits
+// at the far end. Because both rooms are the *same* tile type, each
+// contributes a door where it meets the corridor — two doors instead of the
+// original single hand-placed one, which is a fine, arguably nicer,
+// consequence of reusing one room type rather than a deviation to work
+// around.
 
 export const LEVEL_TILES: TileInstance[] = [
   {
@@ -22,21 +23,7 @@ export const LEVEL_TILES: TileInstance[] = [
     sectorId: "room-a",
   },
   {
-    id: "corridor-1",
-    tileTypeId: "hallway",
-    originCell: { x: 0, z: -1 },
-    rotation: 0,
-    sectorId: "corridor",
-  },
-  {
-    id: "corridor-2",
-    tileTypeId: "hallway",
-    originCell: { x: 0, z: -2 },
-    rotation: 0,
-    sectorId: "corridor",
-  },
-  {
-    id: "corridor-3",
+    id: "corridor",
     tileTypeId: "hallway",
     originCell: { x: 0, z: -3 },
     rotation: 0,
@@ -45,13 +32,13 @@ export const LEVEL_TILES: TileInstance[] = [
   {
     id: "room-b",
     tileTypeId: "great_hall",
-    originCell: { x: -1, z: -5 },
+    originCell: { x: -1, z: -6 },
     rotation: 180,
     sectorId: "room-b",
   },
 ];
 
-/** Spawn point, inside room-a, facing south (-z) down the corridor —
- * matches the old level's "start in room A, corridor heads away from you"
- * feel. */
-export const LEVEL_SPAWN = { x: 1.5, z: 4.5, yaw: 0 };
+/** Spawn point, inside room-a (now 9m x 9m), facing south (-z) down the
+ * corridor — matches the old level's "start in room A, corridor heads away
+ * from you" feel. */
+export const LEVEL_SPAWN = { x: 1.5, z: 7.5, yaw: 0 };

@@ -44,38 +44,39 @@ function wallsOf(length: number): FaceKind[] {
 }
 
 /**
- * A single 3m x 3m x 9m corridor segment, open at both ends (north/south,
- * before rotation). Chain several instances to form a longer corridor, or
- * rotate a single instance 90 degrees to run it east-west instead.
+ * A single 3m x 9m corridor segment (3m ceiling), open at both ends
+ * (north/south, before rotation). Chain several instances to form a longer
+ * corridor, or rotate a single instance 90 degrees to run it east-west
+ * instead.
  */
 export const HALLWAY: TileType = {
   id: "hallway",
   w: 1,
-  d: 1,
-  h: 3,
+  d: 3,
+  h: 1,
   faces: {
     north: ["opening"],
     south: ["opening"],
-    east: ["wall"],
-    west: ["wall"],
+    east: wallsOf(3),
+    west: wallsOf(3),
   },
 };
 
 /**
- * A 9m x 6m room (3 wide x 2 deep, unrotated) with a single door centered on
- * the middle unit-cell segment of its south (long, 3-wide) face — the other
- * three faces are solid walls.
+ * A 9m x 9m room (3 wide x 3 deep, unrotated) with a 6m ceiling, with a
+ * single door centered on the middle unit-cell segment of its south (long,
+ * 3-wide) face — the other three faces are solid walls.
  */
 export const GREAT_HALL: TileType = {
   id: "great_hall",
   w: 3,
-  d: 2,
-  h: 3,
+  d: 3,
+  h: 2,
   faces: {
     north: wallsOf(3),
     south: ["wall", "door", "wall"],
-    east: wallsOf(2),
-    west: wallsOf(2),
+    east: wallsOf(3),
+    west: wallsOf(3),
   },
 };
 
