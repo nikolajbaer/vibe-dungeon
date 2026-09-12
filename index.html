@@ -16,6 +16,42 @@
         width: 100vw;
         height: 100vh;
         display: block;
+        position: relative;
+        touch-action: none;
+      }
+      #controls-hint {
+        position: fixed;
+        left: 50%;
+        top: 16px;
+        transform: translateX(-50%);
+        max-width: calc(100vw - 32px);
+        width: max-content;
+        text-align: center;
+        color: #eee;
+        font: 14px/1.4 system-ui, sans-serif;
+        background: rgba(0, 0, 0, 0.45);
+        padding: 6px 14px;
+        border-radius: 6px;
+        pointer-events: none;
+        transition: opacity 0.3s ease;
+      }
+      #controls-hint.hidden {
+        opacity: 0;
+      }
+      .touch-joystick {
+        position: fixed;
+        bottom: 20px;
+        touch-action: none;
+      }
+      .touch-joystick-left {
+        left: 20px;
+      }
+      .touch-joystick-right {
+        right: 20px;
+      }
+      .touch-joystick canvas {
+        touch-action: none;
+        display: block;
       }
     </style>
   </head>
