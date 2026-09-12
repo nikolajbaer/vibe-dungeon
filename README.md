@@ -40,7 +40,7 @@ Each task below is tagged with the role it belongs to. An agent session should g
 Status legend: `todo` / `in-progress (owner/branch)` / `done`
 
 ### Engine/Infra
-- [ ] `in-progress` — Hello-world three.js scene: Vite + TypeScript scaffold, single rotating-cube (or similar) scene, GitHub Actions workflow deploying to GitHub Pages. Goal: prove out the deploy pipeline end-to-end.
+- [x] `done` — Hello-world three.js scene: Vite + TypeScript scaffold, single rotating-cube (or similar) scene, GitHub Actions workflow deploying to GitHub Pages. Goal: prove out the deploy pipeline end-to-end.
 - [ ] Add bitecs and stand up a minimal ECS skeleton (a couple of components/systems wired into the render loop)
 - [ ] Add lint/format/typecheck to CI (block merge on failure)
 - [ ] Basic asset pipeline (loading glTF models/textures)
