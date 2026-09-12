@@ -13,13 +13,17 @@ A web-based 3D dungeon crawler in the spirit of *Ultima Underworld*, built with 
 
 There's no single developer at a keyboard all day — instead, short-lived coding agent sessions pick up one task at a time from the board below, do the work in a feature branch, open a PR, and hand it off. Because sessions are async and phone-driven, tasks need to be scoped small enough that one agent session can take a task from "todo" to a mergeable PR without needing a mid-task clarifying conversation.
 
+Tasks live in two places, kept in sync: this README's task board (quick overview, grouped by role) and [GitHub Issues](../../issues) (one issue per task, labeled by role, for assignment/discussion/linking to PRs). The README is the map; Issues are where the detail and history lives.
+
 Ground rules for keeping multiple agents from tripping over each other:
 
-1. **One task = one PR = one owner.** Claim a task by moving it to "in progress" (with the branch/PR name) before starting.
-2. **Small, single-purpose PRs.** Prefer several small merges over one large one — easier to review from a phone, easier for the next agent to build on a stable `main`.
-3. **Tasks declare their file/module footprint** where possible, so two agents don't get queued against the same files at the same time.
-4. **`main` stays deployable.** CI (build + deploy) must pass before merge; don't merge on red CI.
-5. **Design decisions that affect multiple systems get written down here** (in a `## Design Notes` section, once we have any) rather than living only in a chat log or a PR description, since the next agent won't have that context otherwise.
+1. **One task = one PR = one owner.** Claim a task by assigning yourself the Issue and moving its README line to "in progress" (with the branch/PR name) before starting.
+2. **PRs required, reviewed before merging to `main`.** No direct pushes to `main` — every task lands via a PR, even small ones. Feature/task branches (like this one) are fine to push to directly.
+3. **Small, single-purpose PRs.** Prefer several small merges over one large one — easier to review from a phone, easier for the next agent to build on a stable `main`.
+4. **One agent session active at a time**, for now — pick the next `todo` task off the board rather than starting a second one in parallel, until there's enough surface area (non-overlapping files/systems) that running a couple concurrently stops causing merge conflicts.
+5. **Tasks declare their file/module footprint** where possible, so two agents don't get queued against the same files at the same time.
+6. **`main` stays deployable.** CI (build + deploy) must pass before merge; don't merge on red CI.
+7. **Design decisions that affect multiple systems get written down here** (in the `## Design Notes` section below) rather than living only in a chat log or a PR description, since the next agent won't have that context otherwise.
 
 ## Agent roles
 
@@ -37,31 +41,31 @@ Each task below is tagged with the role it belongs to. An agent session should g
 
 ## Task board
 
-Status legend: `todo` / `in-progress (owner/branch)` / `done`
+Status legend: `todo` / `in-progress (owner/branch)` / `done`. Each line links to its GitHub Issue for details/discussion.
 
 ### Engine/Infra
-- [x] `done` — Hello-world three.js scene: Vite + TypeScript scaffold, single rotating-cube (or similar) scene, GitHub Actions workflow deploying to GitHub Pages. Goal: prove out the deploy pipeline end-to-end.
-- [ ] Add bitecs and stand up a minimal ECS skeleton (a couple of components/systems wired into the render loop)
-- [ ] Add lint/format/typecheck to CI (block merge on failure)
-- [ ] Basic asset pipeline (loading glTF models/textures)
+- [x] `done` — [#1](../../issues/1) Hello-world three.js scene + GitHub Pages deploy pipeline
+- [ ] [#2](../../issues/2) Stand up minimal bitecs ECS skeleton
+- [ ] [#3](../../issues/3) Add lint/format/typecheck gating to CI
+- [ ] [#4](../../issues/4) Basic asset pipeline: glTF model/texture loading
 
 ### Gameplay Systems
-- [ ] First-person player controller + camera (Underworld-style: mouse-look or drag-look for touch, WASD/analog movement)
-- [ ] Collision/movement against level geometry
-- [ ] Basic interaction system (use/open/pick up)
+- [ ] [#5](../../issues/5) First-person player controller + camera (Underworld-style: mouse-look or drag-look for touch, WASD/analog movement)
+- [ ] [#6](../../issues/6) Collision/movement against level geometry
+- [ ] [#7](../../issues/7) Basic interaction system (use/open/pick up)
 
 ### Game Design
-- [ ] One-page design doc: core loop, moment-to-moment goals, what "Underworld-like" means for this project specifically
+- [ ] [#8](../../issues/8) One-page design doc: core loop, moment-to-moment goals, what "Underworld-like" means for this project specifically
 
 ### Level Design
-- [ ] Minimal test level (a few connected rooms/corridors) to exercise the player controller
+- [ ] [#9](../../issues/9) Minimal test level (a few connected rooms/corridors) to exercise the player controller
 
 ### Art/Asset
-- [ ] Concept art pass to establish look and feel (palette, lighting mood, tile/prop style)
-- [ ] Placeholder primitive art set (blockout materials) so gameplay isn't blocked on final art
+- [ ] [#10](../../issues/10) Concept art pass to establish look and feel (palette, lighting mood, tile/prop style)
+- [ ] [#11](../../issues/11) Placeholder primitive art set (blockout materials) so gameplay isn't blocked on final art
 
 ### QA/Playtest
-- [ ] (blocked until there's a build) Smoke-test checklist for each deploy
+- [ ] [#12](../../issues/12) Smoke-test checklist for each deploy (unblocked now that the deploy pipeline exists)
 
 ## Design Notes
 
