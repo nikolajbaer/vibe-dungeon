@@ -11,12 +11,11 @@ A web-based 3D dungeon crawler in the spirit of *Ultima Underworld*, built with 
 
 ## Status
 
-_Last updated: after the hello-world scaffold ([#1](../../issues/1))._
+_Last updated: after the player-controller vertical slice ([#2](../../issues/2), [#5](../../issues/5), [#6](../../issues/6), [#9](../../issues/9), and the "open doors" portion of [#7](../../issues/7))._
 
-- **Working:** Vite + TypeScript + three.js project scaffold, rendering a single rotating cube (smoke-test scene, no gameplay). Local `npm run build` verified clean.
-- **In progress / not yet merged:** the scaffold above and its GitHub Actions Pages-deploy workflow exist on a branch but haven't been merged to `main` yet, so nothing is live at `https://nikolajbaer.github.io/vibe-dungeon/` yet.
-- **Outstanding manual step:** repo Settings → Pages → Source needs to be set to "GitHub Actions" before any deploy can actually publish.
-- **Not started:** ECS wiring, player controller, levels, art, audio, everything gameplay-related.
+- **Working:** Vite + TypeScript + three.js scaffold, built on a minimal `bitecs` ECS (position/velocity/collider/door/player-controlled components; input → movement → collision → door-interaction → sync-to-three.js → render pipeline). Playable first-person vertical slice: walk a hand-placed test level (two rooms joined by an L-shaped corridor with one door) using WASD + mouse-look (desktop, click to enable pointer lock) or two virtual joysticks (touch), collide with and slide along walls, and open the door via a short-range raycast (see Design Notes below). Local `npm run build` and `tsc --noEmit` are clean; Playwright smoke tests confirm movement, wall collision, and door interaction all work end-to-end.
+- **Outstanding manual step:** repo Settings → Pages → Source needs to be set to "GitHub Actions" before any deploy can actually publish (carried over from [#1](../../issues/1), unchanged by this work).
+- **Not started:** enemies/combat, inventory, general item pickup/use (the rest of [#7](../../issues/7)), procedural level generation, real art/audio assets ([#4](../../issues/4), [#11](../../issues/11)), lint/CI beyond the existing build+deploy check ([#3](../../issues/3)).
 
 Update this section as milestones land (what runs, what's live, what's known-broken) — it's meant to be the "what's actually true right now" summary, not a task list.
 
@@ -52,4 +51,15 @@ Each Issue is labeled with the role it belongs to. An agent session should gener
 
 ## Design Notes
 
-_(nothing yet — add architectural or design decisions here as they're made, so future agent sessions have the context)_
+### ECS conventions (`bitecs`)
+
+Components are plain structure-of-arrays objects indexed by entity id (bitECS's recommended pattern), defined in `src/ecs/components.ts`. Systems are plain functions run in a fixed pipeline each frame (`src/game.ts`): **input → movement → collision → door-interaction → sync-to-three.js → render**. A three.js `Object3D` is attached to an entity via the `Object3DRef` component and kept in sync by `syncSystem` — new visual/dynamic entity types should follow that same pattern rather than mutating `Object3D`s directly from other systems.
+
+### Door interaction trigger (issues #6 / #7)
+
+Opening a door fires a **raycast straight out from the camera center**; the nearest **closed** door it hits within ~3m opens (slides straight up, past the ceiling line, so it disappears cleanly). What triggers the raycast:
+
+- **Desktop:** press `E`.
+- **Touch:** tap anywhere on screen outside both joystick pads.
+
+Doors only open (no auto-close, no "hold to open") — that's the full scope of this pass. The rest of the interaction system (issue #7 — picking up/using general items) should reuse this same "raycast from camera center, triggered by `E`/an outside-the-pads tap" convention for consistency, adding new interactable types rather than inventing a second trigger scheme.
