@@ -1,19 +1,22 @@
 import * as THREE from "three";
 import { addComponent, addEntity, createWorld } from "bitecs";
 import { query } from "bitecs";
-import { Position, Velocity, Rotation, Collider, PlayerControlled, Object3DRef, Door } from "./ecs/components";
+import { Position, Velocity, Rotation, Collider, PlayerControlled, Object3DRef, Door, Health } from "./ecs/components";
 import { inputSystem } from "./ecs/systems/input";
 import { movementSystem } from "./ecs/systems/movement";
 import { collisionSystem } from "./ecs/systems/collision";
 import { doorAnimationSystem, tryInteract } from "./ecs/systems/doors";
 import { syncSystem } from "./ecs/systems/sync";
+import { hudSync } from "./ecs/systems/hudSync";
 import { buildLevel } from "./level/level";
 import { Keyboard } from "./input/keyboard";
 import { PointerLook } from "./input/pointerLook";
 import { TouchControls, isTouchDevice } from "./input/touchControls";
+import { mountHud } from "./hud/mount";
 
 const EYE_HEIGHT = 1.6;
 const PLAYER_HALF_EXTENT = 0.35;
+const DEBUG_HEALTH_STEP = 10; // debug-only nudge, see `[`/`]` handling below
 
 /** Wires up the ECS world, level, player entity, input sources, and the
  * core game loop (input -> movement -> collision -> door interaction ->
@@ -47,6 +50,7 @@ export function startGame(container: HTMLElement): void {
   addComponent(world, player, Collider);
   addComponent(world, player, PlayerControlled);
   addComponent(world, player, Object3DRef);
+  addComponent(world, player, Health);
   Position.x[player] = level.spawn.x;
   Position.y[player] = EYE_HEIGHT;
   Position.z[player] = level.spawn.z;
@@ -57,6 +61,8 @@ export function startGame(container: HTMLElement): void {
   Collider.hx[player] = PLAYER_HALF_EXTENT;
   Collider.hz[player] = PLAYER_HALF_EXTENT;
   Object3DRef[player] = camera;
+  Health.current[player] = 100;
+  Health.max[player] = 100;
 
   // Minimal debug hook for manual/automated smoke testing (e.g. Playwright
   // checking that movement and collision actually affect position).
@@ -66,6 +72,7 @@ export function startGame(container: HTMLElement): void {
       Array.from(query(world, [Door])).map((eid) => ({ state: Door.state[eid], progress: Door.progress[eid] })),
     setYaw: (yaw: number) => { Rotation.yaw[player] = yaw; },
     getCurrentSector: () => currentSector,
+    getHealth: () => ({ current: Health.current[player], max: Health.max[player] }),
   };
 
   // Tracks (and logs, on change) the sector the player currently occupies —
@@ -77,6 +84,7 @@ export function startGame(container: HTMLElement): void {
   const pointerLook = new PointerLook(renderer.domElement);
   const touch = new TouchControls(container);
   setupHint(container, renderer.domElement, pointerLook);
+  mountHud(container);
 
   window.addEventListener("resize", () => {
     camera.aspect = window.innerWidth / window.innerHeight;
@@ -102,6 +110,16 @@ export function startGame(container: HTMLElement): void {
     const interactPressed = keyboard.consumeJustPressed("KeyE") || touch.consumeInteractRequest();
     if (interactPressed) tryInteract(world, camera);
 
+    // Debug-only health nudge (`[`/`]`) so the ECS -> MobX -> HUD plumbing
+    // is visibly exercised before real combat (#16) exists. Harmless to
+    // leave in permanently as a debug convenience.
+    if (keyboard.consumeJustPressed("BracketLeft")) {
+      Health.current[player] = Math.max(0, Health.current[player] - DEBUG_HEALTH_STEP);
+    }
+    if (keyboard.consumeJustPressed("BracketRight")) {
+      Health.current[player] = Math.min(Health.max[player], Health.current[player] + DEBUG_HEALTH_STEP);
+    }
+
     const sector = level.sectorAt(Position.x[player], Position.z[player]);
     if (sector !== currentSector) {
       currentSector = sector;
@@ -109,6 +127,7 @@ export function startGame(container: HTMLElement): void {
     }
 
     syncSystem(world);
+    hudSync(world);
     renderer.render(scene, camera);
   }
   frame();
