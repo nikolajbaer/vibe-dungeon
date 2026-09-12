@@ -61,3 +61,12 @@ export const Door = {
  * (AoS-by-reference component — see bitECS docs on component storage).
  * Synced from Position/Rotation each frame by syncSystem. */
 export const Object3DRef: (THREE.Object3D | undefined)[] = [];
+
+/** Hit points. Added ahead of real combat (#16) so the HUD health bar (#23)
+ * has something to read; combat should consume this same component rather
+ * than inventing its own. `current` may exceed 0..max only transiently
+ * (e.g. a debug nudge) — consumers should clamp when displaying. */
+export const Health = {
+  current: [] as number[],
+  max: [] as number[],
+};
