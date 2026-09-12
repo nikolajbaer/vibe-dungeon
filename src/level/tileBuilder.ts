@@ -43,31 +43,84 @@ function addSlab(scene: THREE.Scene, cx: number, cz: number, hx: number, hz: num
   scene.add(mesh);
 }
 
-/** Adds a door: a collider + mesh that slides straight up (past this tile's
- * ceiling line, so it disappears cleanly) when opened. */
-function addDoor(world: World, scene: THREE.Scene, cx: number, cz: number, hx: number, hz: number, wallHeight: number): void {
+/**
+ * Adds one door leaf: a collider (static AABB, centered at the leaf's
+ * closed-position center `(leafCx, leafCz)` — exactly like a wall) plus a
+ * visual hinge: a `THREE.Group` positioned at the world hinge point
+ * `(hingeX, hingeZ)` with the slab mesh as a child offset by half the
+ * leaf's width, so rotating the *group* around Y swings the slab on that
+ * hinge instead of spinning it in place. `Position`/`Collider` never move —
+ * `doorAnimationSystem` only ever rotates the group (see doors.ts), and
+ * `syncSystem` knows to leave a `Door` entity's Object3DRef position alone
+ * (see sync.ts) so it doesn't stomp the group back onto `Position` (the
+ * leaf center, not the hinge point) every frame.
+ */
+function addDoorLeaf(
+  world: World,
+  scene: THREE.Scene,
+  leafCx: number,
+  leafCz: number,
+  hx: number,
+  hz: number,
+  hingeX: number,
+  hingeZ: number,
+  hingeSign: number,
+): number {
   const closedY = DOOR_HEIGHT / 2;
-  const openY = wallHeight + DOOR_HEIGHT / 2;
+
+  const group = new THREE.Group();
+  group.position.set(hingeX, closedY, hingeZ);
+  scene.add(group);
 
   const mesh = new THREE.Mesh(new THREE.BoxGeometry(hx * 2, DOOR_HEIGHT, hz * 2), doorMaterial());
-  mesh.position.set(cx, closedY, cz);
-  scene.add(mesh);
+  mesh.position.set(leafCx - hingeX, 0, leafCz - hingeZ);
+  group.add(mesh);
 
   const eid = addEntity(world);
   addComponent(world, eid, Position);
   addComponent(world, eid, Collider);
   addComponent(world, eid, Door);
   addComponent(world, eid, Object3DRef);
-  Position.x[eid] = cx;
+  Position.x[eid] = leafCx;
   Position.y[eid] = closedY;
-  Position.z[eid] = cz;
+  Position.z[eid] = leafCz;
   Collider.hx[eid] = hx;
   Collider.hz[eid] = hz;
   Door.state[eid] = DoorState.CLOSED;
   Door.progress[eid] = 0;
-  Door.closedY[eid] = closedY;
-  Door.openY[eid] = openY;
-  Object3DRef[eid] = mesh;
+  Door.hingeSign[eid] = hingeSign;
+  Door.pairId[eid] = eid; // fixed up by addDoorPair to the shared pair id
+  Object3DRef[eid] = group;
+  mesh.userData.eid = eid; // lets tryInteract's recursive raycast find the eid
+
+  return eid;
+}
+
+/**
+ * Builds a doorway as **two hinge leaves** (~1.5m each) rather than one
+ * 3m slab, hinged on opposite outer edges and swinging outward like double
+ * doors — avoids one wide slab sweeping a big arc, and reads more like a
+ * real door. Both leaves share a `Door.pairId` so `tryInteract` opens them
+ * together (see doors.ts).
+ */
+function addDoorPair(world: World, scene: THREE.Scene, orientation: "x" | "z", planeCoord: number, rangeStart: number, rangeEnd: number): void {
+  const leafHalf = (rangeEnd - rangeStart) / 4; // half-width of each ~1.5m leaf
+
+  let eidA: number;
+  let eidB: number;
+  if (orientation === "x") {
+    // Wall plane at constant X (a +x/-x boundary); leaves split the Z span,
+    // slab thickness runs along X.
+    eidA = addDoorLeaf(world, scene, planeCoord, rangeStart + leafHalf, WALL_THICKNESS, leafHalf, planeCoord, rangeStart, 1);
+    eidB = addDoorLeaf(world, scene, planeCoord, rangeEnd - leafHalf, WALL_THICKNESS, leafHalf, planeCoord, rangeEnd, -1);
+  } else {
+    // Wall plane at constant Z (a +z/-z boundary); leaves split the X span,
+    // slab thickness runs along Z.
+    eidA = addDoorLeaf(world, scene, rangeStart + leafHalf, planeCoord, leafHalf, WALL_THICKNESS, rangeStart, planeCoord, 1);
+    eidB = addDoorLeaf(world, scene, rangeEnd - leafHalf, planeCoord, leafHalf, WALL_THICKNESS, rangeEnd, planeCoord, -1);
+  }
+  Door.pairId[eidA] = eidA;
+  Door.pairId[eidB] = eidA;
 }
 
 interface InstanceBounds {
@@ -76,6 +129,18 @@ interface InstanceBounds {
   minZ: number;
   maxZ: number;
   heightCells: number;
+}
+
+/** A pending wall or door segment, collected in cell-grid units during the
+ * main perimeter walk and only turned into actual geometry afterward, once
+ * every segment is known — that second pass is what lets wall segments
+ * check whether a perpendicular wall meets them at a corner (see
+ * `emitWalls` below) before deciding how far to extend. */
+interface Segment {
+  orientation: "x" | "z"; // "x" = plane at constant X (a +x/-x boundary); "z" = plane at constant Z
+  planeCell: number; // grid-cell integer coordinate of the plane
+  rangeStartCell: number; // grid-cell integer start of the segment's span (span is always exactly 1 cell pre-extension)
+  wallHeight: number;
 }
 
 /** Direction helpers for wall/door emission. `owner: true` means this is
@@ -109,6 +174,55 @@ function combineKind(mine: FaceKind, theirs: FaceKind): FaceKind {
   return "opening";
 }
 
+function cornerKey(cellX: number, cellZ: number): string {
+  return `${cellX},${cellZ}`;
+}
+
+/**
+ * Turns collected wall segments into actual wall boxes. Where a segment's
+ * end meets a perpendicular wall segment (a real 90° corner), that end is
+ * extended by `WALL_THICKNESS` past the unit-cell boundary so the two
+ * segments fully overlap at the corner instead of only touching in a thin
+ * `WALL_THICKNESS`-ish square — the standard "extend into the corner" miter
+ * trick, applied per-segment rather than rewriting wall emission into
+ * merged per-instance loops. Ends that border an opening/door are never
+ * extended, so doorways keep their exact framing.
+ */
+function emitWalls(world: World, scene: THREE.Scene, segments: Segment[]): void {
+  const xWallCorners = new Set<string>(); // corners touched by an x-oriented (plane-at-constant-X) wall
+  const zWallCorners = new Set<string>(); // corners touched by a z-oriented (plane-at-constant-Z) wall
+
+  for (const seg of segments) {
+    if (seg.orientation === "x") {
+      xWallCorners.add(cornerKey(seg.planeCell, seg.rangeStartCell));
+      xWallCorners.add(cornerKey(seg.planeCell, seg.rangeStartCell + 1));
+    } else {
+      zWallCorners.add(cornerKey(seg.rangeStartCell, seg.planeCell));
+      zWallCorners.add(cornerKey(seg.rangeStartCell + 1, seg.planeCell));
+    }
+  }
+
+  for (const seg of segments) {
+    let rangeStart = seg.rangeStartCell * UNIT;
+    let rangeEnd = (seg.rangeStartCell + 1) * UNIT;
+    const planeCoord = seg.planeCell * UNIT;
+
+    if (seg.orientation === "x") {
+      if (zWallCorners.has(cornerKey(seg.planeCell, seg.rangeStartCell))) rangeStart -= WALL_THICKNESS;
+      if (zWallCorners.has(cornerKey(seg.planeCell, seg.rangeStartCell + 1))) rangeEnd += WALL_THICKNESS;
+      const cz = (rangeStart + rangeEnd) / 2;
+      const hz = (rangeEnd - rangeStart) / 2;
+      addWall(world, scene, planeCoord, cz, WALL_THICKNESS, hz, seg.wallHeight);
+    } else {
+      if (xWallCorners.has(cornerKey(seg.rangeStartCell, seg.planeCell))) rangeStart -= WALL_THICKNESS;
+      if (xWallCorners.has(cornerKey(seg.rangeStartCell + 1, seg.planeCell))) rangeEnd += WALL_THICKNESS;
+      const cx = (rangeStart + rangeEnd) / 2;
+      const hx = (rangeEnd - rangeStart) / 2;
+      addWall(world, scene, cx, planeCoord, hx, WALL_THICKNESS, seg.wallHeight);
+    }
+  }
+}
+
 /**
  * Builds wall/floor/ceiling/door geometry + ECS entities for every tile
  * placed in `index`. Call `validateOccupancy(index)` first — this function
@@ -140,10 +254,15 @@ export function buildGeometryFromOccupancy(world: World, scene: THREE.Scene, ind
     addSlab(scene, cx, cz, hx, hz, ceilingY + 0.1, ceilingMaterial());
   }
 
-  // --- Walls & doors, one box per unit-cell face segment. A shared
-  // boundary between two instances is only emitted once (from the "owner"
-  // +x/+z direction); an outer boundary (facing empty space) is emitted
-  // from whichever direction actually has geometry there. ---
+  // --- Walls & doors, one segment per unit-cell face. A shared boundary
+  // between two instances is only emitted once (from the "owner" +x/+z
+  // direction); an outer boundary (facing empty space) is emitted from
+  // whichever direction actually has geometry there. Walls are collected
+  // and emitted in a second pass (emitWalls) so corner-mitering can see
+  // every segment; doors are built immediately since they never need
+  // mitering against their neighbors. ---
+  const wallSegments: Segment[] = [];
+
   for (const [key, cell] of index) {
     const [x, z] = key.split(",").map(Number);
     const wallHeight = cell.heightCells * UNIT;
@@ -153,39 +272,36 @@ export function buildGeometryFromOccupancy(world: World, scene: THREE.Scene, ind
       if (kind === null) continue; // interior to this tile instance
 
       const neighbor = index.get(`${x + dir.dx},${z + dir.dz}`);
+      let effective: FaceKind;
       if (neighbor) {
         if (!dir.owner) continue; // the neighbor's opposite pass owns this boundary
-        const effective = combineKind(kind, neighbor.sides[dir.opposite] ?? "wall");
-        emit(effective, x, z, dir, wallHeight);
+        effective = combineKind(kind, neighbor.sides[dir.opposite] ?? "wall");
       } else {
         // Outer boundary — validateOccupancy guarantees this is "wall".
-        emit(kind, x, z, dir, wallHeight);
+        effective = kind;
+      }
+
+      if (effective === "opening") continue; // just empty space, no geometry
+
+      if (dir.dx !== 0) {
+        // +x or -x boundary: a plane of constant X, spanning this cell's Z extent.
+        const planeCell = dir.dx > 0 ? x + 1 : x;
+        if (effective === "wall") {
+          wallSegments.push({ orientation: "x", planeCell, rangeStartCell: z, wallHeight });
+        } else {
+          addDoorPair(world, scene, "x", planeCell * UNIT, z * UNIT, (z + 1) * UNIT);
+        }
+      } else {
+        // +z or -z boundary: a plane of constant Z, spanning this cell's X extent.
+        const planeCell = dir.dz > 0 ? z + 1 : z;
+        if (effective === "wall") {
+          wallSegments.push({ orientation: "z", planeCell, rangeStartCell: x, wallHeight });
+        } else {
+          addDoorPair(world, scene, "z", planeCell * UNIT, x * UNIT, (x + 1) * UNIT);
+        }
       }
     }
   }
 
-  function emit(kind: FaceKind, x: number, z: number, dir: (typeof WALL_DIRS)[number], wallHeight: number): void {
-    if (kind === "opening") return; // just empty space, no geometry
-
-    let cx: number;
-    let cz: number;
-    let hx: number;
-    let hz: number;
-    if (dir.dx !== 0) {
-      // +x or -x boundary: a plane of constant X, spanning this cell's Z extent.
-      cx = (dir.dx > 0 ? x + 1 : x) * UNIT;
-      cz = z * UNIT + UNIT / 2;
-      hx = WALL_THICKNESS;
-      hz = UNIT / 2;
-    } else {
-      // +z or -z boundary: a plane of constant Z, spanning this cell's X extent.
-      cx = x * UNIT + UNIT / 2;
-      cz = (dir.dz > 0 ? z + 1 : z) * UNIT;
-      hx = UNIT / 2;
-      hz = WALL_THICKNESS;
-    }
-
-    if (kind === "wall") addWall(world, scene, cx, cz, hx, hz, wallHeight);
-    else addDoor(world, scene, cx, cz, hx, hz, wallHeight);
-  }
+  emitWalls(world, scene, wallSegments);
 }
