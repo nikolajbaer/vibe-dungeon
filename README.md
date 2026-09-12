@@ -63,3 +63,12 @@ Opening a door fires a **raycast straight out from the camera center**; the near
 - **Touch:** tap anywhere on screen outside both joystick pads.
 
 Doors only open (no auto-close, no "hold to open") — that's the full scope of this pass. The rest of the interaction system (issue #7 — picking up/using general items) should reuse this same "raycast from camera center, triggered by `E`/an outside-the-pads tap" convention for consistency, adding new interactable types rather than inventing a second trigger scheme.
+
+### Procedural stone textures (issue #11)
+
+`src/materials/textures.ts` and `src/materials/dungeonMaterials.ts` are a standalone pair of modules — not imported by anything yet — providing placeholder-grade stone looks with no image assets and no noise library:
+
+- `textures.ts` implements small hashed-noise primitives (a bit-mixing `hash2`, toroidal value noise/fbm, and toroidal Worley/cellular noise) and `createStoneTexture(opts)`, which draws one of three seamlessly-tileable patterns (`"coursed"` block masonry, `"flagstone"` crazy-paving, or `"flat"` low-contrast) onto a `<canvas>` and returns a `THREE.CanvasTexture` with `RepeatWrapping` already set. All the noise sampling wraps toroidally so there's no seam at the tile edges.
+- `dungeonMaterials.ts` exports `wallMaterial(repeat?)`, `floorMaterial(repeat?)`, and `ceilingMaterial(repeat?)`, each returning a ready-to-use `THREE.MeshStandardMaterial` (rough, non-metal) built from a cached base texture. Each source texture is authored to represent one 3m project grid unit with individual stone blocks ~0.3-0.6m; `repeat` (default 1, a number or `[x, y]`) is an extra multiplier for surfaces bigger than one grid unit.
+
+**Intended follow-up hookup** (not done here, to stay out of the parallel tile-system work): once the tile-based level system's `src/level/materials.ts` exists with its own `wallMaterial()`/`floorMaterial()`/`ceilingMaterial()` functions (currently flat-colored `MeshStandardMaterial`s), swap their bodies to construct and return `dungeonMaterials.wallMaterial(...)` etc. instead, passing a `repeat` scaled to each tile/face's real size in meters (e.g. `faceSizeMeters / 3`) so stone blocks keep a consistent real-world scale rather than stretching. This should be a small, self-contained change confined to that one file.
