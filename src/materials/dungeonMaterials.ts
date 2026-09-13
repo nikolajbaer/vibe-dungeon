@@ -1,5 +1,5 @@
 import * as THREE from "three";
-import { createStoneTexture } from "./textures";
+import { createStoneTexture, createWoodTexture } from "./textures";
 
 // ---------------------------------------------------------------------------
 // Drop-in stone MeshStandardMaterials for walls/floors/ceilings (issue #11).
@@ -77,6 +77,20 @@ function ceilingTexture(): THREE.CanvasTexture {
   return ceilingTextureBase;
 }
 
+let woodTextureBase: THREE.CanvasTexture | null = null;
+function woodTexture(): THREE.CanvasTexture {
+  if (!woodTextureBase) {
+    woodTextureBase = createWoodTexture({
+      baseColor: [120, 78, 45],
+      grainColor: [72, 44, 22],
+      grainDirection: "vertical",
+      plankCount: 4,
+      seed: 44,
+    });
+  }
+  return woodTextureBase;
+}
+
 function cloneWithRepeat(base: THREE.CanvasTexture, repeat: Repeat): THREE.CanvasTexture {
   const tex = base.clone();
   tex.needsUpdate = true;
@@ -108,5 +122,14 @@ export function ceilingMaterial(repeat: Repeat = 1): THREE.MeshStandardMaterial 
     map: cloneWithRepeat(ceilingTexture(), repeat),
     roughness: 0.95,
     metalness: 0.0,
+  });
+}
+
+/** Vertical-plank wood-grain material, used for doors (issue #42). */
+export function woodMaterial(repeat: Repeat = 1): THREE.MeshStandardMaterial {
+  return new THREE.MeshStandardMaterial({
+    map: cloneWithRepeat(woodTexture(), repeat),
+    roughness: 0.75,
+    metalness: 0.02,
   });
 }

@@ -1,7 +1,8 @@
 import * as THREE from "three";
 import { hasComponent, query, type World } from "bitecs";
-import { Dead, Door, DoorState, Object3DRef, NPC } from "../components";
+import { Dead, Door, DoorState, Object3DRef, NPC, Item, Carried, PlayerControlled } from "../components";
 import { toggleNpcFollow } from "./npc";
+import { pickUpItem } from "./items";
 
 const OPEN_DURATION = 0.8; // seconds for a door to fully open
 const INTERACT_RANGE = 3; // meters
@@ -42,9 +43,10 @@ const forward = new THREE.Vector3();
  * from the camera hits the nearest interactable within INTERACT_RANGE
  * meters and dispatches on which ECS component the hit entity carries —
  * `Door` opens it (see `openDoor` below); `NPC` toggles it between
- * follow/loiter (see `toggleNpcFollow` in npc.ts). Callers decide *when* to
- * fire this — desktop on `KeyE`, touch on a tap outside both joystick pads
- * (see game.ts).
+ * follow/loiter (see `toggleNpcFollow` in npc.ts); an uncarried `Item`
+ * (issue #39) is picked up (see `pickUpItem` in items.ts). Callers decide
+ * *when* to fire this — desktop on `KeyE`, touch on a tap outside both
+ * joystick pads (see game.ts).
  *
  * The raycast targets every interactable's `Object3DRef` in one combined
  * list rather than running a separate raycast per interactable type —
@@ -54,9 +56,10 @@ const forward = new THREE.Vector3();
  * child; the NPC's Object3DRef is its mesh directly. Either way the
  * raycastable object carries the owning eid in `userData.eid` (recursive
  * intersection finds it on whichever child was actually hit) so a hit maps
- * back to its entity — new interactable types (issue #7 items/levers)
- * should follow the same `userData.eid` + combined-raycast-list shape
- * rather than adding a second trigger path.
+ * back to its entity — new interactable types (issue #39's items were the
+ * first; future ones like levers should follow) should follow the same
+ * `userData.eid` + combined-raycast-list shape rather than adding a second
+ * trigger path.
  *
  * Returns true if the hit interactable actually did something (a door
  * opened, an NPC toggled).
@@ -69,6 +72,11 @@ export function tryInteract(world: World, camera: THREE.Camera): boolean {
   }
   for (const eid of query(world, [NPC, Object3DRef])) {
     if (hasComponent(world, eid, Dead)) continue; // corpses aren't interactable (issue #48)
+    const obj = Object3DRef[eid];
+    if (obj) interactables.push(obj);
+  }
+  for (const eid of query(world, [Item, Object3DRef])) {
+    if (hasComponent(world, eid, Carried)) continue; // already picked up — not raycastable
     const obj = Object3DRef[eid];
     if (obj) interactables.push(obj);
   }
@@ -87,6 +95,12 @@ export function tryInteract(world: World, camera: THREE.Camera): boolean {
   if (hasComponent(world, hitEid, Door)) return openDoor(world, hitEid);
   if (hasComponent(world, hitEid, NPC)) {
     toggleNpcFollow(hitEid);
+    return true;
+  }
+  if (hasComponent(world, hitEid, Item)) {
+    const [playerEid] = query(world, [PlayerControlled]);
+    if (playerEid === undefined) return false;
+    pickUpItem(world, hitEid, playerEid);
     return true;
   }
   return false;
