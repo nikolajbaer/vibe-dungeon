@@ -8,7 +8,8 @@ import { collisionSystem } from "./ecs/systems/collision";
 import { doorAnimationSystem, tryInteract } from "./ecs/systems/doors";
 import { tryMeleeAttack } from "./ecs/systems/combat";
 import { npcSystem } from "./ecs/systems/npc";
-import { createAnimatedNpcMesh, createStubHumanoidRig, getNpcAnimationDebugState, npcAnimationSystem } from "./ecs/systems/npcAnimation";
+import { createAnimatedNpcMesh, getNpcAnimationDebugState, npcAnimationSystem } from "./ecs/systems/npcAnimation";
+import { createHumanoidRig } from "./characters/humanoidRig";
 import { equipItem, equipToOpenHandSlot, unequipItem, viewmodelSwingSystem } from "./ecs/systems/items";
 import { syncSystem } from "./ecs/systems/sync";
 import { hudSync } from "./ecs/systems/hudSync";
@@ -119,13 +120,9 @@ export function startGame(container: HTMLElement): void {
   Health.max[npc] = NPC_HEALTH;
 
   // Issue #54: animated idle/walk mesh instead of the old plain
-  // CylinderGeometry placeholder. `humanoidRig` is a tiny local stub
-  // matching the exact shape #53 (in progress, in parallel) is building for
-  // `src/characters/humanoidRig.ts` — see npcAnimation.ts's top-of-file
-  // comment for why this doesn't just import that module. Swap
-  // `createStubHumanoidRig()` for a real `createHumanoidRig()` import once
-  // #53 lands; nothing else here should need to change.
-  const humanoidRig = createStubHumanoidRig();
+  // CylinderGeometry placeholder, backed by the procedural humanoid rig
+  // (issue #53, src/characters/humanoidRig.ts).
+  const humanoidRig = createHumanoidRig();
   const npcMesh = createAnimatedNpcMesh(humanoidRig, npc); // same userData.eid convention doors' slab meshes use
   scene.add(npcMesh);
   Object3DRef[npc] = npcMesh;
