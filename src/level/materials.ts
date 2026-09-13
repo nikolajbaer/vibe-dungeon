@@ -1,12 +1,20 @@
 import * as THREE from "three";
+import {
+  wallMaterial as stoneWallMaterial,
+  floorMaterial as stoneFloorMaterial,
+  ceilingMaterial as stoneCeilingMaterial,
+} from "../materials/dungeonMaterials";
 
-// Flat/colored placeholder materials for level geometry — same look as the
-// original hand-placed level, just moved behind small named functions.
+// Level materials — walls/floors/ceilings now use the procedural stone
+// materials from src/materials/dungeonMaterials.ts (issue #11), wired in as
+// described in README's Design Notes ("Procedural stone textures").
 //
-// This is a deliberate seam for a separate, later task that's adding real
-// stone textures: swapping these bodies for `THREE.TextureLoader` output
-// (or a shared `MeshStandardMaterial` with `map`/`normalMap` set) is then a
-// small, isolated change to this one file. Do not add textures here.
+// This initial pass uses each material's default `repeat` rather than
+// threading real per-face size in meters through from tileBuilder.ts — see
+// issue #27. A fast-follow can pass a `repeat` scaled to each face's actual
+// size once tileBuilder's wall-segment geometry settles.
+//
+// `doorMaterial()` has no stone-texture equivalent yet and stays flat-colored.
 
 let wall: THREE.Material | undefined;
 let floor: THREE.Material | undefined;
@@ -14,15 +22,17 @@ let ceiling: THREE.Material | undefined;
 let door: THREE.Material | undefined;
 
 export function wallMaterial(): THREE.Material {
-  return (wall ??= new THREE.MeshStandardMaterial({ color: 0x888d96 }));
+  return (wall ??= stoneWallMaterial());
 }
 
 export function floorMaterial(): THREE.Material {
-  return (floor ??= new THREE.MeshStandardMaterial({ color: 0x5a4a3a }));
+  // repeat 1.5 (50% more repetition than the default) — smaller-looking
+  // flagstones per the coordinator's request.
+  return (floor ??= stoneFloorMaterial(1.5));
 }
 
 export function ceilingMaterial(): THREE.Material {
-  return (ceiling ??= new THREE.MeshStandardMaterial({ color: 0x24262c }));
+  return (ceiling ??= stoneCeilingMaterial());
 }
 
 export function doorMaterial(): THREE.Material {
