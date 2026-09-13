@@ -97,3 +97,48 @@ export const Health = {
   current: [] as number[],
   max: [] as number[],
 };
+
+/** A pickup-able item (issue #39) — sword, gem, etc. `itemTypeId` indexes
+ * `ITEM_TYPES` (`src/items/itemTypes.ts`), the small static registry of
+ * item data (name/icon/equip slot), the same way `NPC`/`Door` keep their
+ * per-instance state in components here while `src/level/tiles.ts` keeps
+ * shared *type* data (`TILE_TYPES`) in its own module. An item lying in the
+ * world has `Item` + `Position` + `Object3DRef` but no `Carried` — see
+ * `Carried` below for what picking it up adds. */
+export const Item = {
+  itemTypeId: [] as string[],
+};
+
+/** Every slot a `Carried` item can occupy: the freeform inventory list, one
+ * of the three non-functional paper-doll slots (kept for a complete data
+ * model even though they have no gameplay/visual effect yet), or one of the
+ * two hand slots (the only slots that currently do anything — see
+ * `equipItem`/`Viewmodel` in `ecs/systems/items.ts`). */
+export type CarriedSlot = "inventory" | "head" | "torso" | "legs" | "hand-left" | "hand-right";
+
+/** Added to an `Item` entity once it's picked up (the `tryInteract` `Item`
+ * branch in doors.ts) — `ownerEid` is who's carrying it (always the player
+ * today, but deliberately its own field rather than an assumption, so a
+ * future container item that's also `Carried`-*by* something else fits this
+ * same shape later without rework) and `slot` is where in that owner's
+ * paper-doll/inventory it currently sits. Equipping/unequipping
+ * (`ecs/systems/items.ts`) only ever changes `slot` in place — the item
+ * entity itself is never destroyed or recreated by moving between slots,
+ * mirroring how `Door`/`NPC` are first-class entities rather than fields on
+ * the player. */
+export const Carried = {
+  ownerEid: [] as number[],
+  slot: [] as CarriedSlot[],
+};
+
+/** Backing three.js Object3D for a `Carried` item's first-person viewmodel
+ * (issue #39) — set only while the item sits in a hand slot, parented
+ * directly to the camera (`camera.add(...)`, not the scene) at a fixed
+ * camera-relative offset, so it rides rigidly with the view like a classic
+ * FPS weapon. Deliberately distinct from `Object3DRef`, which for an `Item`
+ * entity is always that item's in-world pickup mesh (hidden via
+ * `.visible = false` while carried, not repurposed as the viewmodel) — the
+ * two meshes live in different parts of the scene graph (world-space vs.
+ * camera-local) and the world mesh should still be there, un-reused, if the
+ * item is ever droppable later. */
+export const Viewmodel: (THREE.Object3D | undefined)[] = [];
