@@ -3,6 +3,7 @@ import {
   wallMaterial as stoneWallMaterial,
   floorMaterial as stoneFloorMaterial,
   ceilingMaterial as stoneCeilingMaterial,
+  woodMaterial as woodDoorMaterial,
 } from "../materials/dungeonMaterials";
 
 // Level materials — walls/floors/ceilings now use the procedural stone
@@ -14,7 +15,7 @@ import {
 // issue #27. A fast-follow can pass a `repeat` scaled to each face's actual
 // size once tileBuilder's wall-segment geometry settles.
 //
-// `doorMaterial()` has no stone-texture equivalent yet and stays flat-colored.
+// `doorMaterial()` now uses the procedural wood-grain material (issue #42).
 
 let wall: THREE.Material | undefined;
 let floor: THREE.Material | undefined;
@@ -36,5 +37,5 @@ export function ceilingMaterial(): THREE.Material {
 }
 
 export function doorMaterial(): THREE.Material {
-  return (door ??= new THREE.MeshStandardMaterial({ color: 0xa5622f }));
+  return (door ??= woodDoorMaterial());
 }
