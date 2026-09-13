@@ -1,6 +1,7 @@
 import * as THREE from "three";
-import { query, type World } from "bitecs";
-import { Door, DoorState, Object3DRef } from "../components";
+import { hasComponent, query, type World } from "bitecs";
+import { Door, DoorState, Object3DRef, NPC } from "../components";
+import { toggleNpcFollow } from "./npc";
 
 const OPEN_DURATION = 0.8; // seconds for a door to fully open
 const INTERACT_RANGE = 3; // meters
@@ -38,36 +39,63 @@ const forward = new THREE.Vector3();
 /**
  * Interaction trigger (documented in README under Design Notes so later
  * interaction work builds on the same convention): a raycast straight out
- * from the camera hits the nearest CLOSED door leaf within INTERACT_RANGE
- * meters and opens it — and, since a doorway is built from two hinge leaves
- * sharing a `Door.pairId` (see tileBuilder.ts), opens its partner leaf too
- * so the whole doorway swings open together. Callers decide *when* to fire
- * this — desktop on `KeyE`, touch on a tap outside both joystick pads (see
- * game.ts).
+ * from the camera hits the nearest interactable within INTERACT_RANGE
+ * meters and dispatches on which ECS component the hit entity carries —
+ * `Door` opens it (see `openDoor` below); `NPC` toggles it between
+ * follow/loiter (see `toggleNpcFollow` in npc.ts). Callers decide *when* to
+ * fire this — desktop on `KeyE`, touch on a tap outside both joystick pads
+ * (see game.ts).
  *
- * Each leaf's Object3DRef is a hinge THREE.Group (non-raycastable itself);
- * the raycast is recursive and the actual slab mesh child carries the
- * owning eid in `userData.eid` so a hit can be mapped back to its entity.
+ * The raycast targets every interactable's `Object3DRef` in one combined
+ * list rather than running a separate raycast per interactable type —
+ * `intersectObjects` already sorts by distance, so the first hit across all
+ * of them is nearest. A door leaf's Object3DRef is a hinge THREE.Group
+ * (non-raycastable itself) with the actual slab mesh as a raycastable
+ * child; the NPC's Object3DRef is its mesh directly. Either way the
+ * raycastable object carries the owning eid in `userData.eid` (recursive
+ * intersection finds it on whichever child was actually hit) so a hit maps
+ * back to its entity — new interactable types (issue #7 items/levers)
+ * should follow the same `userData.eid` + combined-raycast-list shape
+ * rather than adding a second trigger path.
  *
- * Returns true if a door was opened.
+ * Returns true if the hit interactable actually did something (a door
+ * opened, an NPC toggled).
  */
 export function tryInteract(world: World, camera: THREE.Camera): boolean {
-  const doorGroups: THREE.Object3D[] = [];
+  const interactables: THREE.Object3D[] = [];
   for (const eid of query(world, [Door, Object3DRef])) {
     const obj = Object3DRef[eid];
-    if (obj) doorGroups.push(obj);
+    if (obj) interactables.push(obj);
   }
-  if (doorGroups.length === 0) return false;
+  for (const eid of query(world, [NPC, Object3DRef])) {
+    const obj = Object3DRef[eid];
+    if (obj) interactables.push(obj);
+  }
+  if (interactables.length === 0) return false;
 
   camera.getWorldDirection(forward);
   raycaster.set(camera.position, forward);
   raycaster.far = INTERACT_RANGE;
 
-  const hits = raycaster.intersectObjects(doorGroups, true);
+  const hits = raycaster.intersectObjects(interactables, true);
   if (hits.length === 0) return false;
 
   const hitEid = hits[0].object.userData.eid as number | undefined;
-  if (hitEid === undefined || Door.state[hitEid] !== DoorState.CLOSED) return false;
+  if (hitEid === undefined) return false;
+
+  if (hasComponent(world, hitEid, Door)) return openDoor(world, hitEid);
+  if (hasComponent(world, hitEid, NPC)) {
+    toggleNpcFollow(hitEid);
+    return true;
+  }
+  return false;
+}
+
+/** Opens the CLOSED door leaf `hitEid` and, since a doorway is built from
+ * two hinge leaves sharing a `Door.pairId` (see tileBuilder.ts), its
+ * partner leaf too, so the whole doorway swings open together. */
+function openDoor(world: World, hitEid: number): boolean {
+  if (Door.state[hitEid] !== DoorState.CLOSED) return false;
 
   const pairId = Door.pairId[hitEid];
   let opened = false;

@@ -1,11 +1,12 @@
 import * as THREE from "three";
 import { addComponent, addEntity, createWorld } from "bitecs";
 import { query } from "bitecs";
-import { Position, Velocity, Rotation, Collider, PlayerControlled, Object3DRef, Door, Health } from "./ecs/components";
+import { Position, Velocity, Rotation, Collider, PlayerControlled, Object3DRef, Door, Health, NPC, NpcState } from "./ecs/components";
 import { inputSystem } from "./ecs/systems/input";
 import { movementSystem } from "./ecs/systems/movement";
 import { collisionSystem } from "./ecs/systems/collision";
 import { doorAnimationSystem, tryInteract } from "./ecs/systems/doors";
+import { npcSystem } from "./ecs/systems/npc";
 import { syncSystem } from "./ecs/systems/sync";
 import { hudSync } from "./ecs/systems/hudSync";
 import { buildLevel } from "./level/level";
@@ -18,8 +19,19 @@ const EYE_HEIGHT = 1.6;
 const PLAYER_HALF_EXTENT = 0.35;
 const DEBUG_HEALTH_STEP = 10; // debug-only nudge, see `[`/`]` handling below
 
+// Test NPC (issue #36) — hardcoded spawn inside room-a (x in [-3,6], z in
+// [0,9]; see level/levelData.ts), straight ahead of the player's spawn
+// point along the path to the door (same x, facing yaw 0 looks directly at
+// it) and well clear of the walls. No general NPC-spawn data format yet,
+// per the issue.
+const NPC_SPAWN = { x: 1.5, z: 3.5 };
+const NPC_HALF_EXTENT = 0.4;
+const NPC_HEIGHT = 1.75; // roughly humanoid-sized
+const NPC_RADIUS = 0.35;
+const NPC_INITIAL_WANDER_PAUSE = 2; // seconds before its first idle wander leg
+
 /** Wires up the ECS world, level, player entity, input sources, and the
- * core game loop (input -> movement -> collision -> door interaction ->
+ * core game loop (input -> npc -> movement -> collision -> interact ->
  * sync-to-render -> render). This replaces the hello-world "rotate a cube"
  * loop from the scaffold. */
 export function startGame(container: HTMLElement): void {
@@ -64,6 +76,39 @@ export function startGame(container: HTMLElement): void {
   Health.current[player] = 100;
   Health.max[player] = 100;
 
+  // Test NPC (issue #36): loiters near NPC_SPAWN by default; interacting
+  // with it (same raycast dispatch as doors, see doors.ts `tryInteract`)
+  // toggles it to follow the player instead. Moves via Velocity, driven
+  // through the normal movementSystem/collisionSystem pipeline just like
+  // the player — see ecs/systems/npc.ts.
+  const npc = addEntity(world);
+  addComponent(world, npc, Position);
+  addComponent(world, npc, Velocity);
+  addComponent(world, npc, Collider);
+  addComponent(world, npc, NPC);
+  addComponent(world, npc, Object3DRef);
+  Position.x[npc] = NPC_SPAWN.x;
+  Position.y[npc] = NPC_HEIGHT / 2;
+  Position.z[npc] = NPC_SPAWN.z;
+  Velocity.x[npc] = 0;
+  Velocity.z[npc] = 0;
+  Collider.hx[npc] = NPC_HALF_EXTENT;
+  Collider.hz[npc] = NPC_HALF_EXTENT;
+  NPC.state[npc] = NpcState.LOITERING;
+  NPC.homeX[npc] = NPC_SPAWN.x;
+  NPC.homeZ[npc] = NPC_SPAWN.z;
+  NPC.wanderTargetX[npc] = NPC_SPAWN.x;
+  NPC.wanderTargetZ[npc] = NPC_SPAWN.z;
+  NPC.wanderTimer[npc] = NPC_INITIAL_WANDER_PAUSE;
+
+  const npcMesh = new THREE.Mesh(
+    new THREE.CylinderGeometry(NPC_RADIUS, NPC_RADIUS, NPC_HEIGHT, 12),
+    new THREE.MeshStandardMaterial({ color: 0xdd3355 }), // saturated, distinct from the stone environment
+  );
+  npcMesh.userData.eid = npc; // same userData.eid convention doors' slab meshes use
+  scene.add(npcMesh);
+  Object3DRef[npc] = npcMesh;
+
   // Minimal debug hook for manual/automated smoke testing (e.g. Playwright
   // checking that movement and collision actually affect position).
   (window as unknown as { __vibeDungeonDebug: unknown }).__vibeDungeonDebug = {
@@ -74,6 +119,12 @@ export function startGame(container: HTMLElement): void {
     getRotation: () => ({ yaw: Rotation.yaw[player], pitch: Rotation.pitch[player] }),
     getCurrentSector: () => currentSector,
     getHealth: () => ({ current: Health.current[player], max: Health.max[player] }),
+    getNpcState: () => ({
+      state: NPC.state[npc] === NpcState.FOLLOWING ? "FOLLOWING" : "LOITERING",
+      x: Position.x[npc],
+      y: Position.y[npc],
+      z: Position.z[npc],
+    }),
   };
 
   // Tracks (and logs, on change) the sector the player currently occupies —
@@ -104,6 +155,7 @@ export function startGame(container: HTMLElement): void {
       moveStick: touch.moveStick,
       touchLook: touch.lookDrag,
     });
+    npcSystem(world, dt);
     movementSystem(world, dt);
     collisionSystem(world);
     doorAnimationSystem(world, dt);
