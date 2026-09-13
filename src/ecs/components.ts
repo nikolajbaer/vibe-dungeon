@@ -66,6 +66,29 @@ export const Door = {
  * Synced from Position/Rotation each frame by syncSystem. */
 export const Object3DRef: (THREE.Object3D | undefined)[] = [];
 
+export const NpcState = {
+  LOITERING: 0,
+  FOLLOWING: 1,
+} as const;
+
+/** A simple follow/loiter NPC (issue #36) — the first non-door consumer of
+ * the generalized interact-raycast dispatch (see doors.ts `tryInteract` and
+ * README's "Interact dispatch" design note). It moves by writing `Velocity`
+ * (see `npc.ts`), same as the player, so it goes through the normal
+ * `movementSystem`/`collisionSystem` pipeline rather than being hand-moved.
+ * `homeX`/`homeZ` anchor its idle wander while `LOITERING` — re-anchored to
+ * wherever it actually stopped when it drops out of `FOLLOWING`, not its
+ * original spawn point (see issue #36's acceptance criteria). `wanderTargetX
+ * /Z` and `wanderTimer` are `npc.ts`'s own scratch state for that wander. */
+export const NPC = {
+  state: [] as number[], // one of NpcState
+  homeX: [] as number[],
+  homeZ: [] as number[],
+  wanderTargetX: [] as number[],
+  wanderTargetZ: [] as number[],
+  wanderTimer: [] as number[], // seconds until the next wander re-target
+};
+
 /** Hit points. Added ahead of real combat (#16) so the HUD health bar (#23)
  * has something to read; combat should consume this same component rather
  * than inventing its own. `current` may exceed 0..max only transiently
