@@ -4,7 +4,7 @@
 // `src/ecs/systems/input.ts` can treat mouse-look and touch-look the same
 // way (see issue #31).
 
-const SENSITIVITY = 0.0035; // radians per CSS px of drag, analogous to PointerLook's SENSITIVITY
+const SENSITIVITY = 0.00525; // radians per CSS px of drag (bumped 50% per feedback), analogous to PointerLook's SENSITIVITY
 const TAP_THRESHOLD_PX = 10; // total displacement from touch-start below which a touch counts as a tap, not a drag
 
 /**
