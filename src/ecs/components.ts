@@ -48,13 +48,17 @@ export const DoorState = {
   OPEN: 2,
 } as const;
 
-/** A door: a collider that slides straight up out of the opening (into the
- * space above the ceiling line) when opened. See doorSystem.ts. */
+/** A door leaf: a collider that swings open on a vertical hinge (see
+ * doors.ts). `Position`/`Collider` stay fixed at the leaf's closed-position
+ * center (used for the static collision AABB, same as a wall) — only the
+ * leaf's visual `Object3DRef` (a hinge `THREE.Group`, see tileBuilder.ts)
+ * rotates as it opens; `syncSystem` skips position-sync for `Door` entities
+ * so it doesn't fight that group's fixed hinge-point position. */
 export const Door = {
   state: [] as number[], // one of DoorState
   progress: [] as number[], // 0 (closed) .. 1 (fully open)
-  closedY: [] as number[], // Position.y when fully closed
-  openY: [] as number[], // Position.y when fully open
+  hingeSign: [] as number[], // +1 or -1: which way this leaf swings around its hinge
+  pairId: [] as number[], // eid shared by both leaves of one doorway, so opening either opens both
 };
 
 /** Backing three.js Object3D for entities with a visual representation

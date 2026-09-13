@@ -55,14 +55,20 @@ Each Issue is labeled with the role it belongs to. An agent session should gener
 
 Components are plain structure-of-arrays objects indexed by entity id (bitECS's recommended pattern), defined in `src/ecs/components.ts`. Systems are plain functions run in a fixed pipeline each frame (`src/game.ts`): **input → movement → collision → door-interaction → sync-to-three.js → render**. A three.js `Object3D` is attached to an entity via the `Object3DRef` component and kept in sync by `syncSystem` — new visual/dynamic entity types should follow that same pattern rather than mutating `Object3D`s directly from other systems.
 
-### Door interaction trigger (issues #6 / #7)
+### Door interaction trigger (issues #6 / #7 / #26)
 
-Opening a door fires a **raycast straight out from the camera center**; the nearest **closed** door it hits within ~3m opens (slides straight up, past the ceiling line, so it disappears cleanly). What triggers the raycast:
+Opening a door fires a **raycast straight out from the camera center**; the nearest **closed** door leaf it hits within ~3m swings open on a hinge. What triggers the raycast:
 
 - **Desktop:** press `E`.
 - **Touch:** tap anywhere on screen outside both joystick pads.
 
 Doors only open (no auto-close, no "hold to open") — that's the full scope of this pass. The rest of the interaction system (issue #7 — picking up/using general items) should reuse this same "raycast from camera center, triggered by `E`/an outside-the-pads tap" convention for consistency, adding new interactable types rather than inventing a second trigger scheme.
+
+**Doors swing on a hinge (issue #26)** — each doorway is built as **two ~1.5m leaves**, hinged on opposite outer edges and swinging outward together like double doors, rather than one 3m slab. A leaf's `Position`/`Collider` stay fixed at its closed-position center throughout — exactly like a wall — so `collisionSystem` needs no door-specific logic beyond the existing `Door.progress` gate (`DOOR_SOLID_UNTIL_PROGRESS`); only the leaf's visual `Object3DRef` moves. That visual is a `THREE.Group` positioned once, at build time, at the leaf's hinge point, with the door slab mesh as a child offset by half the leaf's width — `doorAnimationSystem` (`src/ecs/systems/doors.ts`) then rotates the *group* around Y from 0 to ~100° as `Door.progress` advances, which swings the slab on that hinge instead of spinning it in place. Because a hinge group's position (the hinge point) deliberately differs from `Position` (the leaf center, kept there for collision), `syncSystem` special-cases `Door` entities out of its position-sync loop entirely, the same way it already special-cases rotation-sync to `PlayerControlled` only — otherwise it would stomp the group back onto `Position` every frame. Both leaves of a doorway share a `Door.pairId`, so hitting either one with the interact raycast opens both together.
+
+### Seamless wall corners (issue #26)
+
+`tileBuilder.ts` still emits one box per unit-cell wall segment (`WALL_DIRS`), but a segment's span is no longer always exactly `UNIT`: a second pass (`emitWalls`) first records every wall segment's two corner points, then, for each segment, extends whichever end(s) coincide with a *perpendicular* wall's corner by `WALL_THICKNESS` past the unit-cell boundary. That fills a 90° corner solidly (the two perpendicular segments now overlap in the corner square) instead of the segments only touching edge-to-edge, which is what previously read as a doubled/seamed joint. Ends that border an opening or a door are never extended, so doorway framing is unaffected.
 
 ### Tile-based level system (implemented in #21)
 
