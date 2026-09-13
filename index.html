@@ -55,6 +55,71 @@
         inset: 0;
         pointer-events: none;
       }
+      #menu-overlay {
+        position: fixed;
+        inset: 0;
+      }
+      .menu-root {
+        position: fixed;
+        inset: 0;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        background: #0b0b12;
+        color: #eee;
+        font: 16px/1.4 system-ui, sans-serif;
+        padding: 24px;
+        box-sizing: border-box;
+      }
+      .menu-panel {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 28px;
+        width: 100%;
+        max-width: 360px;
+      }
+      .menu-title {
+        margin: 0;
+        font-size: clamp(28px, 8vw, 40px);
+        letter-spacing: 0.04em;
+        text-align: center;
+        color: #fff;
+      }
+      .menu-options {
+        display: flex;
+        flex-direction: column;
+        gap: 14px;
+        width: 100%;
+      }
+      .menu-btn {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        width: 100%;
+        padding: 12px 20px;
+        font: inherit;
+        font-weight: 600;
+        color: #fff;
+        background: rgba(255, 255, 255, 0.08);
+        border: 1px solid rgba(255, 255, 255, 0.35);
+        border-radius: 8px;
+        cursor: pointer;
+      }
+      .menu-btn:hover:not(:disabled) {
+        background: rgba(255, 255, 255, 0.16);
+      }
+      .menu-btn-disabled {
+        color: rgba(255, 255, 255, 0.4);
+        border-color: rgba(255, 255, 255, 0.15);
+        background: rgba(255, 255, 255, 0.03);
+        cursor: not-allowed;
+      }
+      .menu-btn-note {
+        font-size: 11px;
+        font-weight: 400;
+        color: rgba(255, 255, 255, 0.35);
+      }
       .hud-health-bar {
         position: fixed;
         left: 50%;
