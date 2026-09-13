@@ -26,7 +26,9 @@ export function wallMaterial(): THREE.Material {
 }
 
 export function floorMaterial(): THREE.Material {
-  return (floor ??= stoneFloorMaterial());
+  // repeat 1.5 (50% more repetition than the default) — smaller-looking
+  // flagstones per the coordinator's request.
+  return (floor ??= stoneFloorMaterial(1.5));
 }
 
 export function ceilingMaterial(): THREE.Material {
