@@ -8,6 +8,8 @@ import { collisionSystem } from "./ecs/systems/collision";
 import { doorAnimationSystem, tryInteract } from "./ecs/systems/doors";
 import { tryMeleeAttack } from "./ecs/systems/combat";
 import { npcSystem } from "./ecs/systems/npc";
+import { createAnimatedNpcMesh, getNpcAnimationDebugState, npcAnimationSystem } from "./ecs/systems/npcAnimation";
+import { createHumanoidRig } from "./characters/humanoidRig";
 import { equipItem, equipToOpenHandSlot, unequipItem, viewmodelSwingSystem } from "./ecs/systems/items";
 import { syncSystem } from "./ecs/systems/sync";
 import { hudSync } from "./ecs/systems/hudSync";
@@ -31,8 +33,6 @@ const DEBUG_HEALTH_STEP = 10; // debug-only nudge, see `[`/`]` handling below
 // per the issue.
 const NPC_SPAWN = { x: 1.5, z: 3.5 };
 const NPC_HALF_EXTENT = 0.4;
-const NPC_HEIGHT = 1.75; // roughly humanoid-sized
-const NPC_RADIUS = 0.35;
 const NPC_INITIAL_WANDER_PAUSE = 2; // seconds before its first idle wander leg
 const NPC_HEALTH = 30; // issue #48 — first thing that can actually be damaged; two 15-damage hits kill it
 
@@ -46,9 +46,9 @@ const GEM_SPAWN = { x: -1, z: 7 };
 const ITEM_HEIGHT = 1; // meters off the floor — roughly a low table/pedestal height
 
 /** Wires up the ECS world, level, player entity, input sources, and the
- * core game loop (input -> npc -> movement -> collision -> interact ->
- * sync-to-render -> hud/inventory-sync -> render). This replaces the
- * hello-world "rotate a cube" loop from the scaffold. */
+ * core game loop (input -> npc -> npc-animation -> movement -> collision ->
+ * interact -> sync-to-render -> hud/inventory-sync -> render). This replaces
+ * the hello-world "rotate a cube" loop from the scaffold. */
 export function startGame(container: HTMLElement): void {
   const scene = new THREE.Scene();
   scene.background = new THREE.Color(0x11131a);
@@ -104,7 +104,7 @@ export function startGame(container: HTMLElement): void {
   addComponent(world, npc, Object3DRef);
   addComponent(world, npc, Health);
   Position.x[npc] = NPC_SPAWN.x;
-  Position.y[npc] = NPC_HEIGHT / 2;
+  Position.y[npc] = 0; // the humanoid rig's origin is at its feet, unlike the old cylinder's centered origin
   Position.z[npc] = NPC_SPAWN.z;
   Velocity.x[npc] = 0;
   Velocity.z[npc] = 0;
@@ -119,11 +119,11 @@ export function startGame(container: HTMLElement): void {
   Health.current[npc] = NPC_HEALTH;
   Health.max[npc] = NPC_HEALTH;
 
-  const npcMesh = new THREE.Mesh(
-    new THREE.CylinderGeometry(NPC_RADIUS, NPC_RADIUS, NPC_HEIGHT, 12),
-    new THREE.MeshStandardMaterial({ color: 0xdd3355 }), // saturated, distinct from the stone environment
-  );
-  npcMesh.userData.eid = npc; // same userData.eid convention doors' slab meshes use
+  // Issue #54: animated idle/walk mesh instead of the old plain
+  // CylinderGeometry placeholder, backed by the procedural humanoid rig
+  // (issue #53, src/characters/humanoidRig.ts).
+  const humanoidRig = createHumanoidRig();
+  const npcMesh = createAnimatedNpcMesh(humanoidRig, npc); // same userData.eid convention doors' slab meshes use
   scene.add(npcMesh);
   Object3DRef[npc] = npcMesh;
 
@@ -208,6 +208,11 @@ export function startGame(container: HTMLElement): void {
       dead: hasComponent(world, npc, Dead),
       meshInScene: npcMesh.parent !== null,
     }),
+    // Issue #54: exposes the NPC's animation-mixer state (which of
+    // idle/walk is fading in, and the mixer's own clock) so automated
+    // (Playwright) tests can confirm the walk/idle crossfade actually
+    // happens instead of only inferring it from position deltas.
+    getNpcAnimationState: () => getNpcAnimationDebugState(npc),
     // Debug-only direct trigger for automated (Playwright) testing of melee
     // combat (issue #48) without needing to simulate real pointer-lock
     // clicks/touches — fires the exact same `tryMeleeAttack` the real
@@ -273,6 +278,7 @@ export function startGame(container: HTMLElement): void {
       touchLook: touch.lookDrag,
     });
     npcSystem(world, dt);
+    npcAnimationSystem(world, dt);
     movementSystem(world, dt);
     collisionSystem(world);
     doorAnimationSystem(world, dt);
