@@ -16,9 +16,15 @@ export interface ItemType {
    * doll, inventory list) — no image/texture assets for items (issue #39). */
   icon: string;
   slot: EquipSlotKind;
+  /** Damage `tryMeleeAttack` (combat.ts) deals while this item is equipped
+   * in a hand slot. `undefined` means "not a weapon" — combat.ts falls back
+   * to its own unarmed damage constant rather than this being 0, so a
+   * future non-weapon `slot: "hand"` item (a torch, a shield) doesn't
+   * accidentally zero out an otherwise-unarmed attack. */
+  meleeDamage?: number;
 }
 
-export const SWORD: ItemType = { id: "sword", name: "Sword", icon: "🗡️", slot: "hand" };
+export const SWORD: ItemType = { id: "sword", name: "Sword", icon: "🗡️", slot: "hand", meleeDamage: 15 };
 export const GEM: ItemType = { id: "gem", name: "Gem", icon: "💎", slot: null };
 
 export const ITEM_TYPES: Record<string, ItemType> = {
