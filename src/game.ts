@@ -71,6 +71,7 @@ export function startGame(container: HTMLElement): void {
     getDoorStates: () =>
       Array.from(query(world, [Door])).map((eid) => ({ state: Door.state[eid], progress: Door.progress[eid] })),
     setYaw: (yaw: number) => { Rotation.yaw[player] = yaw; },
+    getRotation: () => ({ yaw: Rotation.yaw[player], pitch: Rotation.pitch[player] }),
     getCurrentSector: () => currentSector,
     getHealth: () => ({ current: Health.current[player], max: Health.max[player] }),
   };
@@ -101,7 +102,7 @@ export function startGame(container: HTMLElement): void {
       keyboard,
       look: pointerLook,
       moveStick: touch.moveStick,
-      lookStick: touch.lookStick,
+      touchLook: touch.lookDrag,
     });
     movementSystem(world, dt);
     collisionSystem(world);

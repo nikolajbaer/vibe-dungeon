@@ -4,16 +4,16 @@ import { Position, Velocity, Rotation, PlayerControlled } from "../components";
 import type { Keyboard } from "../../input/keyboard";
 import type { PointerLook } from "../../input/pointerLook";
 import type { TouchJoystick } from "../../input/touchJoystick";
+import type { TouchLookDrag } from "../../input/touchLookDrag";
 
 const MOVE_SPEED = 3.2; // meters/second
-const TOUCH_LOOK_SPEED = 2.6; // radians/second at full stick deflection
 const MAX_PITCH = Math.PI / 2 - 0.05;
 
 export interface InputSources {
   keyboard: Keyboard;
   look: PointerLook;
   moveStick: TouchJoystick | null;
-  lookStick: TouchJoystick | null;
+  touchLook: TouchLookDrag | null;
 }
 
 const euler = new THREE.Euler(0, 0, 0, "YXZ");
@@ -24,17 +24,21 @@ const moveVec = new THREE.Vector3();
 /** Reads keyboard/mouse/touch input and writes the player's desired
  * Velocity (world-space, relative to current facing) and updated
  * Rotation (yaw/pitch). Movement is resolved against collision afterwards
- * by collisionSystem. */
-export function inputSystem(world: World, dt: number, input: InputSources): void {
+ * by collisionSystem. `_dt` is unused now that both look sources
+ * (`PointerLook`/`TouchLookDrag`) already accumulate pre-scaled per-frame
+ * deltas via `consume()`; kept in the signature for call-site symmetry with
+ * the other systems in the pipeline. */
+export function inputSystem(world: World, _dt: number, input: InputSources): void {
   for (const eid of query(world, [PlayerControlled, Position, Velocity, Rotation])) {
     // --- Look ---
     const mouse = input.look.consume();
+    const touchLook = input.touchLook?.consume();
     let yaw = Rotation.yaw[eid] - mouse.yaw;
     let pitch = Rotation.pitch[eid] - mouse.pitch;
 
-    if (input.lookStick?.active) {
-      yaw -= input.lookStick.x * TOUCH_LOOK_SPEED * dt;
-      pitch -= input.lookStick.y * TOUCH_LOOK_SPEED * dt;
+    if (touchLook) {
+      yaw -= touchLook.yaw;
+      pitch -= touchLook.pitch;
     }
 
     Rotation.yaw[eid] = yaw;
