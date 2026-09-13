@@ -9,9 +9,10 @@ const TAP_THRESHOLD_PX = 10; // total displacement from touch-start below which 
 
 /**
  * Tracks a single "look" touch at a time (identified by its touch
- * identifier), ignoring any touch that starts inside `ignoreElement` (the
- * move stick's element) so that pad keeps working independently — including
- * simultaneously with a look-drag from the other hand.
+ * identifier), ignoring any touch that starts inside one of `ignoreElements`
+ * (the move stick and, since issue #48, the attack button) so those pads
+ * keep working independently — including simultaneously with a look-drag
+ * from the other hand.
  *
  * Also disambiguates tap vs. drag: a touch that ends without ever exceeding
  * `TAP_THRESHOLD_PX` of displacement from its start point is treated as a
@@ -29,7 +30,7 @@ export class TouchLookDrag {
   private movedPastThreshold = false;
   private tapRequested = false;
 
-  constructor(private readonly ignoreElement: HTMLElement) {
+  constructor(private readonly ignoreElements: HTMLElement[]) {
     window.addEventListener("touchstart", this.onTouchStart, { passive: true });
     window.addEventListener("touchmove", this.onTouchMove, { passive: true });
     window.addEventListener("touchend", this.onTouchEnd, { passive: true });
@@ -58,7 +59,7 @@ export class TouchLookDrag {
 
     const touch = e.changedTouches[0];
     const target = touch.target as Node | null;
-    if (target && this.ignoreElement.contains(target)) return; // let the move stick own this one
+    if (target && this.ignoreElements.some((el) => el.contains(target))) return; // let that pad own this one
 
     this.touchId = touch.identifier;
     this.startX = touch.clientX;

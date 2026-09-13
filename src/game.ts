@@ -1,11 +1,12 @@
 import * as THREE from "three";
-import { addComponent, addEntity, createWorld } from "bitecs";
+import { addComponent, addEntity, createWorld, hasComponent } from "bitecs";
 import { query } from "bitecs";
-import { Position, Velocity, Rotation, Collider, PlayerControlled, Object3DRef, Door, Health, NPC, NpcState } from "./ecs/components";
+import { Position, Velocity, Rotation, Collider, PlayerControlled, Object3DRef, Door, Dead, Health, NPC, NpcState } from "./ecs/components";
 import { inputSystem } from "./ecs/systems/input";
 import { movementSystem } from "./ecs/systems/movement";
 import { collisionSystem } from "./ecs/systems/collision";
 import { doorAnimationSystem, tryInteract } from "./ecs/systems/doors";
+import { tryMeleeAttack } from "./ecs/systems/combat";
 import { npcSystem } from "./ecs/systems/npc";
 import { syncSystem } from "./ecs/systems/sync";
 import { hudSync } from "./ecs/systems/hudSync";
@@ -29,6 +30,7 @@ const NPC_HALF_EXTENT = 0.4;
 const NPC_HEIGHT = 1.75; // roughly humanoid-sized
 const NPC_RADIUS = 0.35;
 const NPC_INITIAL_WANDER_PAUSE = 2; // seconds before its first idle wander leg
+const NPC_HEALTH = 30; // issue #48 — first thing that can actually be damaged; two 15-damage hits kill it
 
 /** Wires up the ECS world, level, player entity, input sources, and the
  * core game loop (input -> npc -> movement -> collision -> interact ->
@@ -87,6 +89,7 @@ export function startGame(container: HTMLElement): void {
   addComponent(world, npc, Collider);
   addComponent(world, npc, NPC);
   addComponent(world, npc, Object3DRef);
+  addComponent(world, npc, Health);
   Position.x[npc] = NPC_SPAWN.x;
   Position.y[npc] = NPC_HEIGHT / 2;
   Position.z[npc] = NPC_SPAWN.z;
@@ -100,6 +103,8 @@ export function startGame(container: HTMLElement): void {
   NPC.wanderTargetX[npc] = NPC_SPAWN.x;
   NPC.wanderTargetZ[npc] = NPC_SPAWN.z;
   NPC.wanderTimer[npc] = NPC_INITIAL_WANDER_PAUSE;
+  Health.current[npc] = NPC_HEALTH;
+  Health.max[npc] = NPC_HEALTH;
 
   const npcMesh = new THREE.Mesh(
     new THREE.CylinderGeometry(NPC_RADIUS, NPC_RADIUS, NPC_HEIGHT, 12),
@@ -116,6 +121,7 @@ export function startGame(container: HTMLElement): void {
     getDoorStates: () =>
       Array.from(query(world, [Door])).map((eid) => ({ state: Door.state[eid], progress: Door.progress[eid] })),
     setYaw: (yaw: number) => { Rotation.yaw[player] = yaw; },
+    setPitch: (pitch: number) => { Rotation.pitch[player] = pitch; },
     getRotation: () => ({ yaw: Rotation.yaw[player], pitch: Rotation.pitch[player] }),
     getCurrentSector: () => currentSector,
     getHealth: () => ({ current: Health.current[player], max: Health.max[player] }),
@@ -124,7 +130,15 @@ export function startGame(container: HTMLElement): void {
       x: Position.x[npc],
       y: Position.y[npc],
       z: Position.z[npc],
+      health: Health.current[npc],
+      dead: hasComponent(world, npc, Dead),
+      meshInScene: npcMesh.parent !== null,
     }),
+    // Debug-only direct trigger for automated (Playwright) testing of melee
+    // combat (issue #48) without needing to simulate real pointer-lock
+    // clicks/touches — fires the exact same `tryMeleeAttack` the real
+    // click/touch-button wiring below calls.
+    attack: () => tryMeleeAttack(world, camera),
   };
 
   // Tracks (and logs, on change) the sector the player currently occupies —
@@ -137,6 +151,18 @@ export function startGame(container: HTMLElement): void {
   const touch = new TouchControls(container);
   setupHint(container, renderer.domElement, pointerLook);
   mountHud(container);
+
+  // Desktop melee attack trigger (issue #48): left-click, but only once
+  // pointer lock is already engaged — `PointerLook`'s own click handler
+  // requests lock asynchronously (pointer lock only ever activates after
+  // this handler returns), so `pointerLook.locked` still reads false on the
+  // very click that engages it, meaning that first click never also counts
+  // as an attack. Edge-triggered into `attackRequested` and consumed once
+  // per frame below, the same "just pressed" shape `interactPressed` uses.
+  let attackRequested = false;
+  renderer.domElement.addEventListener("mousedown", (e) => {
+    if (e.button === 0 && pointerLook.locked) attackRequested = true;
+  });
 
   window.addEventListener("resize", () => {
     camera.aspect = window.innerWidth / window.innerHeight;
@@ -162,6 +188,10 @@ export function startGame(container: HTMLElement): void {
 
     const interactPressed = keyboard.consumeJustPressed("KeyE") || touch.consumeInteractRequest();
     if (interactPressed) tryInteract(world, camera);
+
+    const attackPressed = attackRequested || touch.consumeAttackRequest();
+    attackRequested = false;
+    if (attackPressed) tryMeleeAttack(world, camera);
 
     // Debug-only health nudge (`[`/`]`) so the ECS -> MobX -> HUD plumbing
     // is visibly exercised before real combat (#16) exists. Harmless to
@@ -192,8 +222,8 @@ function setupHint(container: HTMLElement, domElement: HTMLElement, look: Pointe
   const hint = document.createElement("div");
   hint.id = "controls-hint";
   hint.textContent = isTouchDevice()
-    ? "Drag the pads to move & look · tap elsewhere to open doors"
-    : "Click to look around · WASD move · E opens doors";
+    ? "Drag the pads to move & look · tap elsewhere to open doors · ATK to attack"
+    : "Click to look around · WASD move · E opens doors · click to attack";
   container.appendChild(hint);
 
   if (isTouchDevice()) return;
