@@ -105,6 +105,18 @@ export const Health = {
  * corpse doesn't keep moving, respond to interact, or get hit again. */
 export const Dead: Record<string, never> = {};
 
+/** Sector (see `level.sectorAt` in `level/level.ts`/`occupancy.ts`) an entity
+ * died in — issue #59. Set once, in `game.ts`, at the moment an entity
+ * transitions to `Dead` (`sectorAt` isn't reachable from `combat.ts`'s
+ * `tryMeleeAttack`, which only has `world`/`camera`, not the level). Drives
+ * `corpseCleanupSystem` (`ecs/systems/corpseCleanup.ts`): once the player's
+ * current sector no longer matches this, the corpse's `Object3DRef` mesh is
+ * removed from the scene and this is cleared back to `undefined` — a
+ * one-way cleanup, not a presence toggle (the corpse never reappears). */
+export const DeathSector = {
+  sectorId: [] as (string | undefined)[],
+};
+
 /** A pickup-able item (issue #39) — sword, gem, etc. `itemTypeId` indexes
  * `ITEM_TYPES` (`src/items/itemTypes.ts`), the small static registry of
  * item data (name/icon/equip slot), the same way `NPC`/`Door` keep their
