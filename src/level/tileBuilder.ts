@@ -16,11 +16,28 @@ import { wallMaterial, floorMaterial, ceilingMaterial, doorMaterial } from "./ma
 const WALL_THICKNESS = 0.15; // half-thickness of a wall/door slab, meters
 const DOOR_HEIGHT = 2.2;
 
-/** Adds a static, solid wall collider box spanning [cx-hx,cx+hx] x [cz-hz,cz+hz]. */
-function addWall(world: World, scene: THREE.Scene, cx: number, cz: number, hx: number, hz: number, height: number): void {
+/**
+ * Adds a wall box spanning [cx-hx,cx+hx] x [cz-hz,cz+hz], from `baseY` up to
+ * `baseY + height` (default `baseY = 0`, i.e. floor-to-height like a regular
+ * wall). A header wall above a doorway passes `baseY = DOOR_HEIGHT` to sit
+ * above the door leaf instead of starting at the floor.
+ *
+ * `solid` (default `true`) controls whether it also gets a static
+ * `Collider`/`Solid` ECS entity. A **header** wall passes `solid = false`:
+ * `Position`/`Collider` are XZ-only (see components.ts — "collision only
+ * considers x/z") with no notion of vertical extent, so a Solid collider
+ * placed above a doorway would still block the player at floor level across
+ * its full XZ footprint — i.e. it would seal the doorway shut even with both
+ * leaves open. A header is purely decorative geometry filling the visual gap
+ * to the ceiling; nothing can reach that height to require colliding with
+ * it anyway.
+ */
+function addWall(world: World, scene: THREE.Scene, cx: number, cz: number, hx: number, hz: number, height: number, baseY: number = 0, solid: boolean = true): void {
   const mesh = new THREE.Mesh(new THREE.BoxGeometry(hx * 2, height, hz * 2), wallMaterial());
-  mesh.position.set(cx, height / 2, cz);
+  mesh.position.set(cx, baseY + height / 2, cz);
   scene.add(mesh);
+
+  if (!solid) return;
 
   const eid = addEntity(world);
   addComponent(world, eid, Position);
@@ -28,7 +45,7 @@ function addWall(world: World, scene: THREE.Scene, cx: number, cz: number, hx: n
   addComponent(world, eid, Solid);
   addComponent(world, eid, Object3DRef);
   Position.x[eid] = cx;
-  Position.y[eid] = height / 2;
+  Position.y[eid] = baseY + height / 2;
   Position.z[eid] = cz;
   Collider.hx[eid] = hx;
   Collider.hz[eid] = hz;
@@ -102,8 +119,20 @@ function addDoorLeaf(
  * doors — avoids one wide slab sweeping a big arc, and reads more like a
  * real door. Both leaves share a `Door.pairId` so `tryInteract` opens them
  * together (see doors.ts).
+ *
+ * Also emits a **header wall**: a wall segment spanning the same width as
+ * the doorway, from `DOOR_HEIGHT` up to `wallHeight` (the room's actual
+ * ceiling height), so the doorway doesn't leave an open gap to the ceiling
+ * in tall rooms (e.g. a 6m great_hall vs. a 2.2m door leaf). Skipped when
+ * `wallHeight <= DOOR_HEIGHT` (no gap to fill). It's built with
+ * `addWall(..., solid: false)` — visual geometry only, no ECS entity — since
+ * XZ-only collision would otherwise treat its footprint as blocking the
+ * doorway at floor level even though it sits well above head height (see
+ * `addWall`'s doc comment). It's otherwise a separate static mesh from the
+ * door leaves and never affects leaf swinging, which still only occupies
+ * `0..DOOR_HEIGHT`.
  */
-function addDoorPair(world: World, scene: THREE.Scene, orientation: "x" | "z", planeCoord: number, rangeStart: number, rangeEnd: number): void {
+function addDoorPair(world: World, scene: THREE.Scene, orientation: "x" | "z", planeCoord: number, rangeStart: number, rangeEnd: number, wallHeight: number): void {
   const leafHalf = (rangeEnd - rangeStart) / 4; // half-width of each ~1.5m leaf
 
   let eidA: number;
@@ -121,6 +150,17 @@ function addDoorPair(world: World, scene: THREE.Scene, orientation: "x" | "z", p
   }
   Door.pairId[eidA] = eidA;
   Door.pairId[eidB] = eidA;
+
+  const headerHeight = wallHeight - DOOR_HEIGHT;
+  if (headerHeight > 0) {
+    const cRange = (rangeStart + rangeEnd) / 2;
+    const hRange = (rangeEnd - rangeStart) / 2;
+    if (orientation === "x") {
+      addWall(world, scene, planeCoord, cRange, WALL_THICKNESS, hRange, headerHeight, DOOR_HEIGHT, false);
+    } else {
+      addWall(world, scene, cRange, planeCoord, hRange, WALL_THICKNESS, headerHeight, DOOR_HEIGHT, false);
+    }
+  }
 }
 
 interface InstanceBounds {
@@ -283,13 +323,20 @@ export function buildGeometryFromOccupancy(world: World, scene: THREE.Scene, ind
 
       if (effective === "opening") continue; // just empty space, no geometry
 
+      // A door's header must reach the taller of the two rooms it connects
+      // (e.g. a great_hall door opening onto a lower-ceilinged hallway) —
+      // otherwise the boundary is emitted from whichever side "owns" it
+      // (see `owner` above) and a header sized only to the *shorter* side's
+      // `wallHeight` would still leave the taller room's gap open above it.
+      const doorHeaderHeight = neighbor ? Math.max(wallHeight, neighbor.heightCells * UNIT) : wallHeight;
+
       if (dir.dx !== 0) {
         // +x or -x boundary: a plane of constant X, spanning this cell's Z extent.
         const planeCell = dir.dx > 0 ? x + 1 : x;
         if (effective === "wall") {
           wallSegments.push({ orientation: "x", planeCell, rangeStartCell: z, wallHeight });
         } else {
-          addDoorPair(world, scene, "x", planeCell * UNIT, z * UNIT, (z + 1) * UNIT);
+          addDoorPair(world, scene, "x", planeCell * UNIT, z * UNIT, (z + 1) * UNIT, doorHeaderHeight);
         }
       } else {
         // +z or -z boundary: a plane of constant Z, spanning this cell's X extent.
@@ -297,7 +344,7 @@ export function buildGeometryFromOccupancy(world: World, scene: THREE.Scene, ind
         if (effective === "wall") {
           wallSegments.push({ orientation: "z", planeCell, rangeStartCell: x, wallHeight });
         } else {
-          addDoorPair(world, scene, "z", planeCell * UNIT, x * UNIT, (x + 1) * UNIT);
+          addDoorPair(world, scene, "z", planeCell * UNIT, x * UNIT, (x + 1) * UNIT, doorHeaderHeight);
         }
       }
     }
