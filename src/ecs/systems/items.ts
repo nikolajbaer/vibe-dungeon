@@ -5,7 +5,9 @@ import { ITEM_TYPES } from "../../items/itemTypes";
 
 export type HandSlot = "hand-left" | "hand-right";
 
-function isHandSlot(slot: CarriedSlot): slot is HandSlot {
+/** Exported for combat.ts (checking whether an item is equipped in *a* hand,
+ * not which one) as well as internal use here. */
+export function isHandSlot(slot: CarriedSlot): slot is HandSlot {
   return slot === "hand-left" || slot === "hand-right";
 }
 
@@ -124,5 +126,63 @@ export function unequipItem(world: World, itemEid: number): void {
   if (mesh) {
     mesh.removeFromParent();
     Viewmodel[itemEid] = undefined;
+  }
+}
+
+const SWING_DURATION = 0.22; // seconds, roundtrip
+
+interface SwingState {
+  itemEid: number;
+  elapsed: number;
+}
+
+/** Items currently mid-swing (see `triggerViewmodelSwing`/
+ * `viewmodelSwingSystem` below) — a plain array since there's realistically
+ * at most one or two entries (one per hand) at once. */
+const activeSwings: SwingState[] = [];
+
+/** Starts (or restarts, if already swinging) a weapon-swing animation for
+ * `itemEid`'s viewmodel — called from `tryMeleeAttack` (combat.ts) on every
+ * attack attempt, hit or miss, since the swing is what the player *did*,
+ * not a reaction to a hit. No-ops harmlessly next frame in
+ * `viewmodelSwingSystem` if the item turns out not to have a viewmodel
+ * (unarmed) or gets unequipped mid-swing. */
+export function triggerViewmodelSwing(itemEid: number): void {
+  const existing = activeSwings.find((s) => s.itemEid === itemEid);
+  if (existing) existing.elapsed = 0;
+  else activeSwings.push({ itemEid, elapsed: 0 });
+}
+
+/**
+ * Advances every active weapon swing (issue: sword swing animation),
+ * animating each swinging item's `Viewmodel` mesh in an arc away from its
+ * resting `VIEWMODEL_OFFSET` pose and back — a forward/downward chop that
+ * eases in and out via `sin(t * PI)` (0 at both ends, 1 at the midpoint) so
+ * it doesn't snap at either end. Reads `Carried.slot` each frame (rather
+ * than caching the hand at swing-start) so re-equipping mid-swing doesn't
+ * leave the mesh animating around a stale offset. Must run every frame
+ * (called unconditionally from game.ts's loop, not just when attacking) so
+ * a swing already in progress keeps advancing on frames with no new input.
+ */
+export function viewmodelSwingSystem(dt: number): void {
+  for (let i = activeSwings.length - 1; i >= 0; i--) {
+    const swing = activeSwings[i];
+    const slot = Carried.slot[swing.itemEid];
+    const mesh = Viewmodel[swing.itemEid];
+    if (!mesh || !isHandSlot(slot)) {
+      activeSwings.splice(i, 1);
+      continue;
+    }
+
+    swing.elapsed += dt;
+    const t = Math.min(1, swing.elapsed / SWING_DURATION);
+    const arc = Math.sin(t * Math.PI);
+    const side = slot === "hand-right" ? -1 : 1;
+    const base = VIEWMODEL_OFFSET[slot];
+
+    mesh.position.set(base.pos[0], base.pos[1] - arc * 0.05, base.pos[2] - arc * 0.2);
+    mesh.rotation.set(base.rot[0] - arc * 0.9, base.rot[1], base.rot[2] + side * arc * 0.6);
+
+    if (t >= 1) activeSwings.splice(i, 1);
   }
 }

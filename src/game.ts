@@ -8,7 +8,7 @@ import { collisionSystem } from "./ecs/systems/collision";
 import { doorAnimationSystem, tryInteract } from "./ecs/systems/doors";
 import { tryMeleeAttack } from "./ecs/systems/combat";
 import { npcSystem } from "./ecs/systems/npc";
-import { equipToOpenHandSlot, unequipItem } from "./ecs/systems/items";
+import { equipToOpenHandSlot, unequipItem, viewmodelSwingSystem } from "./ecs/systems/items";
 import { syncSystem } from "./ecs/systems/sync";
 import { hudSync } from "./ecs/systems/hudSync";
 import { buildLevel } from "./level/level";
@@ -276,6 +276,7 @@ export function startGame(container: HTMLElement): void {
     const attackPressed = attackRequested || touch.consumeAttackRequest();
     attackRequested = false;
     if (attackPressed) tryMeleeAttack(world, camera);
+    viewmodelSwingSystem(dt);
 
     // Debug-only health nudge (`[`/`]`) so the ECS -> MobX -> HUD plumbing
     // is visibly exercised before real combat (#16) exists. Harmless to
