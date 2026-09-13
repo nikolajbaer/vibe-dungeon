@@ -1,5 +1,5 @@
-import { query, type World } from "bitecs";
-import { NPC, NpcState, Position, Velocity, PlayerControlled } from "../components";
+import { hasComponent, query, type World } from "bitecs";
+import { Dead, NPC, NpcState, Position, Velocity, PlayerControlled } from "../components";
 
 const FOLLOW_SPEED = 2; // m/s — slower than the player's 3.2 so it doesn't ride the player's heels
 export const FOLLOW_STOP_DISTANCE = 2; // meters — target follow distance, directly behind is fine for v1
@@ -54,6 +54,16 @@ export function npcSystem(world: World, dt: number): void {
   const [playerEid] = query(world, [PlayerControlled, Position]);
 
   for (const eid of query(world, [NPC, Position, Velocity])) {
+    if (hasComponent(world, eid, Dead)) {
+      // A dead NPC (issue #48) stops moving outright — zero its velocity so
+      // movementSystem doesn't keep coasting the corpse on whatever it was
+      // doing the instant it died — rather than just skipping the
+      // follow/wander branches below.
+      Velocity.x[eid] = 0;
+      Velocity.z[eid] = 0;
+      continue;
+    }
+
     if (NPC.state[eid] === NpcState.FOLLOWING && playerEid !== undefined) {
       seekPlayer(eid, playerEid);
     } else {

@@ -98,6 +98,13 @@ export const Health = {
   max: [] as number[],
 };
 
+/** Tag: this entity's `Health.current` has reached 0 (see `tryMeleeAttack`
+ * in combat.ts). Systems that treat entities as alive and interactable —
+ * `npcSystem`'s wander/follow, `tryInteract`'s interactable list, and
+ * `tryMeleeAttack`'s own target list — skip anything already `Dead` so a
+ * corpse doesn't keep moving, respond to interact, or get hit again. */
+export const Dead: Record<string, never> = {};
+
 /** A pickup-able item (issue #39) — sword, gem, etc. `itemTypeId` indexes
  * `ITEM_TYPES` (`src/items/itemTypes.ts`), the small static registry of
  * item data (name/icon/equip slot), the same way `NPC`/`Door` keep their

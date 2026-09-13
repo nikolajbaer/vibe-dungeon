@@ -1,6 +1,6 @@
 import * as THREE from "three";
 import { hasComponent, query, type World } from "bitecs";
-import { Door, DoorState, Object3DRef, NPC, Item, Carried, PlayerControlled } from "../components";
+import { Dead, Door, DoorState, Object3DRef, NPC, Item, Carried, PlayerControlled } from "../components";
 import { toggleNpcFollow } from "./npc";
 import { pickUpItem } from "./items";
 
@@ -71,6 +71,7 @@ export function tryInteract(world: World, camera: THREE.Camera): boolean {
     if (obj) interactables.push(obj);
   }
   for (const eid of query(world, [NPC, Object3DRef])) {
+    if (hasComponent(world, eid, Dead)) continue; // corpses aren't interactable (issue #48)
     const obj = Object3DRef[eid];
     if (obj) interactables.push(obj);
   }

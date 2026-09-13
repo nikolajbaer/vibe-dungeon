@@ -50,6 +50,29 @@
         touch-action: none;
         display: block;
       }
+      .touch-attack-btn {
+        position: fixed;
+        left: 20px;
+        bottom: 20px;
+        width: 90px;
+        height: 90px;
+        border-radius: 50%;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        background: rgba(255, 255, 255, 0.12);
+        border: 2px solid rgba(255, 255, 255, 0.35);
+        color: rgba(255, 255, 255, 0.75);
+        font: 700 13px/1 system-ui, sans-serif;
+        letter-spacing: 0.05em;
+        touch-action: none;
+        user-select: none;
+        -webkit-user-select: none;
+      }
+      .touch-attack-btn:active {
+        background: rgba(217, 67, 63, 0.5);
+        border-color: rgba(255, 255, 255, 0.6);
+      }
       #hud-overlay {
         position: fixed;
         inset: 0;
