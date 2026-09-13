@@ -7,7 +7,7 @@ import { movementSystem } from "./ecs/systems/movement";
 import { collisionSystem } from "./ecs/systems/collision";
 import { doorAnimationSystem, tryInteract } from "./ecs/systems/doors";
 import { npcSystem } from "./ecs/systems/npc";
-import { equipToOpenHandSlot, unequipItem } from "./ecs/systems/items";
+import { equipItem, equipToOpenHandSlot, unequipItem } from "./ecs/systems/items";
 import { syncSystem } from "./ecs/systems/sync";
 import { hudSync } from "./ecs/systems/hudSync";
 import { buildLevel } from "./level/level";
@@ -169,6 +169,13 @@ export function startGame(container: HTMLElement): void {
   const inventoryActions: InventoryActions = {
     equip(itemEid) {
       equipToOpenHandSlot(world, camera, itemEid);
+    },
+    // Issue #47: lets the inventory UI put an item in a specific hand
+    // (rather than whichever one `equipToOpenHandSlot` picks) once the
+    // player has tapped a paper-doll slot for it — the store only ever
+    // calls this after confirming that slot is open.
+    equipToSlot(itemEid, slot) {
+      equipItem(world, camera, itemEid, slot);
     },
     unequip(itemEid) {
       unequipItem(world, itemEid);
