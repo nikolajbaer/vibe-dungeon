@@ -1,7 +1,7 @@
 import * as THREE from "three";
 import { addComponent, addEntity, type World } from "bitecs";
 import { Position, Collider, Solid, Door, DoorState, Object3DRef } from "../ecs/components";
-import { UNIT } from "./tiles";
+import { UNIT, TILE_TYPES } from "./tiles";
 import type { FaceKind } from "./tiles";
 import type { OccupancyIndex } from "./occupancy";
 import { wallMaterial, floorMaterial, ceilingMaterial, doorMaterial } from "./materials";
@@ -58,6 +58,88 @@ function addSlab(scene: THREE.Scene, cx: number, cz: number, hx: number, hz: num
   const mesh = new THREE.Mesh(new THREE.BoxGeometry(hx * 2, 0.2, hz * 2), material);
   mesh.position.set(cx, y, cz);
   scene.add(mesh);
+}
+
+// --- Wall-mounted torches (issue #41) -------------------------------------
+// Baked-in level dressing, same spirit as `addSlab`: purely visual geometry
+// plus a real `THREE.PointLight`, no ECS entity/Collider/Solid at all — a
+// torch is never solid and never interactable. Kept deliberately sparse (see
+// the room-selection logic in `emitWalls`) since dynamic point lights aren't
+// free in three.js's standard material pipeline.
+
+const TORCH_MOUNT_Y = 2.1; // meters above the floor — readable at both player eye height and above head height in taller rooms
+const TORCH_BRACKET_LENGTH = 0.22; // how far the bracket arm juts into the room from the wall face
+const TORCH_BRACKET_THICKNESS = 0.06;
+const TORCH_FLAME_RADIUS = 0.09;
+const TORCH_FLAME_HEIGHT = 0.22;
+const TORCH_LIGHT_COLOR = 0xffaa55; // warm torchlight
+const TORCH_LIGHT_INTENSITY = 1.4;
+const TORCH_LIGHT_RANGE = 6; // meters — a warm pool of light, not a room-flooding one
+
+let torchBracketMaterial: THREE.MeshStandardMaterial | null = null;
+function getTorchBracketMaterial(): THREE.MeshStandardMaterial {
+  if (!torchBracketMaterial) {
+    torchBracketMaterial = new THREE.MeshStandardMaterial({ color: 0x2b1f16, roughness: 0.85, metalness: 0.15 });
+  }
+  return torchBracketMaterial;
+}
+
+let torchFlameMaterial: THREE.MeshStandardMaterial | null = null;
+function getTorchFlameMaterial(): THREE.MeshStandardMaterial {
+  if (!torchFlameMaterial) {
+    torchFlameMaterial = new THREE.MeshStandardMaterial({
+      color: 0xffb347,
+      emissive: 0xff6a1a,
+      emissiveIntensity: 2.2,
+      roughness: 0.4,
+    });
+  }
+  return torchFlameMaterial;
+}
+
+/**
+ * Adds one wall-mounted torch: a small bracket "arm" jutting out from the
+ * wall face at `(cx, cz)`, a glowing flame mesh at its tip, and a real
+ * `THREE.PointLight` colocated with the flame. `orientation`/`interiorSign`
+ * say which axis-aligned direction is "into the room" from the wall plane
+ * (walls here are always axis-aligned, so the bracket/flame/light offsets
+ * are just added along that one world axis — no rotation math needed).
+ * Purely visual: no ECS entity, no Collider/Solid.
+ */
+function addTorch(
+  scene: THREE.Scene,
+  cx: number,
+  cz: number,
+  wallHeight: number,
+  orientation: "x" | "z",
+  interiorSign: 1 | -1,
+): void {
+  const mountY = Math.min(TORCH_MOUNT_Y, wallHeight - 0.4);
+  const offsetX = orientation === "x" ? interiorSign : 0;
+  const offsetZ = orientation === "z" ? interiorSign : 0;
+
+  const group = new THREE.Group();
+  group.position.set(cx, mountY, cz);
+  scene.add(group);
+
+  const bracket = new THREE.Mesh(
+    new THREE.BoxGeometry(
+      orientation === "x" ? TORCH_BRACKET_LENGTH : TORCH_BRACKET_THICKNESS,
+      TORCH_BRACKET_THICKNESS,
+      orientation === "z" ? TORCH_BRACKET_LENGTH : TORCH_BRACKET_THICKNESS,
+    ),
+    getTorchBracketMaterial(),
+  );
+  bracket.position.set(offsetX * (TORCH_BRACKET_LENGTH / 2), 0, offsetZ * (TORCH_BRACKET_LENGTH / 2));
+  group.add(bracket);
+
+  const flame = new THREE.Mesh(new THREE.ConeGeometry(TORCH_FLAME_RADIUS, TORCH_FLAME_HEIGHT, 8), getTorchFlameMaterial());
+  flame.position.set(offsetX * TORCH_BRACKET_LENGTH, TORCH_FLAME_HEIGHT / 2 + 0.03, offsetZ * TORCH_BRACKET_LENGTH);
+  group.add(flame);
+
+  const light = new THREE.PointLight(TORCH_LIGHT_COLOR, TORCH_LIGHT_INTENSITY, TORCH_LIGHT_RANGE, 2);
+  light.position.set(offsetX * TORCH_BRACKET_LENGTH, TORCH_FLAME_HEIGHT / 2, offsetZ * TORCH_BRACKET_LENGTH);
+  group.add(light);
 }
 
 /**
@@ -181,6 +263,18 @@ interface Segment {
   planeCell: number; // grid-cell integer coordinate of the plane
   rangeStartCell: number; // grid-cell integer start of the segment's span (span is always exactly 1 cell pre-extension)
   wallHeight: number;
+  instanceId: string; // owning tile instance (the cell this segment was emitted from) — used to place torches per-room, not per-segment
+  roomSized: boolean; // true for a "room-sized" tile instance (both footprint dimensions > 1 cell) — corridors (e.g. hallway, 1 cell wide) are never torch-eligible
+  interiorSign: 1 | -1; // which way, along this segment's perpendicular axis, the owning cell's interior (the room) lies relative to the wall plane
+}
+
+/** A tile instance counts as "room-sized" (torch-eligible) when its footprint
+ * is more than one cell wide in both directions — a 1-wide corridor like
+ * `hallway` (w=1) never qualifies, per issue #41 ("skip corridors
+ * entirely"), without hardcoding tile type ids here. */
+function isRoomSizedTileType(tileTypeId: string): boolean {
+  const type = TILE_TYPES[tileTypeId];
+  return !!type && type.w > 1 && type.d > 1;
 }
 
 /** Direction helpers for wall/door emission. `owner: true` means this is
@@ -227,7 +321,37 @@ function cornerKey(cellX: number, cellZ: number): string {
  * trick, applied per-segment rather than rewriting wall emission into
  * merged per-instance loops. Ends that border an opening/door are never
  * extended, so doorways keep their exact framing.
+ *
+ * Also decides **torch placement** (issue #41) here, since this is where
+ * every wall segment for the whole level is known at once: `pickTorchSegments`
+ * groups segments by owning tile instance and picks up to `TORCHES_PER_ROOM`
+ * of a room-sized instance's segments, spread apart by taking from opposite
+ * ends of its segment list (which in practice tend to land on different
+ * walls). Corridors are excluded via `roomSized`, keeping the total
+ * torch/light count to roughly one or two per room, never per wall segment.
  */
+const TORCHES_PER_ROOM = 2;
+
+function pickTorchSegments(segments: Segment[]): Set<Segment> {
+  const byInstance = new Map<string, Segment[]>();
+  for (const seg of segments) {
+    if (!seg.roomSized) continue;
+    const list = byInstance.get(seg.instanceId);
+    if (list) list.push(seg);
+    else byInstance.set(seg.instanceId, [seg]);
+  }
+
+  const chosen = new Set<Segment>();
+  for (const list of byInstance.values()) {
+    if (list.length === 0) continue;
+    chosen.add(list[0]);
+    if (TORCHES_PER_ROOM > 1 && list.length > 1) {
+      chosen.add(list[Math.floor(list.length / 2)]);
+    }
+  }
+  return chosen;
+}
+
 function emitWalls(world: World, scene: THREE.Scene, segments: Segment[]): void {
   const xWallCorners = new Set<string>(); // corners touched by an x-oriented (plane-at-constant-X) wall
   const zWallCorners = new Set<string>(); // corners touched by a z-oriented (plane-at-constant-Z) wall
@@ -242,10 +366,15 @@ function emitWalls(world: World, scene: THREE.Scene, segments: Segment[]): void 
     }
   }
 
+  const torchSegments = pickTorchSegments(segments);
+
   for (const seg of segments) {
     let rangeStart = seg.rangeStartCell * UNIT;
     let rangeEnd = (seg.rangeStartCell + 1) * UNIT;
     const planeCoord = seg.planeCell * UNIT;
+    // Torch position uses the segment's original (pre-extension) midpoint so
+    // corner mitering never nudges it visibly off-center on its wall face.
+    const along = (seg.rangeStartCell + 0.5) * UNIT;
 
     if (seg.orientation === "x") {
       if (zWallCorners.has(cornerKey(seg.planeCell, seg.rangeStartCell))) rangeStart -= WALL_THICKNESS;
@@ -253,12 +382,18 @@ function emitWalls(world: World, scene: THREE.Scene, segments: Segment[]): void 
       const cz = (rangeStart + rangeEnd) / 2;
       const hz = (rangeEnd - rangeStart) / 2;
       addWall(world, scene, planeCoord, cz, WALL_THICKNESS, hz, seg.wallHeight);
+      if (torchSegments.has(seg)) {
+        addTorch(scene, planeCoord + seg.interiorSign * WALL_THICKNESS, along, seg.wallHeight, "x", seg.interiorSign);
+      }
     } else {
       if (xWallCorners.has(cornerKey(seg.rangeStartCell, seg.planeCell))) rangeStart -= WALL_THICKNESS;
       if (xWallCorners.has(cornerKey(seg.rangeStartCell + 1, seg.planeCell))) rangeEnd += WALL_THICKNESS;
       const cx = (rangeStart + rangeEnd) / 2;
       const hx = (rangeEnd - rangeStart) / 2;
       addWall(world, scene, cx, planeCoord, hx, WALL_THICKNESS, seg.wallHeight);
+      if (torchSegments.has(seg)) {
+        addTorch(scene, along, planeCoord + seg.interiorSign * WALL_THICKNESS, seg.wallHeight, "z", seg.interiorSign);
+      }
     }
   }
 }
@@ -334,7 +469,15 @@ export function buildGeometryFromOccupancy(world: World, scene: THREE.Scene, ind
         // +x or -x boundary: a plane of constant X, spanning this cell's Z extent.
         const planeCell = dir.dx > 0 ? x + 1 : x;
         if (effective === "wall") {
-          wallSegments.push({ orientation: "x", planeCell, rangeStartCell: z, wallHeight });
+          wallSegments.push({
+            orientation: "x",
+            planeCell,
+            rangeStartCell: z,
+            wallHeight,
+            instanceId: cell.instanceId,
+            roomSized: isRoomSizedTileType(cell.tileTypeId),
+            interiorSign: (dir.dx > 0 ? -1 : 1) as 1 | -1,
+          });
         } else {
           addDoorPair(world, scene, "x", planeCell * UNIT, z * UNIT, (z + 1) * UNIT, doorHeaderHeight);
         }
@@ -342,7 +485,15 @@ export function buildGeometryFromOccupancy(world: World, scene: THREE.Scene, ind
         // +z or -z boundary: a plane of constant Z, spanning this cell's X extent.
         const planeCell = dir.dz > 0 ? z + 1 : z;
         if (effective === "wall") {
-          wallSegments.push({ orientation: "z", planeCell, rangeStartCell: x, wallHeight });
+          wallSegments.push({
+            orientation: "z",
+            planeCell,
+            rangeStartCell: x,
+            wallHeight,
+            instanceId: cell.instanceId,
+            roomSized: isRoomSizedTileType(cell.tileTypeId),
+            interiorSign: (dir.dz > 0 ? -1 : 1) as 1 | -1,
+          });
         } else {
           addDoorPair(world, scene, "z", planeCell * UNIT, x * UNIT, (x + 1) * UNIT, doorHeaderHeight);
         }
