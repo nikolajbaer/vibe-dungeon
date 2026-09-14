@@ -1,7 +1,7 @@
 import * as THREE from "three";
 import { addComponent, addEntity, createWorld, hasComponent } from "bitecs";
 import { query } from "bitecs";
-import { Position, Velocity, Rotation, Collider, PlayerControlled, Object3DRef, Door, Dead, Health, NPC, NpcState, Item, Carried } from "./ecs/components";
+import { Position, Velocity, Rotation, Collider, PlayerControlled, Object3DRef, Door, Dead, DeathSector, Health, NPC, NpcState, Item, Carried } from "./ecs/components";
 import { inputSystem } from "./ecs/systems/input";
 import { movementSystem } from "./ecs/systems/movement";
 import { collisionSystem } from "./ecs/systems/collision";
@@ -9,6 +9,7 @@ import { doorAnimationSystem, tryInteract } from "./ecs/systems/doors";
 import { tryMeleeAttack } from "./ecs/systems/combat";
 import { npcSystem } from "./ecs/systems/npc";
 import { createAnimatedNpcMesh, getNpcAnimationDebugState, npcAnimationSystem } from "./ecs/systems/npcAnimation";
+import { corpseCleanupSystem } from "./ecs/systems/corpseCleanup";
 import { createHumanoidRig } from "./characters/humanoidRig";
 import { equipItem, equipToOpenHandSlot, unequipItem, viewmodelSwingSystem } from "./ecs/systems/items";
 import { syncSystem } from "./ecs/systems/sync";
@@ -121,7 +122,8 @@ export function startGame(container: HTMLElement): void {
 
   // Issue #54: animated idle/walk mesh instead of the old plain
   // CylinderGeometry placeholder, backed by the procedural humanoid rig
-  // (issue #53, src/characters/humanoidRig.ts).
+  // (issue #53, src/characters/humanoidRig.ts), which also carries the
+  // hit/death one-shots (issue #58) `createAnimatedNpcMesh` wires up.
   const humanoidRig = createHumanoidRig();
   const npcMesh = createAnimatedNpcMesh(humanoidRig, npc); // same userData.eid convention doors' slab meshes use
   scene.add(npcMesh);
@@ -207,6 +209,10 @@ export function startGame(container: HTMLElement): void {
       health: Health.current[npc],
       dead: hasComponent(world, npc, Dead),
       meshInScene: npcMesh.parent !== null,
+      // Issue #59: the sector it died in (until corpseCleanupSystem clears
+      // it back to undefined once cleaned up), for confirming the corpse
+      // cleanup lifecycle end-to-end.
+      deathSector: hasComponent(world, npc, DeathSector) ? DeathSector.sectorId[npc] : undefined,
     }),
     // Issue #54: exposes the NPC's animation-mixer state (which of
     // idle/walk is fading in, and the mixer's own clock) so automated
@@ -237,9 +243,16 @@ export function startGame(container: HTMLElement): void {
   };
 
   // Tracks (and logs, on change) the sector the player currently occupies —
-  // authoring/tracking data from the tile occupancy index only (see
-  // README "Sectors"); no gameplay reads this yet.
+  // originally authoring/tracking data only (see README "Sectors"); as of
+  // issue #59 it also drives `corpseCleanupSystem` below.
   let currentSector: string | undefined;
+
+  // Edge-detects the NPC's Dead transition (issue #59), the same "was it
+  // already in that state last frame" shape `npcAnimation.ts`'s `moving`
+  // field uses for idle/walk — `tryMeleeAttack` (combat.ts) adds `Dead` but
+  // has no access to `level`, so the one-time `DeathSector` recording has to
+  // happen back here instead, right after the call below.
+  let npcWasDead = false;
 
   const keyboard = new Keyboard();
   const pointerLook = new PointerLook(renderer.domElement);
@@ -291,6 +304,16 @@ export function startGame(container: HTMLElement): void {
     if (attackPressed) tryMeleeAttack(world, camera);
     viewmodelSwingSystem(dt);
 
+    // Issue #59: the NPC just became Dead this frame (edge-detected against
+    // `npcWasDead`) — record the sector it died in once, so
+    // `corpseCleanupSystem` below knows when the player has left it.
+    const npcIsDead = hasComponent(world, npc, Dead);
+    if (npcIsDead && !npcWasDead) {
+      addComponent(world, npc, DeathSector);
+      DeathSector.sectorId[npc] = level.sectorAt(Position.x[npc], Position.z[npc]);
+    }
+    npcWasDead = npcIsDead;
+
     // Debug-only health nudge (`[`/`]`) so the ECS -> MobX -> HUD plumbing
     // is visibly exercised before real combat (#16) exists. Harmless to
     // leave in permanently as a debug convenience.
@@ -306,6 +329,7 @@ export function startGame(container: HTMLElement): void {
       currentSector = sector;
       console.log(`[sector] entered "${currentSector ?? "(none)"}"`);
     }
+    corpseCleanupSystem(world, sector);
 
     syncSystem(world);
     hudSync(world);

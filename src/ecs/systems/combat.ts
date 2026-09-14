@@ -3,6 +3,7 @@ import { addComponent, hasComponent, query, type World } from "bitecs";
 import { Carried, Dead, Health, Item, Object3DRef, PlayerControlled } from "../components";
 import { ITEM_TYPES } from "../../items/itemTypes";
 import { isHandSlot, triggerViewmodelSwing } from "./items";
+import { triggerDeathCollapse, triggerHitReaction } from "./npcAnimation";
 
 /** Damage dealt with no weapon equipped (issue #48 follow-up: fists vs. a
  * sword shouldn't hit the same). */
@@ -49,9 +50,13 @@ function getEquippedWeapon(world: World, attackerEid: number): { itemEid: number
  * target list member: its `Object3DRef` *is* the camera, so it's filtered
  * out here rather than via a separate attacker-eid parameter).
  *
- * On a kill (`Health.current` reaches 0): adds the `Dead` tag and removes
- * the entity's mesh from the scene outright (`removeFromParent`) rather than
- * just hiding it, per the acceptance criteria ("mesh gone").
+ * On a kill (`Health.current` reaches 0): adds the `Dead` tag and triggers a
+ * one-shot "death" collapse animation (`triggerDeathCollapse`, issue #59)
+ * that freezes on its final frame, instead of removing the mesh outright —
+ * the corpse stays visible in the scene until `corpseCleanupSystem`
+ * (game.ts) removes it once the player leaves the sector it died in. On a
+ * non-lethal hit, triggers a one-shot "hit" flinch (`triggerHitReaction`)
+ * instead.
  *
  * Swings the attacker's weapon viewmodel (if any) on every attempt,
  * hit or miss, since a swing is what the *player* did, independent of
@@ -89,7 +94,9 @@ export function tryMeleeAttack(world: World, camera: THREE.Camera): boolean {
 
   if (Health.current[hitEid] <= 0 && !hasComponent(world, hitEid, Dead)) {
     addComponent(world, hitEid, Dead);
-    Object3DRef[hitEid]?.removeFromParent();
+    triggerDeathCollapse(hitEid);
+  } else if (Health.current[hitEid] > 0) {
+    triggerHitReaction(hitEid);
   }
 
   return true;
