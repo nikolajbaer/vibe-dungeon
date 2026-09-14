@@ -136,10 +136,12 @@ export function startGame(container: HTMLElement): void {
   // bar: a player standing in front of a door they need to open shouldn't
   // see undifferentiated black. Raised the ambient intensity and lightened
   // the hemisphere's ground color so there's a real, if dim, non-zero floor
-  // everywhere — re-verified the same shot no longer clips to black while a
-  // torch-adjacent wall is still dramatically brighter (see PR follow-up).
-  scene.add(new THREE.AmbientLight(0x3a4a6b, 1.0));
-  const skyFill = new THREE.HemisphereLight(0x3a4a6b, 0x241f1a, 0.6);
+  // everywhere. Raised once more after user feedback that the overall level
+  // still read as too dark day-to-day (own play-testing, not a pixel-clipping
+  // bug this time) — torch-adjacent walls stay dramatically brighter by
+  // comparison either way, so the mood/contrast holds at both settings.
+  scene.add(new THREE.AmbientLight(0x3a4a6b, 1.3));
+  const skyFill = new THREE.HemisphereLight(0x3a4a6b, 0x241f1a, 0.8);
   scene.add(skyFill);
 
   const world = createWorld();
