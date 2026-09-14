@@ -4,11 +4,12 @@ import { mergeGeometries } from "three/examples/jsm/utils/BufferGeometryUtils.js
 // Procedurally-built bipedal humanoid rig (issue #53) — a hand-authored bone
 // skeleton, a single rigid-skinned THREE.SkinnedMesh (box-per-segment, one
 // bone weight per vertex, no smooth blending — same "placeholder-grade but
-// readable" visual bar as src/props/props.ts's furniture), and two
-// hand-keyframed THREE.AnimationClips ("idle", "walk"). No external DCC
-// tool, no imported mesh files — every vertex and every keyframe here is
-// authored directly in code, matching how the rest of this project's art
-// (furniture props, procedural stone/wood textures) is built.
+// readable" visual bar as src/props/props.ts's furniture), and four
+// hand-keyframed THREE.AnimationClips ("idle", "walk" from issue #53; "hit",
+// "death" from issue #58). No external DCC tool, no imported mesh files —
+// every vertex and every keyframe here is authored directly in code,
+// matching how the rest of this project's art (furniture props, procedural
+// stone/wood textures) is built.
 //
 // This module is intentionally standalone: it is not wired into game.ts or
 // npc.ts (see issue #53's "out of scope" — that's a companion PR). Consumers
@@ -214,6 +215,8 @@ export interface HumanoidRig {
   clips: {
     idle: THREE.AnimationClip;
     walk: THREE.AnimationClip;
+    hit: THREE.AnimationClip;
+    death: THREE.AnimationClip;
   };
 }
 
@@ -235,6 +238,43 @@ function rotationTrack(
   const q = new THREE.Quaternion();
   for (const angle of anglesRad) {
     q.setFromAxisAngle(axis, angle);
+    values.push(q.x, q.y, q.z, q.w);
+  }
+  return new THREE.QuaternionKeyframeTrack(`${boneName}.quaternion`, times, values);
+}
+
+/**
+ * Builds a `THREE.QuaternionKeyframeTrack` for one bone that rotates around
+ * more than one local axis at once (e.g. a shoulder both swinging forward
+ * and splaying outward). Two separate `rotationTrack` calls for the same
+ * bone do NOT compose — `AnimationMixer` binds one `PropertyMixer` per
+ * property path, and a clip with two tracks both targeting
+ * `${boneName}.quaternion` has the second silently clobber the first each
+ * frame rather than combining them (confirmed empirically, not assumed —
+ * see the death clip's original single-axis-per-track version, which
+ * quietly dropped half of every multi-axis rotation). This composes the
+ * axes into one quaternion per keyframe instead, in the given order
+ * (`axes[0]` applied first, i.e. innermost).
+ */
+function combinedRotationTrack(
+  boneName: string,
+  times: number[],
+  axes: { axis: THREE.Vector3; anglesRad: number[] }[],
+): THREE.QuaternionKeyframeTrack {
+  for (const { anglesRad } of axes) {
+    if (times.length !== anglesRad.length) {
+      throw new Error(`humanoidRig: combinedRotationTrack length mismatch for ${boneName}`);
+    }
+  }
+  const values: number[] = [];
+  const q = new THREE.Quaternion();
+  const part = new THREE.Quaternion();
+  for (let i = 0; i < times.length; i++) {
+    q.identity();
+    for (const { axis, anglesRad } of axes) {
+      part.setFromAxisAngle(axis, anglesRad[i]);
+      q.multiply(part);
+    }
     values.push(q.x, q.y, q.z, q.w);
   }
   return new THREE.QuaternionKeyframeTrack(`${boneName}.quaternion`, times, values);
@@ -332,6 +372,107 @@ function buildWalkClip(bones: THREE.Bone[]): THREE.AnimationClip {
 }
 
 /**
+ * A short, sharp hit reaction (issue #58): head and chest snap backward,
+ * shoulders/elbows flinch inward, and the hips take a small backward
+ * stagger step — all reaching a hard peak quickly (t=0.1s of a 0.4s clip)
+ * then easing partway back. Unlike idle/walk this does *not* return to bind
+ * pose at its end: per the issue, a consumer plays this once
+ * (`THREE.LoopOnce`) as an interrupt and decides how to blend back to
+ * idle/walk on its own, so the clip only needs to sell the recoil itself.
+ */
+function buildHitClip(): THREE.AnimationClip {
+  const duration = 0.4;
+  const t = [0, 0.1, duration];
+
+  const tracks: THREE.KeyframeTrack[] = [
+    // Head snaps back hardest and fastest (whiplash), chest follows with a
+    // smaller snap, hips take a slight backward stagger.
+    rotationTrack("head", t, X_AXIS, [deg(0), deg(-32), deg(-9)]),
+    rotationTrack("chest", t, X_AXIS, [deg(0), deg(-18), deg(-5)]),
+    rotationTrack("hips", t, X_AXIS, [deg(0), deg(-7), deg(-2)]),
+    // Arms flinch inward/up defensively: shoulders pull back, elbows bend.
+    rotationTrack("shoulder.L", t, X_AXIS, [deg(0), deg(-22), deg(-6)]),
+    rotationTrack("shoulder.R", t, X_AXIS, [deg(0), deg(-22), deg(-6)]),
+    rotationTrack("forearm.L", t, X_AXIS, [deg(0), deg(38), deg(12)]),
+    rotationTrack("forearm.R", t, X_AXIS, [deg(0), deg(38), deg(12)]),
+  ];
+
+  return new THREE.AnimationClip("hit", duration, tracks);
+}
+
+/**
+ * A collapse to the ground (issue #58): the hips (skeleton root) pitch
+ * backward ~90° about the X axis while dropping in height, so the whole
+ * body swings from standing to lying-on-its-back over the clip — legs end
+ * up extended roughly where the character stood (world +Z) and the
+ * torso/head extend behind (world -Z), both settling near ground level.
+ * Knees buckle first (a brief bend as balance is lost) then relax out
+ * straight-ish for the sprawl; elbows bend and shoulders splay outward
+ * (rotated about their local Z axis, which at bind pose = world Z, i.e.
+ * sideways abduction) so the final frame doesn't read as a stiff plank.
+ *
+ * The LAST keyframe is what a consumer freezes on forever
+ * (`clampWhenFinished = true`) as the corpse pose, so it gets the most
+ * deliberate shaping of any pose in this file: hips pitched a full -90°
+ * and dropped to just above ground height, knees loosely bent, arms
+ * splayed and slightly bent, head lolled to one side.
+ */
+function buildDeathClip(bones: THREE.Bone[]): THREE.AnimationClip {
+  const duration = 1.3;
+  const t = [0, 0.3, 0.65, 1.0, duration];
+
+  // Hips: the falling pitch (X axis) plus the vertical drop that keeps the
+  // pivot (and everything hanging off it) from floating at standing height
+  // once it's rotated flat. HIPS_Y (bind height) - hipsDy[last] lands the
+  // pelvis just above y=0, matching the ~half-thickness of a torso box
+  // lying on its side (see buildMeshGeometry's box sizes).
+  const hipsFallDeg = [deg(0), deg(-14), deg(-48), deg(-80), deg(-90)];
+  const hipsDy = [0, -0.03, -0.32, -0.68, -0.87];
+
+  const tracks: THREE.KeyframeTrack[] = [
+    rotationTrack("hips", t, X_AXIS, hipsFallDeg),
+    positionTrack("hips", bones[boneIndex("hips")].position, t, hipsDy),
+
+    // Knees buckle as balance goes, then loosen into a relaxed sprawl bend
+    // rather than snapping back straight.
+    rotationTrack("lowerLeg.L", t, X_AXIS, [deg(0), deg(22), deg(16), deg(14), deg(18)]),
+    rotationTrack("lowerLeg.R", t, X_AXIS, [deg(0), deg(14), deg(20), deg(16), deg(20)]),
+    // Feet relax off their bind flex once they leave the ground. Kept small
+    // — the foot box's bind-pose forward offset means a bigger swing here
+    // visibly untethers it from the shin once compounded with the knee bend
+    // and the root's fall rotation.
+    rotationTrack("foot.L", t, X_AXIS, [deg(0), deg(0), deg(-4), deg(-6), deg(-6)]),
+    rotationTrack("foot.R", t, X_AXIS, [deg(0), deg(0), deg(-3), deg(-5), deg(-5)]),
+
+    // Torso arches slightly independent of the rigid hips pitch, and the
+    // head lolls to one side (Z axis) as well as trailing the fall (X axis)
+    // — a limp neck rather than staying perfectly rigid with the spine.
+    rotationTrack("spine", t, X_AXIS, [deg(0), deg(2), deg(6), deg(8), deg(8)]),
+    rotationTrack("chest", t, X_AXIS, [deg(0), deg(4), deg(10), deg(12), deg(12)]),
+    combinedRotationTrack("head", t, [
+      { axis: X_AXIS, anglesRad: [deg(0), deg(6), deg(14), deg(10), deg(8)] },
+      { axis: Z_AXIS, anglesRad: [deg(0), deg(3), deg(10), deg(16), deg(18)] },
+    ]),
+
+    // Arms splay outward (local Z = sideways abduction at bind pose) and go
+    // loose at the elbow, unevenly between sides so the pose reads as a
+    // limp fall rather than a symmetric, deliberate one.
+    combinedRotationTrack("shoulder.L", t, [
+      { axis: Z_AXIS, anglesRad: [deg(0), deg(-10), deg(-35), deg(-55), deg(-60)] },
+      { axis: X_AXIS, anglesRad: [deg(0), deg(-4), deg(-12), deg(-15), deg(-15)] },
+    ]),
+    combinedRotationTrack("shoulder.R", t, [
+      { axis: Z_AXIS, anglesRad: [deg(0), deg(8), deg(30), deg(45), deg(48)] },
+      { axis: X_AXIS, anglesRad: [deg(0), deg(6), deg(18), deg(24), deg(26)] },
+    ]),
+    rotationTrack("forearm.L", t, X_AXIS, [deg(0), deg(10), deg(28), deg(38), deg(40)]),
+    rotationTrack("forearm.R", t, X_AXIS, [deg(0), deg(8), deg(20), deg(26), deg(28)]),
+  ];
+
+  return new THREE.AnimationClip("death", duration, tracks);
+}
+
+/**
  * Builds one fresh humanoid rig: skeleton, rigid-skinned box mesh bound to
  * it, and the "idle"/"walk" clips authored against this skeleton's bone
  * names. Call this once and `SkeletonUtils.clone(rig.mesh)` per character
@@ -355,6 +496,8 @@ export function createHumanoidRig(): HumanoidRig {
     clips: {
       idle: buildIdleClip(bones),
       walk: buildWalkClip(bones),
+      hit: buildHitClip(),
+      death: buildDeathClip(bones),
     },
   };
 }
