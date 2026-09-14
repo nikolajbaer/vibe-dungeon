@@ -3,6 +3,7 @@ import { addComponent, hasComponent, query, type World } from "bitecs";
 import { Carried, Item, Object3DRef, Viewmodel, type CarriedSlot } from "../components";
 import { ITEM_TYPES } from "../../items/itemTypes";
 import { createSwordMesh } from "../../items/swordModel";
+import { createLanternMesh, LANTERN_LIGHT_LOCAL_POSITION } from "../../items/lanternModel";
 
 export type HandSlot = "hand-left" | "hand-right";
 
@@ -50,6 +51,23 @@ const VIEWMODEL_OFFSET: Record<HandSlot, { pos: THREE.Vector3Tuple; rot: THREE.E
   "hand-left": { pos: [-0.26, -0.3, -0.4], rot: [-2.6135, 0.4198, 2.9082] },
 };
 
+// Issue #75: lantern viewmodel light params. Sanity-checked against
+// tileBuilder.ts's `TORCH_LIGHT_*` (a wall-mounted torch: color 0xffaa55,
+// intensity 1.4, range 6, decay 2) and against a genuinely dark stretch of
+// corridor in-game (no nearby torch) — see this issue's PR description for
+// the before/after pixel-brightness sample. A shade warmer/whiter than the
+// torch (0xffd9a0 vs 0xffaa55) so the two read as distinct light sources
+// side by side, slightly brighter/longer-reaching than one torch since,
+// unlike a torch, this is meant to be the player's *only* light source deep
+// in corridors that don't get one — but still low enough, at the range the
+// mesh actually sits from the camera, to avoid blowing out nearby geometry
+// under this scene's ACESFilmicToneMapping (game.ts).
+const LANTERN_LIGHT_COLOR = 0xffd9a0;
+const LANTERN_LIGHT_INTENSITY = 1.6;
+const LANTERN_LIGHT_RANGE = 7; // meters
+const LANTERN_VIEWMODEL_SCALE = 0.8; // matches the sword's own "shrink a touch for the closer camera" scale-down
+const LANTERN_VIEWMODEL_TILT = Math.PI / 4; // see its use below
+
 /** Builds a first-person viewmodel mesh for an item type, or `undefined` if
  * that type has no viewmodel look defined yet (only equippable — `slot:
  * "hand"` — item types need one). Placeholder-grade geometry only, matching
@@ -62,6 +80,38 @@ function createViewmodelMesh(itemTypeId: string): THREE.Object3D | undefined {
     const mesh = createSwordMesh();
     mesh.scale.setScalar(0.85);
     return mesh;
+  }
+  if (itemTypeId === "lantern") {
+    // Issue #75: a `THREE.Group` holding the lantern mesh *and* a real
+    // `THREE.PointLight`, so equipItem's `camera.add(mesh)` /
+    // unequipItem's `mesh.removeFromParent()` (this file) turn the light on
+    // and off for free — nothing else needs to know the lantern is lit.
+    // The *world pickup* mesh (game.ts, via the same `createLanternMesh`)
+    // never goes through this function, so it never gets a live light —
+    // only an equipped lantern actually shines, per the issue.
+    const mesh = createLanternMesh();
+    mesh.scale.setScalar(LANTERN_VIEWMODEL_SCALE);
+    // In-hand-only framing tilt (found the same way swordModel.ts's header
+    // comment describes for VIEWMODEL_OFFSET's rot: render candidate
+    // angles at the real hand offset/scale and pick by eye) — set on
+    // `mesh` itself, a child of the returned group, rather than baked into
+    // `createLanternMesh`'s shared geometry, so the *world pickup* mesh
+    // (game.ts, same factory function) stays upright; only the viewmodel
+    // gets tilted. Unrotated (matching the world mesh) reads as a mostly
+    // edge-on sliver at VIEWMODEL_OFFSET's close, off-to-the-side hand
+    // position — this angles the lantern's front/handle enough to actually
+    // read as a lantern there.
+    mesh.rotation.x = LANTERN_VIEWMODEL_TILT;
+
+    const light = new THREE.PointLight(LANTERN_LIGHT_COLOR, LANTERN_LIGHT_INTENSITY, LANTERN_LIGHT_RANGE, 2);
+    // `mesh` is scaled but sits at the group's own origin, so the light's
+    // local position needs no rescaling: `LANTERN_LIGHT_LOCAL_POSITION` is
+    // `(0,0,0)` (the mesh's own origin, unaffected by scaling about it).
+    light.position.copy(LANTERN_LIGHT_LOCAL_POSITION);
+
+    const group = new THREE.Group();
+    group.add(mesh, light);
+    return group;
   }
   return undefined;
 }

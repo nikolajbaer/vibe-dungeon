@@ -13,6 +13,7 @@ import { corpseCleanupSystem } from "./ecs/systems/corpseCleanup";
 import { createHumanoidRig } from "./characters/humanoidRig";
 import { equipItem, equipToOpenHandSlot, unequipItem, viewmodelSwingSystem } from "./ecs/systems/items";
 import { createSwordMesh } from "./items/swordModel";
+import { createLanternMesh } from "./items/lanternModel";
 import { syncSystem } from "./ecs/systems/sync";
 import { hudSync } from "./ecs/systems/hudSync";
 import { buildLevel } from "./level/level";
@@ -45,6 +46,22 @@ const NPC_HEALTH = 30; // issue #48 — first thing that can actually be damaged
 // spot and its path down to the corridor door.
 const SWORD_SPAWN = { x: 4, z: 7 };
 const GEM_SPAWN = { x: -1, z: 7 };
+
+// Issue #75: a third world item, the equippable lantern, placed as the
+// "dead-end detour" pacing pillar's reward (docs/LEVEL_DESIGN.md) for the
+// side-chamber added in #71 — the one room off the main path, previously
+// just crates/barrels with nothing to pick up. Side-chamber (side_chamber,
+// unrotated, originCell {x:4,z:-2} — see decorations.ts's header comment for
+// the full derivation) spans world x in [12,18], z in [-6,0], its one door
+// on the west wall's near/south segment (world x=12, z in [-6,-3]), and its
+// existing crate/barrel clutter (addSideChamberClutter, decorations.ts) sits
+// in the south-east corner (x roughly 15.8-17.4, z roughly -5.6 to -4.6).
+// LANTERN_SPAWN sits in the room's north-east corner instead — clear of the
+// door and its swing arc (both hug the south-west), clear of the crates/
+// barrel (south-east), and clear of all four interior wall faces (~0.15m
+// wall half-thickness, see tileBuilder.ts's WALL_THICKNESS) by well over a
+// meter on every side.
+const LANTERN_SPAWN = { x: 16, z: -1.3 };
 const ITEM_HEIGHT = 1; // meters off the floor — roughly a low table/pedestal height
 
 // Generous invisible raycast target radius for item pickup — the sword's
@@ -240,6 +257,26 @@ export function startGame(container: HTMLElement): void {
   scene.add(gemGroup);
   Object3DRef[gem] = gemGroup;
 
+  // Issue #75: the lantern, equippable (`slot: "hand"`) like the sword —
+  // see LANTERN_SPAWN above for its placement reasoning. This world pickup
+  // mesh is the plain unlit prop `createLanternMesh` builds (a real
+  // `THREE.PointLight` only ever gets attached to the *viewmodel* version in
+  // `ecs/systems/items.ts`'s `createViewmodelMesh`, once actually equipped)
+  // — its glass panels do carry a always-on emissive material, so it still
+  // reads as a lantern rather than a dead prop while sitting in the world.
+  const lantern = addEntity(world);
+  addComponent(world, lantern, Position);
+  addComponent(world, lantern, Object3DRef);
+  addComponent(world, lantern, Item);
+  Position.x[lantern] = LANTERN_SPAWN.x;
+  Position.y[lantern] = ITEM_HEIGHT;
+  Position.z[lantern] = LANTERN_SPAWN.z;
+  Item.itemTypeId[lantern] = "lantern";
+  const lanternMesh = createLanternMesh();
+  const lanternGroup = withPickupHitbox(lanternMesh, lantern);
+  scene.add(lanternGroup);
+  Object3DRef[lantern] = lanternGroup;
+
   // Inventory UI -> ECS action wiring (issue #39): the store can't mutate
   // the ECS world/camera itself (same as everything else under
   // src/inventory/, mirroring src/hud/'s ECS-agnostic components), so
@@ -300,7 +337,7 @@ export function startGame(container: HTMLElement): void {
     // Item/inventory debug hooks (issue #39) for manual/automated smoke
     // testing — world item positions to walk to, and each item's current
     // carry/equip state and world-mesh visibility.
-    getItemSpawns: () => ({ sword: { ...SWORD_SPAWN }, gem: { ...GEM_SPAWN } }),
+    getItemSpawns: () => ({ sword: { ...SWORD_SPAWN }, gem: { ...GEM_SPAWN }, lantern: { ...LANTERN_SPAWN } }),
     getItemStates: () =>
       Array.from(query(world, [Item])).map((eid) => ({
         eid,
