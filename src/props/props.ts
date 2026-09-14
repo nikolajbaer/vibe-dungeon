@@ -130,9 +130,158 @@ export function createBarrel(): THREE.Group {
   return group;
 }
 
+// --- Wall banner / tapestry (issue #70) -------------------------------------
+// A hanging rod + cloth panel with one contrasting stripe, for a simple
+// heraldic look. Purely decorative: thin, flush to a wall, and — per the
+// issue — nothing a player could meaningfully collide with, so (unlike
+// every prop above) it gets no `*_FOOTPRINT`/collider. Builds facing local
+// +z by default; `decorations.ts` rotates the group to match whichever wall
+// it ends up mounted on, the same way it rotates `createChair` to face a
+// table instead of this module hardcoding a direction per wall.
+
+const BANNER_WIDTH = 1.0;
+const BANNER_HEIGHT = 1.8;
+const BANNER_THICKNESS = 0.035;
+const BANNER_BOTTOM_Y = 1.55; // bottom edge height above the floor
+const BANNER_ROD_RADIUS = 0.03;
+const BANNER_ROD_OVERHANG = 0.12; // how far the rod poke out past the cloth on each side
+const BANNER_STRIPE_HEIGHT = 0.32;
+
+let bannerRodMat: THREE.MeshStandardMaterial | undefined;
+function bannerRodMaterial(): THREE.MeshStandardMaterial {
+  return (bannerRodMat ??= new THREE.MeshStandardMaterial({ color: 0x3a2f22, roughness: 0.6, metalness: 0.35 }));
+}
+
+/**
+ * A hanging wall banner: a horizontal mounting rod plus a cloth panel below
+ * it, with one contrasting stripe near the top. `primaryColor`/
+ * `accentColor` let callers vary the look between placements (e.g. giving
+ * room-a and room-b their own palette) without a second factory function.
+ */
+export function createBanner(primaryColor: number = 0x7a1f1f, accentColor: number = 0xc9a227): THREE.Group {
+  const group = new THREE.Group();
+
+  const rodLength = BANNER_WIDTH + BANNER_ROD_OVERHANG * 2;
+  const rod = new THREE.Mesh(new THREE.CylinderGeometry(BANNER_ROD_RADIUS, BANNER_ROD_RADIUS, rodLength, 8), bannerRodMaterial());
+  rod.rotation.z = Math.PI / 2; // lay the cylinder on its side, spanning local X
+  rod.position.y = BANNER_BOTTOM_Y + BANNER_HEIGHT + BANNER_ROD_RADIUS;
+  group.add(rod);
+
+  const clothMat = new THREE.MeshStandardMaterial({ color: primaryColor, roughness: 0.9, metalness: 0 });
+  const cloth = new THREE.Mesh(new THREE.BoxGeometry(BANNER_WIDTH, BANNER_HEIGHT, BANNER_THICKNESS), clothMat);
+  cloth.position.y = BANNER_BOTTOM_Y + BANNER_HEIGHT / 2;
+  group.add(cloth);
+
+  // A slightly-proud stripe (a hair thicker than the cloth) near the top so
+  // it doesn't z-fight with the panel behind it.
+  const stripeMat = new THREE.MeshStandardMaterial({ color: accentColor, roughness: 0.85, metalness: 0 });
+  const stripe = new THREE.Mesh(new THREE.BoxGeometry(BANNER_WIDTH, BANNER_STRIPE_HEIGHT, BANNER_THICKNESS + 0.006), stripeMat);
+  stripe.position.y = BANNER_BOTTOM_Y + BANNER_HEIGHT - BANNER_STRIPE_HEIGHT * 1.4;
+  group.add(stripe);
+
+  return group;
+}
+
+// --- Standing candelabra (issue #70) ----------------------------------------
+// A floor-standing candle stand: a weighted base, a slim pole, and a small
+// tray of candles up top. Deliberately distinct from the wall-mounted
+// torches in tileBuilder.ts's `addTorch` — no bracket arm, no `PointLight`
+// (a torch's whole point is casting real shadows off a wall it's flush
+// against; a candelabra just needs to read as "lit" via its emissive candle
+// tips, with the room's own torches supplying the actual light — see
+// tileBuilder.ts's `TORCHES_PER_ROOM`, which every room-sized tile already
+// gets regardless of what decorations.ts places). A real floor obstacle, so
+// it exports a `*_FOOTPRINT` sized to its widest point (the candle tray),
+// the same "collider matches the widest silhouette" reasoning as the
+// barrel's bulge above — not just the slim pole a naive footprint might use.
+
+const CANDELABRA_POLE_HEIGHT = 1.0;
+const CANDELABRA_POLE_RADIUS = 0.035;
+const CANDELABRA_BASE_RADIUS = 0.22;
+const CANDELABRA_BASE_HEIGHT = 0.05;
+const CANDELABRA_TRAY_RADIUS = 0.26;
+const CANDELABRA_TRAY_HEIGHT = 0.04;
+const CANDELABRA_CANDLE_RADIUS = 0.02;
+const CANDELABRA_CANDLE_HEIGHT = 0.16;
+const CANDELABRA_FLAME_RADIUS = 0.03;
+const CANDELABRA_FLAME_HEIGHT = 0.08;
+const CANDELABRA_CANDLE_COUNT = 3;
+const CANDELABRA_CANDLE_ORBIT = 0.15; // how far each candle sits from the pole's center
+
+let candelabraMetalMat: THREE.MeshStandardMaterial | undefined;
+function candelabraMetalMaterial(): THREE.MeshStandardMaterial {
+  return (candelabraMetalMat ??= new THREE.MeshStandardMaterial({ color: 0x2b2b30, roughness: 0.45, metalness: 0.75 }));
+}
+
+let candleWaxMat: THREE.MeshStandardMaterial | undefined;
+function candleWaxMaterial(): THREE.MeshStandardMaterial {
+  return (candleWaxMat ??= new THREE.MeshStandardMaterial({ color: 0xe8dcc0, roughness: 0.7, metalness: 0 }));
+}
+
+let candleFlameMat: THREE.MeshStandardMaterial | undefined;
+function candleFlameMaterial(): THREE.MeshStandardMaterial {
+  return (candleFlameMat ??= new THREE.MeshStandardMaterial({
+    color: 0xffb347,
+    emissive: 0xff8a1a,
+    emissiveIntensity: 2,
+    roughness: 0.4,
+  }));
+}
+
+/** A wrought-iron floor candelabra: a weighted base, a slim pole, and a
+ * tray of a few candles (with small emissive flame tips) up top. */
+export function createCandelabra(): THREE.Group {
+  const group = new THREE.Group();
+  const metal = candelabraMetalMaterial();
+
+  const base = new THREE.Mesh(
+    new THREE.CylinderGeometry(CANDELABRA_BASE_RADIUS, CANDELABRA_BASE_RADIUS * 1.15, CANDELABRA_BASE_HEIGHT, 16),
+    metal,
+  );
+  base.position.y = CANDELABRA_BASE_HEIGHT / 2;
+  group.add(base);
+
+  const pole = new THREE.Mesh(
+    new THREE.CylinderGeometry(CANDELABRA_POLE_RADIUS, CANDELABRA_POLE_RADIUS * 1.4, CANDELABRA_POLE_HEIGHT, 10),
+    metal,
+  );
+  pole.position.y = CANDELABRA_BASE_HEIGHT + CANDELABRA_POLE_HEIGHT / 2;
+  group.add(pole);
+
+  const trayY = CANDELABRA_BASE_HEIGHT + CANDELABRA_POLE_HEIGHT;
+  const tray = new THREE.Mesh(
+    new THREE.CylinderGeometry(CANDELABRA_TRAY_RADIUS, CANDELABRA_TRAY_RADIUS * 0.85, CANDELABRA_TRAY_HEIGHT, 16),
+    metal,
+  );
+  tray.position.y = trayY + CANDELABRA_TRAY_HEIGHT / 2;
+  group.add(tray);
+
+  const candleBaseY = trayY + CANDELABRA_TRAY_HEIGHT;
+  for (let i = 0; i < CANDELABRA_CANDLE_COUNT; i++) {
+    const angle = (i / CANDELABRA_CANDLE_COUNT) * Math.PI * 2;
+    const cx = Math.cos(angle) * CANDELABRA_CANDLE_ORBIT;
+    const cz = Math.sin(angle) * CANDELABRA_CANDLE_ORBIT;
+
+    const candle = new THREE.Mesh(
+      new THREE.CylinderGeometry(CANDELABRA_CANDLE_RADIUS, CANDELABRA_CANDLE_RADIUS, CANDELABRA_CANDLE_HEIGHT, 8),
+      candleWaxMaterial(),
+    );
+    candle.position.set(cx, candleBaseY + CANDELABRA_CANDLE_HEIGHT / 2, cz);
+    group.add(candle);
+
+    const flame = new THREE.Mesh(new THREE.ConeGeometry(CANDELABRA_FLAME_RADIUS, CANDELABRA_FLAME_HEIGHT, 6), candleFlameMaterial());
+    flame.position.set(cx, candleBaseY + CANDELABRA_CANDLE_HEIGHT + CANDELABRA_FLAME_HEIGHT / 2, cz);
+    group.add(flame);
+  }
+
+  return group;
+}
+
 /** Rough footprint half-extents (meters), for callers building the matching
  * `Collider` — kept alongside the factories so the collision box and the
  * visual geometry can't drift apart. */
 export const TABLE_FOOTPRINT = { hx: TABLE_WIDTH / 2, hz: TABLE_DEPTH / 2 };
 export const CHAIR_FOOTPRINT = { hx: CHAIR_SEAT_SIZE / 2, hz: CHAIR_SEAT_SIZE / 2 };
 export const BARREL_FOOTPRINT = { hx: BARREL_RADIUS_BULGE, hz: BARREL_RADIUS_BULGE };
+export const CANDELABRA_FOOTPRINT = { hx: CANDELABRA_TRAY_RADIUS, hz: CANDELABRA_TRAY_RADIUS };
+// No `BANNER_FOOTPRINT` — see the createBanner doc comment above.
