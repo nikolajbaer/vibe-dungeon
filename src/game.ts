@@ -93,12 +93,41 @@ export function startGame(container: HTMLElement): void {
   const renderer = new THREE.WebGLRenderer({ antialias: true });
   renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
   renderer.setSize(window.innerWidth, window.innerHeight);
+  // Issue #64: ACES so the warm torch PointLights (tileBuilder.ts) roll off
+  // into highlights instead of clipping to flat white under the default
+  // NoToneMapping, which read flat/blown-out once the flat daylight-style
+  // lights below were dimmed down to let them actually read as the dominant
+  // light source. Exposure tuned by eye against rendered screenshots (see
+  // PR) — noticeably higher (~1.4+) blows the torch cones out again, lower
+  // buries the point lights' falloff too far into black.
+  renderer.toneMapping = THREE.ACESFilmicToneMapping;
+  renderer.toneMappingExposure = 1.15;
+  // Issue #64: point-light shadows off a handful of torches sell "moody"
+  // far better than lit-but-flat walls (see PR screenshots). Enabling the
+  // shadow map at all measurably cost frame time in this dev container's
+  // software (no-GPU) rendering path, so this deliberately stays on three's
+  // cheaper default (PCFShadowMap, left implicit) rather than
+  // PCFSoftShadowMap, and each torch's shadow map is kept small (256x256,
+  // see addTorch below) — the level's geometry is simple (a handful of
+  // rooms, at most ~2 torches visible at once), so this should be cheap on
+  // real GPU hardware, but there's no perf-profiling infra to confirm that
+  // number here (see PR description).
+  renderer.shadowMap.enabled = true;
   container.appendChild(renderer.domElement);
 
-  scene.add(new THREE.AmbientLight(0xffffff, 0.55));
-  const sun = new THREE.DirectionalLight(0xffffff, 0.85);
-  sun.position.set(5, 10, 3);
-  scene.add(sun);
+  // Issue #64 ("moody dungeon lighting"): the old flat white AmbientLight(0.55)
+  // + outdoor-style DirectionalLight(0.85) lit every room evenly, washing out
+  // the warm torch PointLights (tileBuilder.ts's addTorch/TORCH_* — issue
+  // #41) that were supposed to be the dungeon's actual light source. Dropped
+  // to a dim, cool blue-grey AmbientLight (a "never fully pitch black" floor,
+  // not real illumination) and a very dim HemisphereLight standing in for
+  // soft bounce/sky fill instead of a directional "sun", which doesn't
+  // belong pointed at an indoor dungeon ceiling. Torches now read as the
+  // dominant light in every screenshot (see PR) — pools of warm light around
+  // each one, real darkness in corridors and between rooms.
+  scene.add(new THREE.AmbientLight(0x3a4a6b, 0.22));
+  const skyFill = new THREE.HemisphereLight(0x3a4a6b, 0x0f0c09, 0.3);
+  scene.add(skyFill);
 
   const world = createWorld();
   const level = buildLevel(world, scene);
