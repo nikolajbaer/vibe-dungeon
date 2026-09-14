@@ -46,6 +46,38 @@ const SWORD_SPAWN = { x: 4, z: 7 };
 const GEM_SPAWN = { x: -1, z: 7 };
 const ITEM_HEIGHT = 1; // meters off the floor — roughly a low table/pedestal height
 
+// Generous invisible raycast target radius for item pickup — the sword's
+// actual visual mesh is a thin 0.08x0.08m box, which made `tryInteract`'s
+// camera-forward raycast (doors.ts) frustratingly precise to land on.
+// Wrapping each item's real mesh together with an invisible sphere this
+// size (see `withPickupHitbox` below) means aiming anywhere reasonably
+// close to the item — not pixel-perfect on its thin visible geometry —
+// registers a hit, without changing the interact raycast's mechanics or
+// its 3m range.
+const ITEM_PICKUP_RADIUS = 0.35;
+
+/**
+ * Wraps an item's visual mesh in a `THREE.Group` alongside an invisible,
+ * generously-sized sphere (see `ITEM_PICKUP_RADIUS`) that's the actual, more
+ * forgiving raycast target — three.js's `Raycaster` tests invisible objects
+ * exactly like visible ones (`.visible` only affects rendering), so this
+ * costs nothing at render time. Both the visual mesh and the hitbox carry
+ * `userData.eid` (same convention as every other raycastable mesh — a door
+ * leaf's slab, the NPC's mesh) so either one being hit resolves back to the
+ * same entity; the returned group (not the bare mesh) becomes the item's
+ * `Object3DRef`, so hiding it on pickup (`pickUpItem` in items.ts) still
+ * hides both.
+ */
+function withPickupHitbox(mesh: THREE.Object3D, eid: number): THREE.Group {
+  mesh.userData.eid = eid;
+  const hitbox = new THREE.Mesh(new THREE.SphereGeometry(ITEM_PICKUP_RADIUS, 8, 6));
+  hitbox.visible = false;
+  hitbox.userData.eid = eid;
+  const group = new THREE.Group();
+  group.add(mesh, hitbox);
+  return group;
+}
+
 /** Wires up the ECS world, level, player entity, input sources, and the
  * core game loop (input -> npc -> npc-animation -> movement -> collision ->
  * interact -> sync-to-render -> hud/inventory-sync -> render). This replaces
@@ -147,9 +179,9 @@ export function startGame(container: HTMLElement): void {
     new THREE.BoxGeometry(0.08, 0.08, 1),
     new THREE.MeshStandardMaterial({ color: 0xc8ccd4, metalness: 0.3, roughness: 0.4 }),
   );
-  swordMesh.userData.eid = sword;
-  scene.add(swordMesh);
-  Object3DRef[sword] = swordMesh;
+  const swordGroup = withPickupHitbox(swordMesh, sword);
+  scene.add(swordGroup);
+  Object3DRef[sword] = swordGroup;
 
   const gem = addEntity(world);
   addComponent(world, gem, Position);
@@ -163,9 +195,9 @@ export function startGame(container: HTMLElement): void {
     new THREE.OctahedronGeometry(0.2),
     new THREE.MeshStandardMaterial({ color: 0x35d6c4, metalness: 0.1, roughness: 0.2 }),
   );
-  gemMesh.userData.eid = gem;
-  scene.add(gemMesh);
-  Object3DRef[gem] = gemMesh;
+  const gemGroup = withPickupHitbox(gemMesh, gem);
+  scene.add(gemGroup);
+  Object3DRef[gem] = gemGroup;
 
   // Inventory UI -> ECS action wiring (issue #39): the store can't mutate
   // the ECS world/camera itself (same as everything else under

@@ -6,8 +6,9 @@ export function isTouchDevice(): boolean {
 }
 
 /**
- * A plain tappable circle, bottom-left — the spot the old look-joystick used
- * before issue #31 moved look to drag-anywhere, now open again. Unlike
+ * A plain tappable circle, bottom-right (issue: move controls to
+ * center-left to match Minecraft mobile's convention, freeing up the
+ * bottom-right for this). Unlike
  * `TouchJoystick` it doesn't track drag/deflection at all, just an
  * edge-triggered "was it tapped" flag (issue #48), consumed the same way
  * `TouchLookDrag.consumeTapRequest()` is. Styled to match `.touch-joystick`
@@ -45,12 +46,13 @@ class TouchAttackButton {
 }
 
 /**
- * Sets up the move stick (bottom-right), the attack button (bottom-left,
- * issue #48), and Minecraft-style drag-to-look (anywhere else on screen),
- * but only on touch-capable devices. On desktop, `moveStick`/`lookDrag` stay
- * null and no DOM/listeners are added, so this is inert (and doesn't throw)
- * when touch APIs aren't present. Desktop mouse/keyboard input is handled
- * separately and keeps working regardless.
+ * Sets up the move stick (bottom-left, matching Minecraft mobile's
+ * convention), the attack button (bottom-right), and Minecraft-style
+ * drag-to-look (anywhere else on screen), but only on touch-capable
+ * devices. On desktop, `moveStick`/`lookDrag` stay null and no DOM/listeners
+ * are added, so this is inert (and doesn't throw) when touch APIs aren't
+ * present. Desktop mouse/keyboard input is handled separately and keeps
+ * working regardless.
  */
 export class TouchControls {
   readonly moveStick: TouchJoystick | null = null;
@@ -60,7 +62,7 @@ export class TouchControls {
   constructor(container: HTMLElement) {
     if (!isTouchDevice()) return;
 
-    this.moveStick = new TouchJoystick("right");
+    this.moveStick = new TouchJoystick("left");
     container.appendChild(this.moveStick.el);
 
     this.attackButton = new TouchAttackButton();
