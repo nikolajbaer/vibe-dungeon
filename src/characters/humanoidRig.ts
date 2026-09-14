@@ -243,6 +243,43 @@ function rotationTrack(
   return new THREE.QuaternionKeyframeTrack(`${boneName}.quaternion`, times, values);
 }
 
+/**
+ * Builds a `THREE.QuaternionKeyframeTrack` for one bone that rotates around
+ * more than one local axis at once (e.g. a shoulder both swinging forward
+ * and splaying outward). Two separate `rotationTrack` calls for the same
+ * bone do NOT compose — `AnimationMixer` binds one `PropertyMixer` per
+ * property path, and a clip with two tracks both targeting
+ * `${boneName}.quaternion` has the second silently clobber the first each
+ * frame rather than combining them (confirmed empirically, not assumed —
+ * see the death clip's original single-axis-per-track version, which
+ * quietly dropped half of every multi-axis rotation). This composes the
+ * axes into one quaternion per keyframe instead, in the given order
+ * (`axes[0]` applied first, i.e. innermost).
+ */
+function combinedRotationTrack(
+  boneName: string,
+  times: number[],
+  axes: { axis: THREE.Vector3; anglesRad: number[] }[],
+): THREE.QuaternionKeyframeTrack {
+  for (const { anglesRad } of axes) {
+    if (times.length !== anglesRad.length) {
+      throw new Error(`humanoidRig: combinedRotationTrack length mismatch for ${boneName}`);
+    }
+  }
+  const values: number[] = [];
+  const q = new THREE.Quaternion();
+  const part = new THREE.Quaternion();
+  for (let i = 0; i < times.length; i++) {
+    q.identity();
+    for (const { axis, anglesRad } of axes) {
+      part.setFromAxisAngle(axis, anglesRad[i]);
+      q.multiply(part);
+    }
+    values.push(q.x, q.y, q.z, q.w);
+  }
+  return new THREE.QuaternionKeyframeTrack(`${boneName}.quaternion`, times, values);
+}
+
 /** Builds a `THREE.VectorKeyframeTrack` for one bone's position, offset
  * from its bind-pose position by `deltas[i]` (meters) at `times[i]`. Used
  * for the small vertical hips bob in both clips. */
@@ -412,16 +449,22 @@ function buildDeathClip(bones: THREE.Bone[]): THREE.AnimationClip {
     // — a limp neck rather than staying perfectly rigid with the spine.
     rotationTrack("spine", t, X_AXIS, [deg(0), deg(2), deg(6), deg(8), deg(8)]),
     rotationTrack("chest", t, X_AXIS, [deg(0), deg(4), deg(10), deg(12), deg(12)]),
-    rotationTrack("head", t, X_AXIS, [deg(0), deg(6), deg(14), deg(10), deg(8)]),
-    rotationTrack("head", t, Z_AXIS, [deg(0), deg(3), deg(10), deg(16), deg(18)]),
+    combinedRotationTrack("head", t, [
+      { axis: X_AXIS, anglesRad: [deg(0), deg(6), deg(14), deg(10), deg(8)] },
+      { axis: Z_AXIS, anglesRad: [deg(0), deg(3), deg(10), deg(16), deg(18)] },
+    ]),
 
     // Arms splay outward (local Z = sideways abduction at bind pose) and go
     // loose at the elbow, unevenly between sides so the pose reads as a
     // limp fall rather than a symmetric, deliberate one.
-    rotationTrack("shoulder.L", t, Z_AXIS, [deg(0), deg(-10), deg(-35), deg(-55), deg(-60)]),
-    rotationTrack("shoulder.R", t, Z_AXIS, [deg(0), deg(8), deg(30), deg(45), deg(48)]),
-    rotationTrack("shoulder.L", t, X_AXIS, [deg(0), deg(-4), deg(-12), deg(-15), deg(-15)]),
-    rotationTrack("shoulder.R", t, X_AXIS, [deg(0), deg(6), deg(18), deg(24), deg(26)]),
+    combinedRotationTrack("shoulder.L", t, [
+      { axis: Z_AXIS, anglesRad: [deg(0), deg(-10), deg(-35), deg(-55), deg(-60)] },
+      { axis: X_AXIS, anglesRad: [deg(0), deg(-4), deg(-12), deg(-15), deg(-15)] },
+    ]),
+    combinedRotationTrack("shoulder.R", t, [
+      { axis: Z_AXIS, anglesRad: [deg(0), deg(8), deg(30), deg(45), deg(48)] },
+      { axis: X_AXIS, anglesRad: [deg(0), deg(6), deg(18), deg(24), deg(26)] },
+    ]),
     rotationTrack("forearm.L", t, X_AXIS, [deg(0), deg(10), deg(28), deg(38), deg(40)]),
     rotationTrack("forearm.R", t, X_AXIS, [deg(0), deg(8), deg(20), deg(26), deg(28)]),
   ];
