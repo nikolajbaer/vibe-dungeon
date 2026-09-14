@@ -2,31 +2,11 @@ import * as THREE from "three";
 import * as SkeletonUtils from "three/examples/jsm/utils/SkeletonUtils.js";
 import { hasComponent, type World } from "bitecs";
 import { NPC, Velocity } from "../components";
+import type { HumanoidRig } from "../../characters/humanoidRig";
 
 const MOVING_EPSILON = 0.05; // m/s — Velocity magnitude above this counts as "walking" (issue #54); NpcState
 // alone isn't enough since LOITERING covers both a paused-between-legs NPC and one mid-wander-leg.
 const CROSSFADE_DURATION = 0.2; // seconds
-
-/**
- * Shape of the humanoid rig this module needs (issue #59) — a superset of
- * `characters/humanoidRig.ts`'s current `HumanoidRig`, which only has
- * `idle`/`walk` clips, adding the `hit`/`death` clips issue #58 (art asset,
- * in progress in parallel) will add there. Declared locally, rather than
- * imported from that module, so this file's logic depends only on this
- * shape and needs no change once #58 lands and that module's own
- * `HumanoidRig` grows to match it — see game.ts's temporary local stub
- * (`buildStubCombatClips`) used until then.
- */
-export interface HumanoidRig {
-  mesh: THREE.SkinnedMesh;
-  skeleton: THREE.Skeleton;
-  clips: {
-    idle: THREE.AnimationClip;
-    walk: THREE.AnimationClip;
-    hit: THREE.AnimationClip;
-    death: THREE.AnimationClip;
-  };
-}
 
 /** Which one-shot clip, if any, is currently overriding idle/walk. `hit`
  * clears itself (back to idle/walk) once its clip finishes; `death` never

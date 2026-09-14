@@ -8,7 +8,7 @@ import { collisionSystem } from "./ecs/systems/collision";
 import { doorAnimationSystem, tryInteract } from "./ecs/systems/doors";
 import { tryMeleeAttack } from "./ecs/systems/combat";
 import { npcSystem } from "./ecs/systems/npc";
-import { createAnimatedNpcMesh, getNpcAnimationDebugState, npcAnimationSystem, type HumanoidRig } from "./ecs/systems/npcAnimation";
+import { createAnimatedNpcMesh, getNpcAnimationDebugState, npcAnimationSystem } from "./ecs/systems/npcAnimation";
 import { corpseCleanupSystem } from "./ecs/systems/corpseCleanup";
 import { createHumanoidRig } from "./characters/humanoidRig";
 import { equipItem, equipToOpenHandSlot, unequipItem, viewmodelSwingSystem } from "./ecs/systems/items";
@@ -45,45 +45,6 @@ const NPC_HEALTH = 30; // issue #48 — first thing that can actually be damaged
 const SWORD_SPAWN = { x: 4, z: 7 };
 const GEM_SPAWN = { x: -1, z: 7 };
 const ITEM_HEIGHT = 1; // meters off the floor — roughly a low table/pedestal height
-
-/**
- * Issue #58 (art asset, in progress in parallel) will add real `hit`/`death`
- * clips to `characters/humanoidRig.ts`'s `HumanoidRig`; until it lands, that
- * module's `createHumanoidRig()` only returns `idle`/`walk`. Per issue #59
- * ("don't block on #58"), this builds a temporary local stand-in — a single
- * simple bone-rotation track for each, on the rig's own "hips" bone, just
- * enough to be a visibly distinct pose and to exercise real
- * `THREE.LoopOnce`/`finished`-event timing end-to-end — matching the
- * *shape* `npcAnimationSystem` (`ecs/systems/npcAnimation.ts`) needs
- * (`HumanoidRig` there, a superset of the real module's current one).
- *
- * Once #58 merges and `characters/humanoidRig.ts`'s own `HumanoidRig` grows
- * real `hit`/`death` clips, this function (and the merge below that calls
- * it) should simply be deleted and `createHumanoidRig()`'s result passed to
- * `createAnimatedNpcMesh` directly — none of `npcAnimation.ts`/`combat.ts`'s
- * logic depends on anything stub-specific.
- */
-function buildStubCombatClips(skeleton: THREE.Skeleton): { hit: THREE.AnimationClip; death: THREE.AnimationClip } {
-  const hips = skeleton.getBoneByName("hips");
-  const boneName = hips?.name ?? "hips";
-  const rotationTrack = (times: number[], anglesDeg: number[]) => {
-    const axis = new THREE.Vector3(1, 0, 0);
-    const q = new THREE.Quaternion();
-    const values: number[] = [];
-    for (const angleDeg of anglesDeg) {
-      q.setFromAxisAngle(axis, (angleDeg * Math.PI) / 180);
-      values.push(q.x, q.y, q.z, q.w);
-    }
-    return new THREE.QuaternionKeyframeTrack(`${boneName}.quaternion`, times, values);
-  };
-
-  // A brief backward-and-recover nod, like flinching away from the hit.
-  const hit = new THREE.AnimationClip("hit-stub", 0.3, [rotationTrack([0, 0.15, 0.3], [0, -20, 0])]);
-  // A slow topple forward into a "lying down" pose, held on the final frame
-  // (`clampWhenFinished`, set on the action in npcAnimation.ts).
-  const death = new THREE.AnimationClip("death-stub", 0.6, [rotationTrack([0, 0.6], [0, 90])]);
-  return { hit, death };
-}
 
 /** Wires up the ECS world, level, player entity, input sources, and the
  * core game loop (input -> npc -> npc-animation -> movement -> collision ->
@@ -161,15 +122,9 @@ export function startGame(container: HTMLElement): void {
 
   // Issue #54: animated idle/walk mesh instead of the old plain
   // CylinderGeometry placeholder, backed by the procedural humanoid rig
-  // (issue #53, src/characters/humanoidRig.ts). Issue #59 adds hit/death
-  // one-shots on top — see `buildStubCombatClips` above for why those are
-  // merged in here rather than coming from `createHumanoidRig()` itself.
-  const baseRig = createHumanoidRig();
-  const humanoidRig: HumanoidRig = {
-    mesh: baseRig.mesh,
-    skeleton: baseRig.skeleton,
-    clips: { ...baseRig.clips, ...buildStubCombatClips(baseRig.skeleton) },
-  };
+  // (issue #53, src/characters/humanoidRig.ts), which also carries the
+  // hit/death one-shots (issue #58) `createAnimatedNpcMesh` wires up.
+  const humanoidRig = createHumanoidRig();
   const npcMesh = createAnimatedNpcMesh(humanoidRig, npc); // same userData.eid convention doors' slab meshes use
   scene.add(npcMesh);
   Object3DRef[npc] = npcMesh;
