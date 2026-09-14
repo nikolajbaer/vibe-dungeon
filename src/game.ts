@@ -140,8 +140,9 @@ export function startGame(container: HTMLElement): void {
   // still read as too dark day-to-day (own play-testing, not a pixel-clipping
   // bug this time) — torch-adjacent walls stay dramatically brighter by
   // comparison either way, so the mood/contrast holds at both settings.
-  scene.add(new THREE.AmbientLight(0x3a4a6b, 1.3));
-  const skyFill = new THREE.HemisphereLight(0x3a4a6b, 0x241f1a, 0.8);
+  // Doubled again (1.3->2.6, 0.8->1.6) per further "still too dark" feedback.
+  scene.add(new THREE.AmbientLight(0x3a4a6b, 2.6));
+  const skyFill = new THREE.HemisphereLight(0x3a4a6b, 0x241f1a, 1.6);
   scene.add(skyFill);
 
   const world = createWorld();
