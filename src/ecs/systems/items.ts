@@ -2,6 +2,7 @@ import * as THREE from "three";
 import { addComponent, hasComponent, query, type World } from "bitecs";
 import { Carried, Item, Object3DRef, Viewmodel, type CarriedSlot } from "../components";
 import { ITEM_TYPES } from "../../items/itemTypes";
+import { createSwordMesh } from "../../items/swordModel";
 
 export type HandSlot = "hand-left" | "hand-right";
 
@@ -31,10 +32,22 @@ export function pickUpItem(world: World, itemEid: number, ownerEid: number): voi
 
 /** Camera-relative offsets for each hand's viewmodel — lower corners of the
  * view, angled slightly inward, so a mesh in either hand reads as "held" up
- * close to the camera without covering the center of the screen. */
+ * close to the camera without covering the center of the screen.
+ *
+ * Retuned for issue #65's new sword shape (see swordModel.ts): unlike the
+ * old flat symmetric plank, the sword mesh's origin sits at its grip and
+ * most of its length is the blade extending away from that origin, so a
+ * naive Euler tilt (the old values) left almost the entire weapon — blade,
+ * crossguard, grip — off-frame, with only the tip poking into view. These
+ * `rot` values instead came from actually posing the mesh: put its grip at
+ * `pos`, call `Object3D.prototype.lookAt` to aim the blade at a point up and
+ * into the scene ahead of the camera, screenshot it, and read back the
+ * resulting Euler angles (see this issue's PR description for the exact
+ * before/after renders) — repeat for any future viewmodel mesh whose shape
+ * changes enough to need this redone, rather than hand-picking numbers. */
 const VIEWMODEL_OFFSET: Record<HandSlot, { pos: THREE.Vector3Tuple; rot: THREE.EulerTuple }> = {
-  "hand-right": { pos: [0.35, -0.35, -0.75], rot: [-0.5, 0, 0.65] },
-  "hand-left": { pos: [-0.35, -0.35, -0.75], rot: [-0.5, 0, -0.65] },
+  "hand-right": { pos: [0.26, -0.3, -0.4], rot: [-2.6135, -0.4198, -2.9082] },
+  "hand-left": { pos: [-0.26, -0.3, -0.4], rot: [-2.6135, 0.4198, 2.9082] },
 };
 
 /** Builds a first-person viewmodel mesh for an item type, or `undefined` if
@@ -43,10 +56,12 @@ const VIEWMODEL_OFFSET: Record<HandSlot, { pos: THREE.Vector3Tuple; rot: THREE.E
  * the world-item meshes in game.ts (no texture assets). */
 function createViewmodelMesh(itemTypeId: string): THREE.Object3D | undefined {
   if (itemTypeId === "sword") {
-    return new THREE.Mesh(
-      new THREE.BoxGeometry(0.05, 0.05, 0.85),
-      new THREE.MeshStandardMaterial({ color: 0xc8ccd4, metalness: 0.3, roughness: 0.4 }),
-    );
+    // Same shared shape as the world pickup mesh (game.ts), scaled down a
+    // touch since it sits much closer to the camera here — an unscaled
+    // sword held at VIEWMODEL_OFFSET's distance reads as oversized.
+    const mesh = createSwordMesh();
+    mesh.scale.setScalar(0.85);
+    return mesh;
   }
   return undefined;
 }

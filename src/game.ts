@@ -12,6 +12,7 @@ import { createAnimatedNpcMesh, getNpcAnimationDebugState, npcAnimationSystem } 
 import { corpseCleanupSystem } from "./ecs/systems/corpseCleanup";
 import { createHumanoidRig } from "./characters/humanoidRig";
 import { equipItem, equipToOpenHandSlot, unequipItem, viewmodelSwingSystem } from "./ecs/systems/items";
+import { createSwordMesh } from "./items/swordModel";
 import { syncSystem } from "./ecs/systems/sync";
 import { hudSync } from "./ecs/systems/hudSync";
 import { buildLevel } from "./level/level";
@@ -175,10 +176,7 @@ export function startGame(container: HTMLElement): void {
   Position.y[sword] = ITEM_HEIGHT;
   Position.z[sword] = SWORD_SPAWN.z;
   Item.itemTypeId[sword] = "sword";
-  const swordMesh = new THREE.Mesh(
-    new THREE.BoxGeometry(0.08, 0.08, 1),
-    new THREE.MeshStandardMaterial({ color: 0xc8ccd4, metalness: 0.3, roughness: 0.4 }),
-  );
+  const swordMesh = createSwordMesh();
   const swordGroup = withPickupHitbox(swordMesh, sword);
   scene.add(swordGroup);
   Object3DRef[sword] = swordGroup;
