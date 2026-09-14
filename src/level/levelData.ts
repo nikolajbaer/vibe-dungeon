@@ -14,6 +14,22 @@ import type { TileInstance } from "./occupancy";
 // consequence of reusing one room type rather than a deviation to work
 // around.
 
+// First dungeon expansion (issue #71): a branch off the corridor's middle
+// cell (world cell (0,-2)), turning the straight room-a/corridor/room-b line
+// into a real choice point. `corridor`'s `id`/`originCell`/`rotation`/
+// `sectorId` are all unchanged from the original layout — only its
+// `tileTypeId` moved from `hallway` to `hallway_junction` (a strict superset
+// of `hallway`'s openings, see tiles.ts), so both original doors, the player
+// spawn, the NPC, both world items, and room-a's furniture are all
+// unaffected. See docs/LEVEL_DESIGN.md's "worked example" section for the
+// reasoning behind retrofitting the corridor rather than room-a/room-b.
+//
+// The junction's new east-facing opening (at world cell (0,-2)/(1,-2)) feeds
+// a `hallway` instance rotated 90 degrees ("branch-corridor", cells
+// (1,-2)-(3,-2), running east-west) into a new small room, "side-chamber"
+// (`side_chamber`, cells (4,-2)-(5,-1)), whose one door (local west, z=0)
+// meets the branch corridor's east end at world cell (3,-2)/(4,-2).
+
 export const LEVEL_TILES: TileInstance[] = [
   {
     id: "room-a",
@@ -24,7 +40,7 @@ export const LEVEL_TILES: TileInstance[] = [
   },
   {
     id: "corridor",
-    tileTypeId: "hallway",
+    tileTypeId: "hallway_junction",
     originCell: { x: 0, z: -3 },
     rotation: 0,
     sectorId: "corridor",
@@ -35,6 +51,20 @@ export const LEVEL_TILES: TileInstance[] = [
     originCell: { x: -1, z: -6 },
     rotation: 180,
     sectorId: "room-b",
+  },
+  {
+    id: "branch-corridor",
+    tileTypeId: "hallway",
+    originCell: { x: 1, z: -2 },
+    rotation: 90,
+    sectorId: "branch-corridor",
+  },
+  {
+    id: "side-chamber",
+    tileTypeId: "side_chamber",
+    originCell: { x: 4, z: -2 },
+    rotation: 0,
+    sectorId: "side-chamber",
   },
 ];
 
