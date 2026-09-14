@@ -35,6 +35,12 @@ const DOOR_HEIGHT = 2.2;
 function addWall(world: World, scene: THREE.Scene, cx: number, cz: number, hx: number, hz: number, height: number, baseY: number = 0, solid: boolean = true): void {
   const mesh = new THREE.Mesh(new THREE.BoxGeometry(hx * 2, height, hz * 2), wallMaterial());
   mesh.position.set(cx, baseY + height / 2, cz);
+  // Issue #64: lets torch PointLights (see addTorch below) actually cast
+  // shadows off walls — the moody "pools of light" look falls flat without
+  // them, since a flat-lit wall face reads the same near a torch or far
+  // from one.
+  mesh.castShadow = true;
+  mesh.receiveShadow = true;
   scene.add(mesh);
 
   if (!solid) return;
@@ -57,6 +63,10 @@ function addWall(world: World, scene: THREE.Scene, cx: number, cz: number, hx: n
 function addSlab(scene: THREE.Scene, cx: number, cz: number, hx: number, hz: number, y: number, material: THREE.Material): void {
   const mesh = new THREE.Mesh(new THREE.BoxGeometry(hx * 2, 0.2, hz * 2), material);
   mesh.position.set(cx, y, cz);
+  // Issue #64: floors/ceilings receive torch shadows (a ceiling can also
+  // receive from anything below it, harmless either way); neither needs to
+  // cast since nothing subsequently placed relies on their shadow.
+  mesh.receiveShadow = true;
   scene.add(mesh);
 }
 
@@ -139,6 +149,18 @@ function addTorch(
 
   const light = new THREE.PointLight(TORCH_LIGHT_COLOR, TORCH_LIGHT_INTENSITY, TORCH_LIGHT_RANGE, 2);
   light.position.set(offsetX * TORCH_BRACKET_LENGTH, TORCH_FLAME_HEIGHT / 2, offsetZ * TORCH_BRACKET_LENGTH);
+  // Issue #64: cast real shadows off the walls/floor/ceiling (see addWall/
+  // addSlab) so torchlight actually reads as directional, not just a lit
+  // sphere floating in space. Only a handful of torches ever exist at once
+  // (TORCHES_PER_ROOM, room-sized instances only), so a modest per-light
+  // shadow map is cheap; `shadow.camera.far` matches the light's own falloff
+  // range since nothing past it is lit brightly enough for a missing shadow
+  // to be visible anyway.
+  light.castShadow = true;
+  light.shadow.mapSize.set(256, 256);
+  light.shadow.camera.near = 0.1;
+  light.shadow.camera.far = TORCH_LIGHT_RANGE;
+  light.shadow.bias = -0.002;
   group.add(light);
 }
 
