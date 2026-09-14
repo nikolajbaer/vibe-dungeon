@@ -80,7 +80,55 @@ export const GREAT_HALL: TileType = {
   },
 };
 
+/**
+ * A T-junction variant of {@link HALLWAY} (issue #71): the same 3m x 9m
+ * footprint and the same north/south openings (so it's a strict superset of
+ * `HALLWAY`'s connections — anything already plugged into a hallway's ends
+ * still fits), plus one more opening on the middle segment of its east face.
+ * Used to retrofit an existing straight corridor into a branch point without
+ * moving it — swap the instance's `tileTypeId` from `"hallway"` to
+ * `"hallway_junction"` and leave `originCell`/`rotation` untouched (see
+ * docs/LEVEL_DESIGN.md's "current limitation" and "worked example" sections
+ * for why a face-map change, not a new instance, is what branching off an
+ * existing hallway actually requires).
+ */
+export const HALLWAY_JUNCTION: TileType = {
+  id: "hallway_junction",
+  w: 1,
+  d: 3,
+  h: 1,
+  faces: {
+    north: ["opening"],
+    south: ["opening"],
+    east: ["wall", "opening", "wall"],
+    west: wallsOf(3),
+  },
+};
+
+/**
+ * A small 6m x 6m side room (2x2 cells, unrotated) with a 3m ceiling — half
+ * `GREAT_HALL`'s footprint and ceiling height, deliberately, so it reads as
+ * a distinct kind of space (a cramped side chamber) rather than a smaller
+ * copy of the great hall (issue #71). A single door sits on the near
+ * (local z=0) segment of its west face; the far segment and the other three
+ * faces are solid walls, so this type has exactly one connection point.
+ */
+export const SIDE_CHAMBER: TileType = {
+  id: "side_chamber",
+  w: 2,
+  d: 2,
+  h: 1,
+  faces: {
+    north: wallsOf(2),
+    south: wallsOf(2),
+    east: wallsOf(2),
+    west: ["door", "wall"],
+  },
+};
+
 export const TILE_TYPES: Record<string, TileType> = {
   [HALLWAY.id]: HALLWAY,
   [GREAT_HALL.id]: GREAT_HALL,
+  [HALLWAY_JUNCTION.id]: HALLWAY_JUNCTION,
+  [SIDE_CHAMBER.id]: SIDE_CHAMBER,
 };

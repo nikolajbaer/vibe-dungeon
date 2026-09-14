@@ -170,4 +170,85 @@ export function addDecorations(world: World, scene: THREE.Scene): void {
 
   addBarrel(world, scene, -2.3, -12.0);
   addBarrel(world, scene, -2.3, -13.2);
+
+  addSideChamberClutter(world, scene);
+}
+
+// --- Side-chamber clutter (issue #71) --------------------------------------
+// A one-off decorative touch for the new "side-chamber" room (see
+// src/level/levelData.ts/tiles.ts) — a small stack of supply crates, kept as
+// its own function (called once above) rather than folded into
+// addDecorations()'s body, so this and any parallel furniture/decoration
+// work (issue #70) land on different lines.
+//
+// Side-chamber (side_chamber, unrotated, originCell {x:4,z:-2}) spans world
+// x in [12,18], z in [-6,0], with its one door on the west face's near
+// (z<0 half) segment — world x=12, z in [-6,-3]. This clutter sits in the
+// room's south-east corner (x roughly 16-17.4, z roughly -5.6 to -4.6),
+// clear of the door and its swing arc, clear of the room's other three
+// walls, and clear of the branch corridor's approach.
+
+let crateMat: THREE.MeshStandardMaterial | undefined;
+function crateMaterial(): THREE.MeshStandardMaterial {
+  return (crateMat ??= new THREE.MeshStandardMaterial({ color: 0x6b4423, roughness: 0.9, metalness: 0 }));
+}
+
+const CRATE_SIZE = 0.6;
+
+/** A simple slatted-look crate: one box plus thin raised edge strips on its
+ * top face (so it doesn't read as a bare cube next to the room's stone
+ * walls), stackable by its exact `CRATE_SIZE` height. */
+function createCrate(): THREE.Group {
+  const group = new THREE.Group();
+  const mat = crateMaterial();
+
+  const body = new THREE.Mesh(new THREE.BoxGeometry(CRATE_SIZE, CRATE_SIZE, CRATE_SIZE), mat);
+  body.position.y = CRATE_SIZE / 2;
+  group.add(body);
+
+  const stripThickness = 0.035;
+  const stripY = CRATE_SIZE - stripThickness / 2;
+  for (const axis of ["x", "z"] as const) {
+    for (const sign of [-1, 1]) {
+      const strip = new THREE.Mesh(
+        new THREE.BoxGeometry(
+          axis === "x" ? CRATE_SIZE : stripThickness,
+          stripThickness,
+          axis === "z" ? CRATE_SIZE : stripThickness,
+        ),
+        mat,
+      );
+      strip.position.set(axis === "x" ? 0 : sign * (CRATE_SIZE / 2 - stripThickness / 2), stripY, axis === "z" ? 0 : sign * (CRATE_SIZE / 2 - stripThickness / 2));
+      group.add(strip);
+    }
+  }
+
+  return group;
+}
+
+function addCrate(world: World, scene: THREE.Scene, x: number, y: number, z: number, yaw: number): void {
+  const mesh = createCrate();
+  mesh.position.set(x, y, z);
+  mesh.rotation.y = yaw;
+  scene.add(mesh);
+  if (y === 0) {
+    // Only the bottom-most crate of a stack gets a collider — a stacked
+    // crate on top has nothing at floor level to collide with, matching how
+    // props.ts callers only ever collide the object actually touching the
+    // floor.
+    addPropCollider(world, mesh, x, z, CRATE_SIZE / 2, CRATE_SIZE / 2);
+  }
+}
+
+/** Places a small stack of supply crates in side-chamber's south-east
+ * corner — a quiet, unpopulated storeroom-style detail (no NPC/item here;
+ * see docs/LEVEL_DESIGN.md's pacing pillar) that also gives the room a
+ * distinct look from room-a's table-and-chairs furniture grouping. */
+function addSideChamberClutter(world: World, scene: THREE.Scene): void {
+  const baseX = 16.7;
+  const baseZ = -5.0;
+
+  addCrate(world, scene, baseX, 0, baseZ, 0.15);
+  addCrate(world, scene, baseX - 0.05, CRATE_SIZE, baseZ + 0.05, -0.35);
+  addBarrel(world, scene, baseX - 0.9, baseZ - 0.3);
 }
