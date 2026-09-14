@@ -125,8 +125,20 @@ export function startGame(container: HTMLElement): void {
   // belong pointed at an indoor dungeon ceiling. Torches now read as the
   // dominant light in every screenshot (see PR) — pools of warm light around
   // each one, real darkness in corridors and between rooms.
-  scene.add(new THREE.AmbientLight(0x3a4a6b, 0.22));
-  const skyFill = new THREE.HemisphereLight(0x3a4a6b, 0x0f0c09, 0.3);
+  //
+  // The first-landed values here (Ambient 0.22 / Hemisphere ground 0x0f0c09
+  // at 0.3) still measured as literal (0,0,0)-(3,1,1) pixels — not just
+  // "very dark" but fully clipped to black — on a door a couple meters away
+  // with no torch nearby, once run through ACESFilmicToneMapping's shadow
+  // rolloff (verified by sampling the actual rendered screenshot's raw
+  // pixels, not by eyeballing a thumbnail). That fails the "still readable"
+  // bar: a player standing in front of a door they need to open shouldn't
+  // see undifferentiated black. Raised the ambient intensity and lightened
+  // the hemisphere's ground color so there's a real, if dim, non-zero floor
+  // everywhere — re-verified the same shot no longer clips to black while a
+  // torch-adjacent wall is still dramatically brighter (see PR follow-up).
+  scene.add(new THREE.AmbientLight(0x3a4a6b, 1.0));
+  const skyFill = new THREE.HemisphereLight(0x3a4a6b, 0x241f1a, 0.6);
   scene.add(skyFill);
 
   const world = createWorld();
