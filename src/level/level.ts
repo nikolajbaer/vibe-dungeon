@@ -3,23 +3,19 @@ import type { World } from "bitecs";
 import { UNIT } from "./tiles";
 import { buildOccupancyIndex, validateOccupancy, sectorAt, type OccupancyIndex } from "./occupancy";
 import { buildGeometryFromOccupancy } from "./tileBuilder";
-import { LEVEL_TILES, LEVEL_SPAWN } from "./levelData";
 import { spawnProps, spawnItems } from "./spawning";
-import { ALL_PROPS, ALL_ITEM_SPAWNS } from "./rooms";
+import { ALL_TILE_INSTANCES, ALL_PROPS, ALL_ITEM_SPAWNS, LEVEL_SPAWN } from "./rooms";
+import type { LevelSpawn } from "./placementTypes";
 
-// Builds the level from tile instances (issue #21): places LEVEL_TILES
-// into an occupancy index, validates it (the load-time "level linter" —
-// throws with a clear message if an author gets adjacent faces wrong),
-// then decomposes it into the same wall/floor/ceiling/door boxes the old
-// hand-placed level used to build directly. See levelData.ts for the
-// authored layout and README's "Tile-based level system" design notes for
-// the format itself.
-
-export interface LevelSpawn {
-  x: number;
-  z: number;
-  yaw: number;
-}
+// Builds the level from tile instances (issue #21): places every room's
+// tile instances (`ALL_TILE_INSTANCES`, auto-aggregated from
+// `src/level/rooms/*.ts` by `./rooms.ts`) into an occupancy index, validates
+// it (the load-time "level linter" — throws with a clear message if an
+// author gets adjacent faces wrong), then decomposes it into the same
+// wall/floor/ceiling/door boxes the old hand-placed level used to build
+// directly. See `src/level/rooms/` for the authored layout and README's
+// "Tile-based level system" / "Asset-authoring system" design notes for the
+// format itself.
 
 export interface Level {
   spawn: LevelSpawn;
@@ -30,7 +26,7 @@ export interface Level {
 }
 
 export function buildLevel(world: World, scene: THREE.Scene): Level {
-  const occupancy: OccupancyIndex = buildOccupancyIndex(LEVEL_TILES);
+  const occupancy: OccupancyIndex = buildOccupancyIndex(ALL_TILE_INSTANCES);
   validateOccupancy(occupancy);
   buildGeometryFromOccupancy(world, scene, occupancy);
   spawnProps(world, scene, ALL_PROPS);

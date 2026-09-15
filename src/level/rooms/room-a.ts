@@ -1,13 +1,16 @@
 import type { RoomContent } from "../placementTypes";
 
-// Room-a's content (issue #40, extended by #70 and #75): a small rest-area
+// Room-a: the level's starting room (issue #21), plus a small rest-area
 // furniture grouping, a couple of west-wall touches, and the level's first
-// two world items.
+// two world items (issue #40, extended by #70 and #75). Room A
+// (great_hall, unrotated) has its one door on its south face at grid x=0;
+// see room-b.ts/corridor.ts for how the rest of the original layout
+// connects to it, and docs/LEVEL_DESIGN.md for the tile system itself.
 //
-// Room-a (great_hall, unrotated, originCell {x:-1,z:0} — see
-// ../levelData.ts) spans world x in [-3,6], z in [0,9], with its one door on
-// the south face (world z=0, x in [0,3]) and interior clear space roughly
-// [-2.85,5.85] x [0.15,8.85] once wall thickness is accounted for.
+// Room-a (great_hall, unrotated, originCell {x:-1,z:0}) spans world x in
+// [-3,6], z in [0,9], with its one door on the south face (world z=0, x in
+// [0,3]) and interior clear space roughly [-2.85,5.85] x [0.15,8.85] once
+// wall thickness is accounted for.
 //
 // Other hardcoded occupants of this room (src/game.ts): the player spawns
 // at (1.5,7.5) and the test NPC loiters around (1.5,3.5), wandering within
@@ -25,6 +28,19 @@ const tableX = 4.3;
 const tableZ = 7.2;
 
 const roomA: RoomContent = {
+  tiles: [
+    {
+      id: "room-a",
+      tileTypeId: "great_hall",
+      originCell: { x: -1, z: 0 },
+      rotation: 0,
+      sectorId: "room-a",
+    },
+  ],
+  // Spawn point, inside room-a (9m x 9m), facing south (-z) down the
+  // corridor — matches the old level's "start in room A, corridor heads
+  // away from you" feel.
+  spawn: { x: 1.5, z: 7.5, yaw: 0 },
   props: [
     { id: "table", x: tableX, z: tableZ },
     // Chair facing north into the table, seated on the table's south side.

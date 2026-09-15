@@ -1,8 +1,9 @@
 import * as THREE from "three";
 import { addComponent, addEntity, type World } from "bitecs";
 import { Position, Collider, Solid, Door, DoorState, Object3DRef } from "../ecs/components";
-import { UNIT, TILE_TYPES } from "./tiles";
+import { UNIT } from "./tiles";
 import type { FaceKind } from "./tiles";
+import { TILE_TYPES } from "./tileTypeRegistry";
 import type { OccupancyIndex } from "./occupancy";
 import { wallMaterial, floorMaterial, ceilingMaterial, doorMaterial } from "./materials";
 

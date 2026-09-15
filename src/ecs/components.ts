@@ -121,8 +121,8 @@ export const DeathSector = {
  * `ITEM_REGISTRY` (`src/assets/itemRegistry.ts`), the auto-discovered
  * registry of item asset data (name/icon/equip slot/mesh factories), the
  * same way `NPC`/`Door` keep their per-instance state in components here
- * while `src/level/tiles.ts` keeps shared *type* data (`TILE_TYPES`) in its
- * own module. An item lying in the
+ * while `src/level/tileTypeRegistry.ts` keeps shared *type* data
+ * (`TILE_TYPES`) in its own module. An item lying in the
  * world has `Item` + `Position` + `Object3DRef` but no `Carried` — see
  * `Carried` below for what picking it up adds. */
 export const Item = {
