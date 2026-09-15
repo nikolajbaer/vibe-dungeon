@@ -244,11 +244,17 @@ occupancy index are all generic over whatever's in `TILE_TYPES`.
 6. If the new instance is room-sized (`w > 1 && d > 1` on its type),
    torches are automatic — verify they actually appear rather than assuming
    it from reading the code. If you want a bespoke decorative touch beyond
-   torches, add a small dedicated function in `src/level/decorations.ts`
-   (same pattern as `addDecorations()`'s furniture group) and call it once
-   from `addDecorations()` — keep new decoration code in its own function
-   rather than growing the existing one in place, so unrelated level-art
-   work doesn't collide on the same lines.
+   torches: create `src/level/rooms/<your-room>.ts` default-exporting a
+   `RoomContent` (`props`/`items` arrays referencing furniture/item asset
+   ids by `id`, plus `x`/`z`/`rotation`/`params` — see
+   `src/level/placementTypes.ts` and any existing file under `rooms/` for
+   the shape) — it's auto-discovered by `src/level/rooms.ts`, so this is a
+   brand-new file, never an edit to a shared one. If the furniture/item you
+   want doesn't exist yet, add it as its own file under
+   `src/assets/furniture/`/`src/assets/items/` first (see the "Asset-authoring
+   system" section of the README) — same rule: a new file, not an edit to a
+   shared registry. This is what keeps unrelated level-art work from
+   colliding on the same lines.
 
 ## Worked example: the first branch off the original line
 

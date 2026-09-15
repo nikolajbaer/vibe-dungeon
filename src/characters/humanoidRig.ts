@@ -4,7 +4,7 @@ import { mergeGeometries } from "three/examples/jsm/utils/BufferGeometryUtils.js
 // Procedurally-built bipedal humanoid rig (issue #53) — a hand-authored bone
 // skeleton, a single rigid-skinned THREE.SkinnedMesh (box-per-segment, one
 // bone weight per vertex, no smooth blending — same "placeholder-grade but
-// readable" visual bar as src/props/props.ts's furniture), and four
+// readable" visual bar as src/assets/furniture/'s props), and four
 // hand-keyframed THREE.AnimationClips ("idle", "walk" from issue #53; "hit",
 // "death" from issue #58). No external DCC tool, no imported mesh files —
 // every vertex and every keyframe here is authored directly in code,
@@ -110,7 +110,7 @@ function buildSkeleton(): { bones: THREE.Bone[]; skeleton: THREE.Skeleton } {
 let skinMat: THREE.MeshStandardMaterial | undefined;
 
 /** Shared flat placeholder "skin" material, cached the same way
- * `woodMaterial()` is in src/props/props.ts. */
+ * `woodMaterial()` is in src/assets/furniture/table.ts. */
 function skinMaterial(): THREE.MeshStandardMaterial {
   return (skinMat ??= new THREE.MeshStandardMaterial({ color: 0xd9a066, roughness: 0.8, metalness: 0 }));
 }

@@ -4,7 +4,8 @@ import { UNIT } from "./tiles";
 import { buildOccupancyIndex, validateOccupancy, sectorAt, type OccupancyIndex } from "./occupancy";
 import { buildGeometryFromOccupancy } from "./tileBuilder";
 import { LEVEL_TILES, LEVEL_SPAWN } from "./levelData";
-import { addDecorations } from "./decorations";
+import { spawnProps, spawnItems } from "./spawning";
+import { ALL_PROPS, ALL_ITEM_SPAWNS } from "./rooms";
 
 // Builds the level from tile instances (issue #21): places LEVEL_TILES
 // into an occupancy index, validates it (the load-time "level linter" —
@@ -32,7 +33,8 @@ export function buildLevel(world: World, scene: THREE.Scene): Level {
   const occupancy: OccupancyIndex = buildOccupancyIndex(LEVEL_TILES);
   validateOccupancy(occupancy);
   buildGeometryFromOccupancy(world, scene, occupancy);
-  addDecorations(world, scene);
+  spawnProps(world, scene, ALL_PROPS);
+  spawnItems(world, scene, ALL_ITEM_SPAWNS);
 
   return {
     spawn: LEVEL_SPAWN,
