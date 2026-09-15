@@ -4,8 +4,9 @@ Written for whoever (human or agent) builds the next piece of the dungeon.
 Pitched at the same level of concreteness as the README's Design Notes: this
 is a working reference for the tile system as it actually exists today, not
 generic level-design advice. Read `src/level/tiles.ts`, `src/level/occupancy.ts`,
-and `src/level/levelData.ts` alongside this doc — it points at line-level
-specifics rather than restating the whole files.
+`src/level/tileTypeRegistry.ts`, and any file under `src/level/rooms/`
+alongside this doc — it points at line-level specifics rather than
+restating the whole files.
 
 ## Design pillars
 
@@ -118,7 +119,7 @@ specific things that trip people up:
   now (a real future feature, not a hack to bolt on here).
 - **Torches are automatic, not authored.** `tileBuilder.ts` decides torch
   placement itself, per tile *instance*, from the already-built wall
-  segments — nothing in `tiles.ts`/`levelData.ts` places a torch directly.
+  segments — nothing under `tileTypes/`/`rooms/` places a torch directly.
   A tile instance is "room-sized" (torch-eligible) when its **type's**
   unrotated `w > 1 && d > 1` (`isRoomSizedTileType()`) — a 1-wide corridor
   never qualifies, regardless of rotation or length. Up to
@@ -166,8 +167,8 @@ less like a hallway and more like a dungeon.
 
 ## How rotation works (worked from the existing level)
 
-`room-b` (`levelData.ts`) is the existing example: same `great_hall` type as
-`room-a`, `rotation: 180`. `GREAT_HALL`'s door is on its local **south**
+`room-b` (`src/level/rooms/room-b.ts`) is the existing example: same
+`great_hall` type as `room-a`, `rotation: 180`. `great_hall`'s door is on its local **south**
 face; a 180° rotation maps local south → world north (and local north →
 world south, local east ↔ local west) — see `rotateOnce()` in
 `occupancy.ts` for the exact per-cell-side mapping it's built from. So
@@ -185,51 +186,69 @@ type.
 
 ## How to add a new tile type
 
-1. Open `src/level/tiles.ts`. Decide the unrotated footprint: `w` (local x,
-   cells), `d` (local z, cells), `h` (ceiling height, cells — `UNIT * h`
-   meters).
+Tile types are auto-discovered, one per file, the same way item/furniture
+assets are (see the README's "Asset-authoring system" section) — you never
+edit a shared registry.
+
+1. Create `src/level/tileTypes/<your_id>.ts` (filename matches the type's
+   `id`, snake_case — see `great_hall.ts`/`hallway_junction.ts` for the
+   convention). Decide the unrotated footprint: `w` (local x, cells), `d`
+   (local z, cells), `h` (ceiling height, cells — `UNIT * h` meters).
 2. Write the face map: `faces.north`/`faces.south` need exactly `w` entries
    each (indexed by local x, increasing); `faces.east`/`faces.west` need
    exactly `d` entries each (indexed by local z, increasing). Every entry is
-   `"wall"`, `"opening"`, or `"door"`. Use the `wallsOf(n)` helper for an
-   all-solid side. Put a door/opening only where you actually intend
+   `"wall"`, `"opening"`, or `"door"`. Import `wallsOf` from `../tiles` for
+   an all-solid side. Put a door/opening only where you actually intend
    something to connect — every open segment must eventually border either
    another instance's matching open segment, or nothing at all (which will
    throw at load time, on purpose, until you place the other side).
-3. Add it to the `TILE_TYPES` registry at the bottom of the file (the
-   `[TYPE.id]: TYPE` pattern already there) — instances reference types by
-   `id` string, and an unknown id throws at load time too.
-4. Write a doc comment on the exported const in the same style as
-   `HALLWAY`/`GREAT_HALL` — footprint, ceiling height, and where its
-   doors/openings are, in plain language. The face-map arrays alone aren't
-   self-explanatory to the next reader.
+3. Default-export the `TileType` const. That's the whole registration step
+   — `src/level/tileTypeRegistry.ts` auto-discovers every file under
+   `tileTypes/` (Vite's `import.meta.glob`) and throws at build time on a
+   duplicate `id`; you never touch that file or any other tile type's file.
+4. Write a doc comment on the const in the same style as
+   `great_hall.ts`/`hallway_junction.ts` — footprint, ceiling height, and
+   where its doors/openings are, in plain language. The face-map arrays
+   alone aren't self-explanatory to the next reader.
 
 You do **not** need to touch `occupancy.ts` — rotation, validation, and the
 occupancy index are all generic over whatever's in `TILE_TYPES`.
 
 ## How to add a new tile instance
 
-1. Open `src/level/levelData.ts`. Pick a `tileTypeId` (existing or one you
-   just added), a `rotation`, and an `originCell`.
+Tile instances (and everything else in a room — decorations, items) live in
+one file per room/area under `src/level/rooms/`, auto-aggregated by
+`src/level/rooms.ts` — the same file structure the README's
+"Asset-authoring system" section describes for props/items. A room file
+doesn't have to place exactly one physical room: `side-chamber.ts` places
+both a corridor segment and the room it leads to, since they were authored
+as one feature — group instances in a file however makes sense as one
+piece of work.
+
+1. Create (or open, if you're adding to an existing feature)
+   `src/level/rooms/<your-room>.ts`, default-exporting a `RoomContent`
+   (`src/level/placementTypes.ts`) with a `tiles: TileInstance[]` array.
+   Pick a `tileTypeId` (existing or one you just added), a `rotation`, and
+   an `originCell` for each instance.
 2. Work out `originCell` by whichever existing instance you're attaching
    to: find the world cell(s) of the open face you're connecting into, then
    place your new instance so its **own** open face (after rotation) lands
    on the matching adjacent cell(s) with the opposite-facing side. It's
    easiest to reason about this in world cells (`x, z` integers, each
    `UNIT` meters) rather than meters — convert to meters (`cell * UNIT`)
-   only when you need a real-world position (e.g. for `LEVEL_SPAWN`, or
-   hand-placed content in `game.ts`/`decorations.ts`).
-3. Give it a unique `id` (used in `validateOccupancy` error messages and by
-   `sectorAt`'s corpse-cleanup consumer indirectly, via `sectorId`) and a
-   `sectorId` — new sector, unless this instance is genuinely a sub-area of
-   an existing sector's same room.
+   only when you need a real-world position (e.g. a `props`/`items` entry
+   in the same file, or a `spawn`).
+3. Give each instance a unique `id` (used in `validateOccupancy` error
+   messages and by `sectorAt`'s corpse-cleanup consumer indirectly, via
+   `sectorId`) and a `sectorId` — new sector, unless this instance is
+   genuinely a sub-area of an existing sector's same room.
 4. Run the level through `validateOccupancy` before assuming it's right —
    there's no test harness for this yet, so the fastest local check is a
    throwaway script:
    ```ts
    import { buildOccupancyIndex, validateOccupancy } from "./src/level/occupancy";
-   import { LEVEL_TILES } from "./src/level/levelData";
-   validateOccupancy(buildOccupancyIndex(LEVEL_TILES)); // throws on any mismatch
+   import { ALL_TILE_INSTANCES } from "./src/level/rooms";
+   validateOccupancy(buildOccupancyIndex(ALL_TILE_INSTANCES)); // throws on any mismatch
    ```
    run with `npx tsx <script>.ts`. It throws with the exact cell/instance/
    direction of the first mismatch, so a bad face map is fast to fix. This
@@ -244,51 +263,54 @@ occupancy index are all generic over whatever's in `TILE_TYPES`.
 6. If the new instance is room-sized (`w > 1 && d > 1` on its type),
    torches are automatic — verify they actually appear rather than assuming
    it from reading the code. If you want a bespoke decorative touch beyond
-   torches: create `src/level/rooms/<your-room>.ts` default-exporting a
-   `RoomContent` (`props`/`items` arrays referencing furniture/item asset
-   ids by `id`, plus `x`/`z`/`rotation`/`params` — see
-   `src/level/placementTypes.ts` and any existing file under `rooms/` for
-   the shape) — it's auto-discovered by `src/level/rooms.ts`, so this is a
-   brand-new file, never an edit to a shared one. If the furniture/item you
-   want doesn't exist yet, add it as its own file under
-   `src/assets/furniture/`/`src/assets/items/` first (see the "Asset-authoring
-   system" section of the README) — same rule: a new file, not an edit to a
-   shared registry. This is what keeps unrelated level-art work from
-   colliding on the same lines.
+   torches, add entries to the same file's `props`/`items` arrays,
+   referencing furniture/item asset ids by `id`, plus `x`/`z`/`rotation`/
+   `params` — see any existing file under `rooms/` for the shape. If the
+   furniture/item you want doesn't exist yet, add it as its own file under
+   `src/assets/furniture/`/`src/assets/items/` first (see the
+   "Asset-authoring system" section of the README) — same rule: a new
+   file, not an edit to a shared registry. This is what keeps unrelated
+   level-art work from colliding on the same lines: a new room/feature is
+   one new file, and even decorating an *existing* room is a data edit
+   inside that room's own file, not a shared placement function.
 
 ## Worked example: the first branch off the original line
 
-This is what shipped alongside this doc (see `levelData.ts`/`tiles.ts`),
+This is what shipped alongside this doc (see `src/level/rooms/corridor.ts`
+and `src/level/tileTypes/hallway_junction.ts`),
 included here as a concrete instance of the walkthrough above, and as the
 answer to the "current limitation" section: **how do you branch off an
 already-placed straight run when neither existing type supports it and
 there's no per-instance face override?**
 
-The corridor (`corridor`, type `HALLWAY`) was the lowest-risk place to
+The corridor (`corridor`, type `hallway`) was the lowest-risk place to
 retrofit: unlike `room-a`/`room-b`, no hardcoded coordinate-anchored content
-(`game.ts`'s player spawn/NPC/items, `decorations.ts`'s furniture) lives
-inside it, so giving it an extra opening can't disturb anything else. A new
-type, `HALLWAY_JUNCTION` (`tiles.ts`), copies `HALLWAY`'s exact footprint and
-north/south openings and adds one more: a `"opening"` on the middle segment
-of its east face. The `corridor` instance's `tileTypeId` was then changed
-from `"hallway"` to `"hallway_junction"` — its `id`, `originCell`,
-`rotation`, and `sectorId` are all untouched, so nothing coordinate-anchored
-moved and both original doors (`room-a`'s and `room-b`'s) keep working
-exactly as before; the only observable change is one new gap in a
-previously fully-solid side wall. **This is the general technique for
-branching off an existing straight run**: define a new type that's a
-strict superset of the old one's openings (same connections, plus the new
-one), then swap the instance's `tileTypeId` to it — never touch
-`originCell`/`rotation` on an instance something else depends on
-positionally.
+(the player spawn/NPC/items and furniture placed via `src/level/rooms/*.ts`)
+lives inside it, so giving it an extra opening can't disturb anything else.
+A new type, `hallway_junction` (`src/level/tileTypes/hallway_junction.ts`),
+copies `hallway`'s exact footprint and north/south openings and adds one
+more: a `"opening"` on the middle segment of its east face. The `corridor`
+instance's `tileTypeId` was then changed from `"hallway"` to
+`"hallway_junction"` — its `id`, `originCell`, `rotation`, and `sectorId`
+are all untouched, so nothing coordinate-anchored moved and both original
+doors (`room-a`'s and `room-b`'s) keep working exactly as before; the only
+observable change is one new gap in a previously fully-solid side wall.
+**This is the general technique for branching off an existing straight
+run**: define a new type that's a strict superset of the old one's openings
+(same connections, plus the new one), then swap the instance's
+`tileTypeId` to it — never touch `originCell`/`rotation` on an instance
+something else depends on positionally.
 
-From that new opening, a `HALLWAY` instance rotated 90° runs the branch
+From that new opening, a `hallway` instance rotated 90° runs the branch
 east (reusing the existing type — a rotated hallway is still a hallway),
-ending in a new room type, `SIDE_CHAMBER` (`w=2, d=2, h=1` — deliberately
-smaller and lower-ceilinged than `GREAT_HALL`'s `3×3×2`, so it reads as a
+ending in a new room type, `side_chamber` (`w=2, d=2, h=1` — deliberately
+smaller and lower-ceilinged than `great_hall`'s `3×3×2`, so it reads as a
 distinct kind of space rather than a smaller copy of the great hall), with
-a single door on its west face meeting the branch corridor. The player now
-gets a real choice at the junction: continue straight to `room-b`, or turn
-off into the side chamber. `SIDE_CHAMBER` is room-sized (`w,d > 1`) so it
-picks up torches automatically; it also gets one bespoke decorative touch
-(see `decorations.ts`) for the "distinct feel" pillar.
+a single door on its west face meeting the branch corridor. Both new tile
+instances live together in `src/level/rooms/side-chamber.ts` (see that
+file's header comment for why one room file can place more than one
+physical room). The player now gets a real choice at the junction:
+continue straight to `room-b`, or turn off into the side chamber.
+`side_chamber` is room-sized (`w,d > 1`) so it picks up torches
+automatically; it also gets one bespoke decorative touch (that same
+`side-chamber.ts` file's `props`) for the "distinct feel" pillar.

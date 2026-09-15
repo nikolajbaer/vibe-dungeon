@@ -27,6 +27,15 @@ const shrineZ = -17.8; // banners flush against the south wall's interior face (
 const shrineBanner = { primaryColor: 0x1f4a3a, accentColor: 0xc9a227 }; // green/gold, a different heraldry than room-a's red/gold
 
 const roomB: RoomContent = {
+  tiles: [
+    {
+      id: "room-b",
+      tileTypeId: "great_hall",
+      originCell: { x: -1, z: -6 },
+      rotation: 180,
+      sectorId: "room-b",
+    },
+  ],
   props: [
     { id: "banner", x: 0.4, z: shrineZ, params: shrineBanner },
     { id: "banner", x: 2.6, z: shrineZ, params: shrineBanner },

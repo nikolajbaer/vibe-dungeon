@@ -29,7 +29,7 @@ const PLAYER_HALF_EXTENT = 0.35;
 const DEBUG_HEALTH_STEP = 10; // debug-only nudge, see `[`/`]` handling below
 
 // Test NPC (issue #36) — hardcoded spawn inside room-a (x in [-3,6], z in
-// [0,9]; see level/levelData.ts), straight ahead of the player's spawn
+// [0,9]; see level/rooms/room-a.ts), straight ahead of the player's spawn
 // point along the path to the door (same x, facing yaw 0 looks directly at
 // it) and well clear of the walls. No general NPC-spawn data format yet,
 // per the issue.

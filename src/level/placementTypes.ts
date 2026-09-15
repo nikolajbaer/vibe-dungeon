@@ -1,10 +1,16 @@
+import type { TileInstance } from "./occupancy";
+
 // Level-authoring data shapes — the other half of the asset-authoring
 // system (see src/assets/types.ts's header comment for the full picture).
 // A `PropPlacement`/`ItemSpawn` references an asset by `id` (matching a
 // `FurnitureAssetDef.id`/`ItemAssetDef.id`) plus where/how to place it; the
 // generic `spawnProps`/`spawnItems` (level/spawning.ts) do the actual
 // ECS/mesh wiring uniformly, so authoring a room means writing plain data,
-// never touching shared spawn logic.
+// never touching shared spawn logic. A `RoomContent.tiles` entry is the same
+// idea one level up: it references a tile *type* by `tileTypeId` (matching a
+// `TileType.id` under `src/level/tileTypes/`) plus where/how to place it in
+// the grid — see `src/level/rooms.ts` for how every room's tiles are
+// aggregated into the one `OccupancyIndex` the whole level is built from.
 
 /** One prop placed in the level. Lives in a `RoomContent.props` array (see
  * below) — one file per room/area under `src/level/rooms/`, so two agents
@@ -40,12 +46,31 @@ export interface ItemSpawn {
   y?: number;
 }
 
+/** Where the player starts: position plus initial facing (radians, same
+ * convention as `Rotation.yaw`). Exactly one room file should declare this
+ * — `src/level/rooms.ts` throws at build time if zero or more than one do,
+ * the same "fail loudly, don't silently pick one" philosophy as
+ * `occupancy.ts`'s `validateOccupancy`. */
+export interface LevelSpawn {
+  x: number;
+  z: number;
+  yaw: number;
+}
+
 /** Everything one room/area places in the level — the default export of
  * each file under `src/level/rooms/`. `src/level/rooms.ts` auto-discovers
  * every such file (via `import.meta.glob`) and flattens all of their
- * `props`/`items` together, so adding a new room's content means adding one
- * new file under `rooms/` and nothing else. */
+ * `tiles`/`props`/`items` together (and collects the one `spawn`), so
+ * adding a new room means adding one new file under `rooms/` and nothing
+ * else — including the tile instances that carve the room/corridor itself
+ * out of the grid, not just its decorations. A file doesn't need to place
+ * exactly one physical room: `side-chamber.ts`, for instance, places both
+ * the side-chamber room *and* the corridor branch leading to it, since
+ * those were authored together as one feature (see that file's header
+ * comment). */
 export interface RoomContent {
+  tiles?: TileInstance[];
   props?: PropPlacement[];
   items?: ItemSpawn[];
+  spawn?: LevelSpawn;
 }

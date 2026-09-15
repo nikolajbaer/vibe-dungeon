@@ -1,11 +1,15 @@
 import type { RoomContent } from "../placementTypes";
 import { CRATE_HEIGHT } from "../../assets/furniture/crate";
 
-// Side-chamber's content (issue #71's dungeon branch, issue #75's lantern
-// reward): a small stack of supply crates plus a barrel — a quiet,
-// unpopulated storeroom-style detail (see docs/LEVEL_DESIGN.md's pacing
-// pillar) — and, per #75, a lantern as the "dead-end detour" pillar's
-// reward for exploring off the main path.
+// Side-chamber: the first branch off the original room-a/corridor/room-b
+// line (issue #71) — both the branch-corridor and side-chamber tile
+// instances live in this one file since they were authored together as one
+// feature (a room file doesn't need to place exactly one physical room —
+// see placementTypes.ts's `RoomContent` doc comment) — plus, per #71/#75, a
+// small stack of supply crates and a barrel (a quiet, unpopulated
+// storeroom-style detail, see docs/LEVEL_DESIGN.md's pacing pillar) and a
+// lantern as the "dead-end detour" pillar's reward for exploring off the
+// main path.
 //
 // Side-chamber (side_chamber, unrotated, originCell {x:4,z:-2}) spans world
 // x in [12,18], z in [-6,0], with its one door on the west face's near
@@ -21,6 +25,22 @@ const baseX = 16.7;
 const baseZ = -5.0;
 
 const sideChamber: RoomContent = {
+  tiles: [
+    {
+      id: "branch-corridor",
+      tileTypeId: "hallway",
+      originCell: { x: 1, z: -2 },
+      rotation: 90,
+      sectorId: "branch-corridor",
+    },
+    {
+      id: "side-chamber",
+      tileTypeId: "side_chamber",
+      originCell: { x: 4, z: -2 },
+      rotation: 0,
+      sectorId: "side-chamber",
+    },
+  ],
   props: [
     { id: "crate", x: baseX, z: baseZ, rotation: 0.15 },
     { id: "crate", x: baseX - 0.05, y: CRATE_HEIGHT, z: baseZ + 0.05, rotation: -0.35 },

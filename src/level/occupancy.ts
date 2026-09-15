@@ -4,7 +4,8 @@
 // verification notes in the PR) and reused by a future level editor (#14)
 // without dragging in rendering/ECS dependencies.
 
-import { TILE_TYPES, type FaceKind, type TileType } from "./tiles";
+import type { FaceKind, TileType } from "./tiles";
+import { TILE_TYPES } from "./tileTypeRegistry";
 
 export type Rotation = 0 | 90 | 180 | 270;
 
