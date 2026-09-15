@@ -129,6 +129,11 @@ export const Dead: Record<string, never> = {};
  * one-way cleanup, not a presence toggle (the corpse never reappears). */
 export const DeathSector = {
   sectorId: [] as (string | undefined)[],
+  /** Seconds left before `corpseCleanupSystem` will even consider removing
+   * this corpse, regardless of sector — see that module's `MIN_LINGER_SECONDS`
+   * doc comment for why a pure sector-mismatch check isn't enough on its
+   * own. */
+  lingerRemaining: [] as number[],
 };
 
 /** A pickup-able item (issue #39) — sword, gem, etc. `itemTypeId` indexes
