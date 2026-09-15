@@ -265,7 +265,7 @@ export function startGame(container: HTMLElement): void {
 
   const keyboard = new Keyboard();
   const pointerLook = new PointerLook(renderer.domElement);
-  const touch = new TouchControls(container);
+  const touch = new TouchControls(container, renderer.domElement);
   setupHint(container, renderer.domElement, pointerLook);
   mountHud(container);
   mountInventory(container);
@@ -278,10 +278,19 @@ export function startGame(container: HTMLElement): void {
   // very click that engages it, meaning that first click never also counts
   // as an attack. Edge-triggered into `attackRequested` and consumed once
   // per frame below, the same "just pressed" shape `interactPressed` uses.
+  //
+  // Desktop-only: on a touch device attacking is the dedicated ATK button
+  // (`touch.consumeAttackRequest()` below) alone. Mobile browsers still
+  // synthesize compatibility mouse events (mousedown/click) some time after
+  // a real touch, and some also grant Pointer Lock from a touch gesture, so
+  // without this guard a plain tap-to-interact could silently also land a
+  // melee hit on whatever the player was just trying to talk to.
   let attackRequested = false;
-  renderer.domElement.addEventListener("mousedown", (e) => {
-    if (e.button === 0 && pointerLook.locked) attackRequested = true;
-  });
+  if (!isTouchDevice()) {
+    renderer.domElement.addEventListener("mousedown", (e) => {
+      if (e.button === 0 && pointerLook.locked) attackRequested = true;
+    });
+  }
 
   window.addEventListener("resize", () => {
     camera.aspect = window.innerWidth / window.innerHeight;
@@ -294,14 +303,20 @@ export function startGame(container: HTMLElement): void {
     requestAnimationFrame(frame);
     const dt = Math.min(clock.getDelta(), 0.1);
 
-    // A dialogue panel or the death overlay is a modal — the player
-    // shouldn't be able to walk off, attack, or open something else while
-    // either is up. Movement/attack/interact are gated on this below;
-    // look/camera rotation stays live either way (harmless), and other
-    // systems (doors, NPCs) keep running normally.
-    const modalActive = dialogueStore.isOpen || hudStore.playerDefeated;
+    // A dialogue panel or the death overlay is a modal — a real pause, not
+    // just a movement freeze: nothing in the world should be able to hurt
+    // (or be hurt by) the player while either is up, so the whole
+    // simulation stands still except look/camera rotation (harmless) and
+    // whatever's needed to render the modal itself. Re-checked fresh at
+    // each gate below, rather than snapshotted once, since `tryInteract`
+    // can open a dialogue mid-frame — an attack later in that same frame
+    // must see the just-opened dialogue, not a stale "not open yet" value
+    // (this was the actual villager-killing bug: a tap that opened dialogue
+    // and a same-frame attack both used one value computed before the
+    // dialogue existed).
+    const isModalActive = () => dialogueStore.isOpen || hudStore.playerDefeated;
 
-    if (modalActive) {
+    if (isModalActive()) {
       Velocity.x[player] = 0;
       Velocity.z[player] = 0;
     } else {
@@ -311,20 +326,27 @@ export function startGame(container: HTMLElement): void {
         moveStick: touch.moveStick,
         touchLook: touch.lookDrag,
       });
+      npcSystem(world, dt);
+      npcAnimationSystem(world, dt);
+      movementSystem(world, dt);
+      collisionSystem(world);
+      doorAnimationSystem(world, dt);
     }
-    npcSystem(world, dt);
-    npcAnimationSystem(world, dt);
-    movementSystem(world, dt);
-    collisionSystem(world);
-    doorAnimationSystem(world, dt);
 
     const interactRequested = keyboard.consumeJustPressed("KeyE") || touch.consumeInteractRequest();
-    if (interactRequested && !modalActive) tryInteract(world, camera);
+    if (interactRequested && !isModalActive()) tryInteract(world, camera);
 
     const attackRequestedThisFrame = attackRequested || touch.consumeAttackRequest();
     attackRequested = false;
-    if (attackRequestedThisFrame && !modalActive) tryMeleeAttack(world, camera);
+    if (attackRequestedThisFrame && !isModalActive()) tryMeleeAttack(world, camera);
     viewmodelSwingSystem(dt);
+
+    // Belt-and-suspenders alongside the pause above: if the NPC a dialogue
+    // is open for ends up Dead by any other means, drop the dialogue rather
+    // than leave it showing lines for a corpse.
+    if (dialogueStore.isOpen && dialogueStore.activeNpcEid !== null && hasComponent(world, dialogueStore.activeNpcEid, Dead)) {
+      dialogueStore.close();
+    }
 
     // Issue #59, extended for archetypes (issue #36 follow-up): any NPC that
     // just became Dead and doesn't have a `DeathSector` yet gets one

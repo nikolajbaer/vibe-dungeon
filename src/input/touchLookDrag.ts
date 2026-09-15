@@ -9,10 +9,19 @@ const TAP_THRESHOLD_PX = 10; // total displacement from touch-start below which 
 
 /**
  * Tracks a single "look" touch at a time (identified by its touch
- * identifier), ignoring any touch that starts inside one of `ignoreElements`
- * (the move stick and, since issue #48, the attack button) so those pads
- * keep working independently — including simultaneously with a look-drag
- * from the other hand.
+ * identifier), only starting one for a touch that begins directly on
+ * `gameSurface` (the three.js renderer's own canvas) — every other on-screen
+ * control (the move stick, the attack button, and any Preact overlay:
+ * inventory, dialogue panel, the death overlay's respawn button, ...) is a
+ * separate DOM element layered on top via its own `pointer-events: auto`,
+ * so a touch landing on one of those already reports that element as its
+ * `target`, never the canvas. Checking the positive case (must be the
+ * canvas) rather than maintaining a negative list of "other" elements to
+ * ignore means a brand new overlay never needs to be added here to get tap
+ * events routed correctly (a real bug this was: a tap on the dialogue
+ * panel's own buttons used to *also* register as a world tap-to-interact,
+ * since the old `ignoreElements` list only knew about the move stick/attack
+ * button and nothing else).
  *
  * Also disambiguates tap vs. drag: a touch that ends without ever exceeding
  * `TAP_THRESHOLD_PX` of displacement from its start point is treated as a
@@ -30,7 +39,7 @@ export class TouchLookDrag {
   private movedPastThreshold = false;
   private tapRequested = false;
 
-  constructor(private readonly ignoreElements: HTMLElement[]) {
+  constructor(private readonly gameSurface: HTMLElement) {
     window.addEventListener("touchstart", this.onTouchStart, { passive: true });
     window.addEventListener("touchmove", this.onTouchMove, { passive: true });
     window.addEventListener("touchend", this.onTouchEnd, { passive: true });
@@ -58,8 +67,7 @@ export class TouchLookDrag {
     if (this.touchId !== null) return; // already tracking a look touch
 
     const touch = e.changedTouches[0];
-    const target = touch.target as Node | null;
-    if (target && this.ignoreElements.some((el) => el.contains(target))) return; // let that pad own this one
+    if (touch.target !== this.gameSurface) return; // some other control/overlay owns this touch
 
     this.touchId = touch.identifier;
     this.startX = touch.clientX;
