@@ -1,4 +1,5 @@
 import { HealthBar } from "./HealthBar";
+import { DeathOverlay } from "./DeathOverlay";
 
 /**
  * HUD root, mounted once into its own overlay DOM node layered above the
@@ -10,6 +11,7 @@ export function HUD() {
   return (
     <div id="hud-root">
       <HealthBar />
+      <DeathOverlay />
     </div>
   );
 }

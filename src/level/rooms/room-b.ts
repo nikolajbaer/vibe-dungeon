@@ -2,7 +2,12 @@ import type { RoomContent } from "../placementTypes";
 
 // Room-b's content (issue #70): a "shrine" grouping — two banners flanking a
 // candelabra — plus a couple of storage barrels, for a look distinct from
-// room-a's dining-table feel. No items or NPC here.
+// room-a's dining-table feel. A bandit (the first aggressive archetype —
+// src/assets/npcs/bandit.ts) now guards the room too, on the x=1.5 spine
+// like room-a's villager, clear of the barrels (x=-2.3) and the shrine
+// (z<=-16.9) — a player walking in through the door is within its 6m aggro
+// range almost immediately, which is the intended "surprise encounter"
+// feel for the room's first hostile.
 //
 // Room-b (great_hall, rotation 180, originCell {x:-1,z:-6}) — working out
 // its bounds the same way as room-a's, but through the 180-degree rotation:
@@ -43,6 +48,7 @@ const roomB: RoomContent = {
     { id: "barrel", x: -2.3, z: -12.0 },
     { id: "barrel", x: -2.3, z: -13.2 },
   ],
+  npcs: [{ id: "bandit", x: 1.5, z: -13 }],
 };
 
 export default roomB;

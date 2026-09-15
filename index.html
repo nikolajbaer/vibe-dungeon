@@ -250,6 +250,85 @@
         color: rgba(255, 255, 255, 0.45);
         padding: 6px 0;
       }
+      /* Dialogue panel: its own fixed overlay (#dialogue-overlay, see
+         src/dialogue/mount.tsx), same "own container, own pointer-events"
+         split as #inventory-overlay above. */
+      #dialogue-overlay {
+        position: fixed;
+        inset: 0;
+        pointer-events: none;
+      }
+      .dialogue-root {
+        position: fixed;
+        left: 50%;
+        bottom: calc(56px + env(safe-area-inset-bottom));
+        transform: translateX(-50%);
+        width: min(calc(100vw - 32px), 420px);
+        display: flex;
+        flex-direction: column;
+        gap: 10px;
+        padding: 14px 16px;
+        background: rgba(10, 10, 16, 0.85);
+        border: 1px solid rgba(255, 255, 255, 0.3);
+        border-radius: 10px;
+        color: #eee;
+        font: 14px/1.4 system-ui, sans-serif;
+        pointer-events: auto;
+      }
+      .dialogue-speaker {
+        font-weight: 700;
+        color: #ffcc44;
+        font-size: 12px;
+        letter-spacing: 0.04em;
+        text-transform: uppercase;
+      }
+      .dialogue-choices {
+        display: flex;
+        flex-direction: column;
+        gap: 6px;
+      }
+      .dialogue-choice {
+        font: inherit;
+        color: inherit;
+        text-align: left;
+        padding: 8px 10px;
+        background: rgba(255, 255, 255, 0.08);
+        border: 1px solid rgba(255, 255, 255, 0.3);
+        border-radius: 6px;
+        cursor: pointer;
+      }
+      .dialogue-choice:active {
+        background: rgba(255, 255, 255, 0.2);
+      }
+      .death-overlay {
+        position: fixed;
+        inset: 0;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        gap: 20px;
+        background: rgba(20, 0, 0, 0.75);
+        pointer-events: auto;
+      }
+      .death-title {
+        font: 700 clamp(28px, 8vw, 40px)/1 system-ui, sans-serif;
+        letter-spacing: 0.06em;
+        color: #d9433f;
+        text-transform: uppercase;
+      }
+      .death-respawn-btn {
+        font: 600 15px/1 system-ui, sans-serif;
+        color: #fff;
+        padding: 12px 28px;
+        background: rgba(255, 255, 255, 0.1);
+        border: 1px solid rgba(255, 255, 255, 0.4);
+        border-radius: 8px;
+        cursor: pointer;
+      }
+      .death-respawn-btn:active {
+        background: rgba(255, 255, 255, 0.22);
+      }
     </style>
   </head>
   <body>

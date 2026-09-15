@@ -100,3 +100,60 @@ export interface FurnitureAssetDef<P = unknown> {
    * rare asset whose footprint genuinely depends on `params`. */
   footprint?: Footprint | ((params?: P) => Footprint | undefined);
 }
+
+/**
+ * One NPC archetype — a reusable "kind" of character (a villager, a
+ * bandit), auto-discovered the same way item/furniture assets are (one file
+ * under `src/assets/npcs/`, picked up by `src/assets/npcRegistry.ts`'s
+ * `import.meta.glob`). `NPC.archetypeId` (`ecs/components.ts`) indexes this
+ * registry for a placed instance's stats/behavior/mesh, the same
+ * shared-type-vs-per-instance-state split every other archetype/type
+ * registry in this repo uses.
+ *
+ * `behavior` picks which half of `ecs/systems/npc.ts`'s state machine an
+ * instance runs: `"docile"` stays on today's LOITERING/FOLLOWING wander,
+ * with `dialogueId` (if set) making an interact open dialogue instead of
+ * toggling follow (see `dialogueId`'s own doc comment); `"aggressive"` adds
+ * CHASING/ATTACKING, driven by the `aggro*`/`attack*`/`chaseSpeed`/
+ * `leashRange` fields below, all required together for that behavior.
+ */
+export interface NpcArchetypeDef {
+  id: string;
+  name: string;
+  health: number;
+  behavior: "docile" | "aggressive";
+  /** Collision half-extent (meters), same meaning as `Collider.hx`/`hz`. */
+  halfExtent: number;
+  /** Docile only: a dialogue tree id (`src/dialogue/dialogueRegistry.ts`)
+   * to open on interact, instead of the legacy `toggleNpcFollow` demo
+   * behavior (issue #36) an archetype without one still falls back to. */
+  dialogueId?: string;
+  /** Aggressive only: distance (meters) from the player, while `LOITERING`,
+   * at which this NPC notices the player and starts `CHASING`. No
+   * line-of-sight check — a simple radius, matching this project's "v1,
+   * simple" bar elsewhere (e.g. sectors have no culling logic yet either). */
+  aggroRange?: number;
+  /** Aggressive only: once within this distance of the player while
+   * `CHASING`, stop and switch to `ATTACKING`. */
+  attackRange?: number;
+  attackDamage?: number;
+  /** Aggressive only: seconds between attacks while `ATTACKING` and still
+   * in range. */
+  attackCooldown?: number;
+  /** Aggressive only: movement speed (m/s) while `CHASING` — deliberately a
+   * separate field from a docile archetype's (shared, module-level) wander/
+   * follow speeds in `npc.ts`, since only aggressive archetypes need to
+   * tune it for balance. */
+  chaseSpeed?: number;
+  /** Aggressive only: once further than this from `NPC.homeX/homeZ` while
+   * `CHASING`/`ATTACKING`, give up and return to `LOITERING` (re-anchoring
+   * home where it stopped, same as a docile archetype dropping out of
+   * `FOLLOWING`) — otherwise a hostile could chase the player across the
+   * entire reachable map once the doors between are open (doors never
+   * auto-close; see `ecs/systems/doors.ts`). */
+  leashRange?: number;
+  /** Builds this instance's mesh. `eid` is threaded through to
+   * `createAnimatedNpcMesh` (`ecs/systems/npcAnimation.ts`), which stamps
+   * it onto the mesh as `userData.eid` for the interact/melee raycasts. */
+  createMesh(eid: number): THREE.Object3D;
+}

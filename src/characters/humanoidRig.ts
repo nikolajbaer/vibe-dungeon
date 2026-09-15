@@ -501,3 +501,35 @@ export function createHumanoidRig(): HumanoidRig {
     },
   };
 }
+
+let sharedRig: HumanoidRig | undefined;
+
+/** The one `HumanoidRig` every NPC archetype's `createMesh` clones from
+ * (`ecs/systems/npcAnimation.ts`'s `createAnimatedNpcMesh` does the actual
+ * `SkeletonUtils.clone`) — built once and cached, since `createHumanoidRig`
+ * does real skeleton/geometry/clip construction work that every archetype
+ * sharing one visual doesn't need to repeat. A future archetype wanting a
+ * genuinely different base body would call `createHumanoidRig()` directly
+ * instead of this. */
+export function getSharedHumanoidRig(): HumanoidRig {
+  return (sharedRig ??= createHumanoidRig());
+}
+
+/**
+ * Recolors a cloned rig mesh (e.g. one `createAnimatedNpcMesh` built from
+ * `getSharedHumanoidRig()`) by multiplying `color` onto its material — a
+ * cheap way for an NPC archetype to read as visually distinct from another
+ * sharing the same base rig, without separate geometry. Clones the material
+ * first: every clone from the shared rig starts out pointing at the same
+ * cached `skinMaterial()` instance (see that function above), so mutating
+ * it in place would recolor every other NPC using the shared rig too.
+ */
+export function tintClonedMesh(mesh: THREE.Object3D, color: number): void {
+  mesh.traverse((child) => {
+    if (!(child instanceof THREE.Mesh)) return;
+    const material = (Array.isArray(child.material) ? child.material[0] : child.material) as THREE.MeshStandardMaterial;
+    const cloned = material.clone();
+    cloned.color.multiply(new THREE.Color(color));
+    child.material = cloned;
+  });
+}

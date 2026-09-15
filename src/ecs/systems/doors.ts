@@ -3,6 +3,8 @@ import { hasComponent, query, type World } from "bitecs";
 import { Dead, Door, DoorState, Object3DRef, NPC, Item, Carried, PlayerControlled } from "../components";
 import { toggleNpcFollow } from "./npc";
 import { pickUpItem } from "./items";
+import { NPC_REGISTRY } from "../../assets/npcRegistry";
+import { dialogueStore } from "../../dialogue/store";
 
 const OPEN_DURATION = 0.8; // seconds for a door to fully open
 const INTERACT_RANGE = 3; // meters
@@ -42,11 +44,14 @@ const forward = new THREE.Vector3();
  * interaction work builds on the same convention): a raycast straight out
  * from the camera hits the nearest interactable within INTERACT_RANGE
  * meters and dispatches on which ECS component the hit entity carries —
- * `Door` opens it (see `openDoor` below); `NPC` toggles it between
- * follow/loiter (see `toggleNpcFollow` in npc.ts); an uncarried `Item`
- * (issue #39) is picked up (see `pickUpItem` in items.ts). Callers decide
- * *when* to fire this — desktop on `KeyE`, touch on a tap outside both
- * joystick pads (see game.ts).
+ * `Door` opens it (see `openDoor` below); `NPC` dispatches on its archetype
+ * (`NPC_REGISTRY`, `NPC.archetypeId`): an aggressive one ignores the
+ * interact entirely (nothing to talk to), a docile one with a `dialogueId`
+ * opens that tree (`dialogueStore.open`, see `src/dialogue/`), and a docile
+ * one without falls back to the original `toggleNpcFollow` demo toggle; an
+ * uncarried `Item` (issue #39) is picked up (see `pickUpItem` in items.ts).
+ * Callers decide *when* to fire this — desktop on `KeyE`, touch on a tap
+ * outside both joystick pads (see game.ts).
  *
  * The raycast targets every interactable's `Object3DRef` in one combined
  * list rather than running a separate raycast per interactable type —
@@ -62,7 +67,7 @@ const forward = new THREE.Vector3();
  * trigger path.
  *
  * Returns true if the hit interactable actually did something (a door
- * opened, an NPC toggled).
+ * opened, a dialogue opened, an NPC's follow toggled).
  */
 export function tryInteract(world: World, camera: THREE.Camera): boolean {
   const interactables: THREE.Object3D[] = [];
@@ -94,6 +99,12 @@ export function tryInteract(world: World, camera: THREE.Camera): boolean {
 
   if (hasComponent(world, hitEid, Door)) return openDoor(world, hitEid);
   if (hasComponent(world, hitEid, NPC)) {
+    const archetype = NPC_REGISTRY[NPC.archetypeId[hitEid]];
+    if (archetype?.behavior === "aggressive") return false; // nothing to talk to
+    if (archetype?.dialogueId) {
+      dialogueStore.open(hitEid, archetype.dialogueId);
+      return true;
+    }
     toggleNpcFollow(hitEid);
     return true;
   }
