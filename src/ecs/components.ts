@@ -118,10 +118,11 @@ export const DeathSector = {
 };
 
 /** A pickup-able item (issue #39) — sword, gem, etc. `itemTypeId` indexes
- * `ITEM_TYPES` (`src/items/itemTypes.ts`), the small static registry of
- * item data (name/icon/equip slot), the same way `NPC`/`Door` keep their
- * per-instance state in components here while `src/level/tiles.ts` keeps
- * shared *type* data (`TILE_TYPES`) in its own module. An item lying in the
+ * `ITEM_REGISTRY` (`src/assets/itemRegistry.ts`), the auto-discovered
+ * registry of item asset data (name/icon/equip slot/mesh factories), the
+ * same way `NPC`/`Door` keep their per-instance state in components here
+ * while `src/level/tiles.ts` keeps shared *type* data (`TILE_TYPES`) in its
+ * own module. An item lying in the
  * world has `Item` + `Position` + `Object3DRef` but no `Carried` — see
  * `Carried` below for what picking it up adds. */
 export const Item = {

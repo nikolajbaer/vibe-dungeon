@@ -12,11 +12,10 @@ import { createAnimatedNpcMesh, getNpcAnimationDebugState, npcAnimationSystem } 
 import { corpseCleanupSystem } from "./ecs/systems/corpseCleanup";
 import { createHumanoidRig } from "./characters/humanoidRig";
 import { equipItem, equipToOpenHandSlot, unequipItem, viewmodelSwingSystem } from "./ecs/systems/items";
-import { createSwordMesh } from "./items/swordModel";
-import { createLanternMesh } from "./items/lanternModel";
 import { syncSystem } from "./ecs/systems/sync";
 import { hudSync } from "./ecs/systems/hudSync";
 import { buildLevel } from "./level/level";
+import { ALL_ITEM_SPAWNS } from "./level/rooms";
 import { Keyboard } from "./input/keyboard";
 import { PointerLook } from "./input/pointerLook";
 import { TouchControls, isTouchDevice } from "./input/touchControls";
@@ -38,63 +37,6 @@ const NPC_SPAWN = { x: 1.5, z: 3.5 };
 const NPC_HALF_EXTENT = 0.4;
 const NPC_INITIAL_WANDER_PAUSE = 2; // seconds before its first idle wander leg
 const NPC_HEALTH = 30; // issue #48 — first thing that can actually be damaged; two 15-damage hits kill it
-
-// Two world items (issue #39), hardcoded placement in room-a like the NPC
-// spawn above — no general item-spawn data format yet. Both sit near the
-// player's spawn point (1.5, 7.5), on either side, well clear of walls
-// (room-a spans world x in [-3,6], z in [0,9]) and off the NPC's home/wander
-// spot and its path down to the corridor door.
-const SWORD_SPAWN = { x: 4, z: 7 };
-const GEM_SPAWN = { x: -1, z: 7 };
-
-// Issue #75: a third world item, the equippable lantern, placed as the
-// "dead-end detour" pacing pillar's reward (docs/LEVEL_DESIGN.md) for the
-// side-chamber added in #71 — the one room off the main path, previously
-// just crates/barrels with nothing to pick up. Side-chamber (side_chamber,
-// unrotated, originCell {x:4,z:-2} — see decorations.ts's header comment for
-// the full derivation) spans world x in [12,18], z in [-6,0], its one door
-// on the west wall's near/south segment (world x=12, z in [-6,-3]), and its
-// existing crate/barrel clutter (addSideChamberClutter, decorations.ts) sits
-// in the south-east corner (x roughly 15.8-17.4, z roughly -5.6 to -4.6).
-// LANTERN_SPAWN sits in the room's north-east corner instead — clear of the
-// door and its swing arc (both hug the south-west), clear of the crates/
-// barrel (south-east), and clear of all four interior wall faces (~0.15m
-// wall half-thickness, see tileBuilder.ts's WALL_THICKNESS) by well over a
-// meter on every side.
-const LANTERN_SPAWN = { x: 16, z: -1.3 };
-const ITEM_HEIGHT = 1; // meters off the floor — roughly a low table/pedestal height
-
-// Generous invisible raycast target radius for item pickup — the sword's
-// actual visual mesh is a thin 0.08x0.08m box, which made `tryInteract`'s
-// camera-forward raycast (doors.ts) frustratingly precise to land on.
-// Wrapping each item's real mesh together with an invisible sphere this
-// size (see `withPickupHitbox` below) means aiming anywhere reasonably
-// close to the item — not pixel-perfect on its thin visible geometry —
-// registers a hit, without changing the interact raycast's mechanics or
-// its 3m range.
-const ITEM_PICKUP_RADIUS = 0.35;
-
-/**
- * Wraps an item's visual mesh in a `THREE.Group` alongside an invisible,
- * generously-sized sphere (see `ITEM_PICKUP_RADIUS`) that's the actual, more
- * forgiving raycast target — three.js's `Raycaster` tests invisible objects
- * exactly like visible ones (`.visible` only affects rendering), so this
- * costs nothing at render time. Both the visual mesh and the hitbox carry
- * `userData.eid` (same convention as every other raycastable mesh — a door
- * leaf's slab, the NPC's mesh) so either one being hit resolves back to the
- * same entity; the returned group (not the bare mesh) becomes the item's
- * `Object3DRef`, so hiding it on pickup (`pickUpItem` in items.ts) still
- * hides both.
- */
-function withPickupHitbox(mesh: THREE.Object3D, eid: number): THREE.Group {
-  mesh.userData.eid = eid;
-  const hitbox = new THREE.Mesh(new THREE.SphereGeometry(ITEM_PICKUP_RADIUS, 8, 6));
-  hitbox.visible = false;
-  hitbox.userData.eid = eid;
-  const group = new THREE.Group();
-  group.add(mesh, hitbox);
-  return group;
-}
 
 /** Wires up the ECS world, level, player entity, input sources, and the
  * core game loop (input -> npc -> npc-animation -> movement -> collision ->
@@ -223,60 +165,10 @@ export function startGame(container: HTMLElement): void {
   scene.add(npcMesh);
   Object3DRef[npc] = npcMesh;
 
-  // World items (issue #39): a sword (equippable, `slot: "hand"`) and a gem
-  // (curio only, `slot: null` — see src/items/itemTypes.ts). Each is an
-  // `Item` + `Position` + `Object3DRef` entity with no `Carried` component
-  // until picked up via the same interact raycast as doors/NPC (see
-  // doors.ts `tryInteract`'s `Item` branch). Simple placeholder meshes —
-  // no textures, distinct flat colors.
-  const sword = addEntity(world);
-  addComponent(world, sword, Position);
-  addComponent(world, sword, Object3DRef);
-  addComponent(world, sword, Item);
-  Position.x[sword] = SWORD_SPAWN.x;
-  Position.y[sword] = ITEM_HEIGHT;
-  Position.z[sword] = SWORD_SPAWN.z;
-  Item.itemTypeId[sword] = "sword";
-  const swordMesh = createSwordMesh();
-  const swordGroup = withPickupHitbox(swordMesh, sword);
-  scene.add(swordGroup);
-  Object3DRef[sword] = swordGroup;
-
-  const gem = addEntity(world);
-  addComponent(world, gem, Position);
-  addComponent(world, gem, Object3DRef);
-  addComponent(world, gem, Item);
-  Position.x[gem] = GEM_SPAWN.x;
-  Position.y[gem] = ITEM_HEIGHT;
-  Position.z[gem] = GEM_SPAWN.z;
-  Item.itemTypeId[gem] = "gem";
-  const gemMesh = new THREE.Mesh(
-    new THREE.OctahedronGeometry(0.2),
-    new THREE.MeshStandardMaterial({ color: 0x35d6c4, metalness: 0.1, roughness: 0.2 }),
-  );
-  const gemGroup = withPickupHitbox(gemMesh, gem);
-  scene.add(gemGroup);
-  Object3DRef[gem] = gemGroup;
-
-  // Issue #75: the lantern, equippable (`slot: "hand"`) like the sword —
-  // see LANTERN_SPAWN above for its placement reasoning. This world pickup
-  // mesh is the plain unlit prop `createLanternMesh` builds (a real
-  // `THREE.PointLight` only ever gets attached to the *viewmodel* version in
-  // `ecs/systems/items.ts`'s `createViewmodelMesh`, once actually equipped)
-  // — its glass panels do carry a always-on emissive material, so it still
-  // reads as a lantern rather than a dead prop while sitting in the world.
-  const lantern = addEntity(world);
-  addComponent(world, lantern, Position);
-  addComponent(world, lantern, Object3DRef);
-  addComponent(world, lantern, Item);
-  Position.x[lantern] = LANTERN_SPAWN.x;
-  Position.y[lantern] = ITEM_HEIGHT;
-  Position.z[lantern] = LANTERN_SPAWN.z;
-  Item.itemTypeId[lantern] = "lantern";
-  const lanternMesh = createLanternMesh();
-  const lanternGroup = withPickupHitbox(lanternMesh, lantern);
-  scene.add(lanternGroup);
-  Object3DRef[lantern] = lanternGroup;
+  // World items (issue #39: sword + gem; #75: lantern) are spawned generically
+  // by `buildLevel` (level/level.ts's `spawnItems`) from `level/rooms/*.ts`'s
+  // data — see `src/assets/types.ts`'s header comment for the full
+  // asset-authoring system. Nothing left to wire up here.
 
   // Inventory UI -> ECS action wiring (issue #39): the store can't mutate
   // the ECS world/camera itself (same as everything else under
@@ -338,7 +230,7 @@ export function startGame(container: HTMLElement): void {
     // Item/inventory debug hooks (issue #39) for manual/automated smoke
     // testing — world item positions to walk to, and each item's current
     // carry/equip state and world-mesh visibility.
-    getItemSpawns: () => ({ sword: { ...SWORD_SPAWN }, gem: { ...GEM_SPAWN }, lantern: { ...LANTERN_SPAWN } }),
+    getItemSpawns: () => Object.fromEntries(ALL_ITEM_SPAWNS.map((s) => [s.id, { x: s.x, z: s.z }])),
     getItemStates: () =>
       Array.from(query(world, [Item])).map((eid) => ({
         eid,

@@ -1,6 +1,6 @@
 import { query, type World } from "bitecs";
 import { Carried, Item, PlayerControlled } from "../ecs/components";
-import { ITEM_TYPES } from "../items/itemTypes";
+import { ITEM_REGISTRY } from "../assets/itemRegistry";
 import { inventoryStore, type CarriedItemView } from "./store";
 
 /**
@@ -19,7 +19,7 @@ export function inventorySync(world: World): void {
   const carried: CarriedItemView[] = [];
   for (const eid of query(world, [Item, Carried])) {
     if (Carried.ownerEid[eid] !== playerEid) continue;
-    const itemType = ITEM_TYPES[Item.itemTypeId[eid]];
+    const itemType = ITEM_REGISTRY[Item.itemTypeId[eid]];
     if (!itemType) continue;
     carried.push({
       eid,

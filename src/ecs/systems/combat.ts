@@ -1,7 +1,7 @@
 import * as THREE from "three";
 import { addComponent, hasComponent, query, type World } from "bitecs";
 import { Carried, Dead, Health, Item, Object3DRef, PlayerControlled } from "../components";
-import { ITEM_TYPES } from "../../items/itemTypes";
+import { ITEM_REGISTRY } from "../../assets/itemRegistry";
 import { isHandSlot, triggerViewmodelSwing } from "./items";
 import { triggerDeathCollapse, triggerHitReaction } from "./npcAnimation";
 
@@ -24,7 +24,7 @@ function getEquippedWeapon(world: World, attackerEid: number): { itemEid: number
   for (const eid of query(world, [Item, Carried])) {
     if (Carried.ownerEid[eid] !== attackerEid) continue;
     if (!isHandSlot(Carried.slot[eid])) continue;
-    const damage = ITEM_TYPES[Item.itemTypeId[eid]]?.meleeDamage;
+    const damage = ITEM_REGISTRY[Item.itemTypeId[eid]]?.meleeDamage;
     if (damage === undefined) continue;
     if (!best || damage > best.damage) best = { itemEid: eid, damage };
   }
