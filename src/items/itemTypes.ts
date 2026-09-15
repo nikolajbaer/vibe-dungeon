@@ -26,8 +26,14 @@ export interface ItemType {
 
 export const SWORD: ItemType = { id: "sword", name: "Sword", icon: "🗡️", slot: "hand", meleeDamage: 15 };
 export const GEM: ItemType = { id: "gem", name: "Gem", icon: "💎", slot: null };
+// Issue #75: the first `slot: "hand"` item that isn't a weapon — `meleeDamage`
+// is left `undefined` on purpose (see the field's doc comment above) so
+// combat.ts's fallback-to-unarmed-damage path kicks in while it's equipped,
+// exactly as anticipated when that field was written.
+export const LANTERN: ItemType = { id: "lantern", name: "Lantern", icon: "🏮", slot: "hand" };
 
 export const ITEM_TYPES: Record<string, ItemType> = {
   [SWORD.id]: SWORD,
   [GEM.id]: GEM,
+  [LANTERN.id]: LANTERN,
 };
