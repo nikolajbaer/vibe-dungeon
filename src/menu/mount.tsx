@@ -6,21 +6,30 @@ import { MainMenu } from "./MainMenu";
  * fixed-overlay pattern `src/hud/mount.tsx` uses for the HUD — appended into
  * the same container the game/HUD/touch controls use. Call once at startup,
  * before `startGame()`, so the three.js scene/ECS world isn't created until
- * the player actually presses Play.
+ * the player actually presses Play — and again from the level viewer's
+ * "← Menu" button, to come back here after leaving that mode.
  *
- * `onPlay` is invoked once the menu has dismissed itself (unmounted and
- * removed from the DOM), so the caller can safely start the game right away.
+ * `onPlay`/`onViewTiles` are each invoked once the menu has dismissed itself
+ * (unmounted and removed from the DOM), so the caller can safely start the
+ * chosen mode right away.
  */
-export function mountMainMenu(container: HTMLElement, onPlay: () => void): void {
+export function mountMainMenu(container: HTMLElement, onPlay: () => void, onViewTiles: () => void): void {
   const el = document.createElement("div");
   el.id = "menu-overlay";
   container.appendChild(el);
 
-  const handlePlay = () => {
+  const dismiss = () => {
     render(null, el);
     el.remove();
+  };
+  const handlePlay = () => {
+    dismiss();
     onPlay();
   };
+  const handleViewTiles = () => {
+    dismiss();
+    onViewTiles();
+  };
 
-  render(<MainMenu onPlay={handlePlay} />, el);
+  render(<MainMenu onPlay={handlePlay} onViewTiles={handleViewTiles} />, el);
 }
