@@ -137,8 +137,20 @@ export function triggerDeathCollapse(eid: number): void {
  * `CROSSFADE_DURATION` so a start/stop doesn't hard-cut. Must run every
  * frame (like `viewmodelSwingSystem`) so `mixer.update` keeps advancing
  * whichever clip(s) are currently faded in, not just on state-change frames.
+ *
+ * `paused` is game.ts's dialogue/death-overlay modal flag: ambient idle/walk
+ * freezes along with the rest of the sim while it's true (`npcSystem`/
+ * `movementSystem` are skipped too, so a walking NPC's `Position` genuinely
+ * stops — letting its walk-cycle mixer keep advancing here would desync legs
+ * still cycling from feet no longer actually moving). A `hit`/`death`
+ * one-shot already in flight is the one exception: it always keeps playing
+ * to completion regardless of `paused`, since it's a purely cosmetic
+ * override with no further gameplay effect — freezing a death collapse
+ * mid-fall (e.g. the killing blow and the player's own death/respawn
+ * landing in the same instant) used to leave a corpse stuck in an
+ * unfinished, not-lying-flat pose once the pause outlived the clip.
  */
-export function npcAnimationSystem(world: World, dt: number): void {
+export function npcAnimationSystem(world: World, dt: number, paused: boolean): void {
   for (const [eid, state] of npcAnimations) {
     if (!hasComponent(world, eid, NPC)) {
       // The NPC entity is gone; nothing left to drive (never happens today —
@@ -147,6 +159,8 @@ export function npcAnimationSystem(world: World, dt: number): void {
       npcAnimations.delete(eid);
       continue;
     }
+
+    if (paused && !state.oneShot) continue; // ambient idle/walk freezes with the rest of the sim
 
     const speed = Math.hypot(Velocity.x[eid], Velocity.z[eid]);
     const moving = speed > MOVING_EPSILON;

@@ -9,7 +9,7 @@ import { doorAnimationSystem, tryInteract } from "./ecs/systems/doors";
 import { tryMeleeAttack } from "./ecs/systems/combat";
 import { npcSystem, toggleNpcFollow } from "./ecs/systems/npc";
 import { getNpcAnimationDebugState, npcAnimationSystem } from "./ecs/systems/npcAnimation";
-import { corpseCleanupSystem } from "./ecs/systems/corpseCleanup";
+import { corpseCleanupSystem, MIN_LINGER_SECONDS } from "./ecs/systems/corpseCleanup";
 import { equipItem, equipToOpenHandSlot, unequipItem, viewmodelSwingSystem } from "./ecs/systems/items";
 import { syncSystem } from "./ecs/systems/sync";
 import { hudSync } from "./ecs/systems/hudSync";
@@ -197,6 +197,11 @@ export function startGame(container: HTMLElement): void {
     getRotation: () => ({ yaw: Rotation.yaw[player], pitch: Rotation.pitch[player] }),
     getCurrentSector: () => currentSector,
     getHealth: () => ({ current: Health.current[player], max: Health.max[player] }),
+    // Debug-only direct health set, for automated (Playwright) testing that
+    // needs the player's health to hit 0 in one step (e.g. forcing the
+    // death overlay open at a precise moment) rather than through many
+    // separate `[`-key nudges, each a real round-trip.
+    setHealth: (current: number) => { Health.current[player] = Math.max(0, Math.min(Health.max[player], current)); },
     // Issue #36, extended for archetypes (multiple NPCs, not one hardcoded
     // test NPC) — one entry per NPC entity rather than a single object.
     getNpcState: () =>
@@ -316,7 +321,8 @@ export function startGame(container: HTMLElement): void {
     // dialogue existed).
     const isModalActive = () => dialogueStore.isOpen || hudStore.playerDefeated;
 
-    if (isModalActive()) {
+    const modalActive = isModalActive();
+    if (modalActive) {
       Velocity.x[player] = 0;
       Velocity.z[player] = 0;
     } else {
@@ -327,11 +333,14 @@ export function startGame(container: HTMLElement): void {
         touchLook: touch.lookDrag,
       });
       npcSystem(world, dt);
-      npcAnimationSystem(world, dt);
       movementSystem(world, dt);
       collisionSystem(world);
       doorAnimationSystem(world, dt);
     }
+    // Runs every frame regardless of `modalActive` — see its own doc
+    // comment for why a death/hit one-shot has to keep playing through a
+    // pause even though ambient idle/walk freezes with everything else.
+    npcAnimationSystem(world, dt, modalActive);
 
     const interactRequested = keyboard.consumeJustPressed("KeyE") || touch.consumeInteractRequest();
     if (interactRequested && !isModalActive()) tryInteract(world, camera);
@@ -359,6 +368,7 @@ export function startGame(container: HTMLElement): void {
       if (!hasComponent(world, eid, DeathSector)) {
         addComponent(world, eid, DeathSector);
         DeathSector.sectorId[eid] = level.sectorAt(Position.x[eid], Position.z[eid]);
+        DeathSector.lingerRemaining[eid] = MIN_LINGER_SECONDS;
       }
     }
 
@@ -377,7 +387,10 @@ export function startGame(container: HTMLElement): void {
       currentSector = sector;
       console.log(`[sector] entered "${currentSector ?? "(none)"}"`);
     }
-    corpseCleanupSystem(world, sector);
+    // Skipped during a pause along with everything else in the `modalActive`
+    // branch above — a corpse's linger timer shouldn't burn down while the
+    // game is sitting on a dialogue or the death overlay.
+    if (!modalActive) corpseCleanupSystem(world, sector, dt);
 
     syncSystem(world);
     hudSync(world);
