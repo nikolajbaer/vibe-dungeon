@@ -59,7 +59,10 @@ export class TouchControls {
   readonly lookDrag: TouchLookDrag | null = null;
   private readonly attackButton: TouchAttackButton | null = null;
 
-  constructor(container: HTMLElement) {
+  /** `gameSurface` is the three.js renderer's own canvas — see
+   * `TouchLookDrag`'s doc comment for why look-drag/tap-interact only ever
+   * tracks a touch that starts directly on it. */
+  constructor(container: HTMLElement, gameSurface: HTMLElement) {
     if (!isTouchDevice()) return;
 
     this.moveStick = new TouchJoystick("left");
@@ -68,12 +71,7 @@ export class TouchControls {
     this.attackButton = new TouchAttackButton();
     container.appendChild(this.attackButton.el);
 
-    // Any touch starting outside the move stick or the attack button drives
-    // look-drag; a short tap (rather than a drag) there is reported back as
-    // a door-interact request via `consumeInteractRequest()` below. Tapping
-    // the attack button itself is handled separately (`consumeAttackRequest`)
-    // and must not also register as a look-tap/interact attempt.
-    this.lookDrag = new TouchLookDrag([this.moveStick.el, this.attackButton.el]);
+    this.lookDrag = new TouchLookDrag(gameSurface);
   }
 
   /** True once for the tap that requested a door interaction. */
