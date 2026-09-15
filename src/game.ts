@@ -1,16 +1,15 @@
 import * as THREE from "three";
 import { addComponent, addEntity, createWorld, hasComponent } from "bitecs";
 import { query } from "bitecs";
-import { Position, Velocity, Rotation, Collider, PlayerControlled, Object3DRef, Door, Dead, DeathSector, Health, NPC, NpcState, Item, Carried } from "./ecs/components";
+import { Position, Velocity, Rotation, Collider, PlayerControlled, Object3DRef, Door, Dead, DeathSector, Health, NPC, Item, Carried } from "./ecs/components";
 import { inputSystem } from "./ecs/systems/input";
 import { movementSystem } from "./ecs/systems/movement";
 import { collisionSystem } from "./ecs/systems/collision";
 import { doorAnimationSystem, tryInteract } from "./ecs/systems/doors";
 import { tryMeleeAttack } from "./ecs/systems/combat";
-import { npcSystem } from "./ecs/systems/npc";
-import { createAnimatedNpcMesh, getNpcAnimationDebugState, npcAnimationSystem } from "./ecs/systems/npcAnimation";
+import { npcSystem, toggleNpcFollow } from "./ecs/systems/npc";
+import { getNpcAnimationDebugState, npcAnimationSystem } from "./ecs/systems/npcAnimation";
 import { corpseCleanupSystem } from "./ecs/systems/corpseCleanup";
-import { createHumanoidRig } from "./characters/humanoidRig";
 import { equipItem, equipToOpenHandSlot, unequipItem, viewmodelSwingSystem } from "./ecs/systems/items";
 import { syncSystem } from "./ecs/systems/sync";
 import { hudSync } from "./ecs/systems/hudSync";
@@ -20,23 +19,22 @@ import { Keyboard } from "./input/keyboard";
 import { PointerLook } from "./input/pointerLook";
 import { TouchControls, isTouchDevice } from "./input/touchControls";
 import { mountHud } from "./hud/mount";
+import { hudStore, type HudActions } from "./hud/store";
 import { mountInventory } from "./inventory/mount";
 import { inventorySync } from "./inventory/sync";
 import { inventoryStore, type InventoryActions } from "./inventory/store";
+import { mountDialogue } from "./dialogue/mount";
+import { dialogueStore, type DialogueActions } from "./dialogue/store";
 
 const EYE_HEIGHT = 1.6;
 const PLAYER_HALF_EXTENT = 0.35;
 const DEBUG_HEALTH_STEP = 10; // debug-only nudge, see `[`/`]` handling below
 
-// Test NPC (issue #36) — hardcoded spawn inside room-a (x in [-3,6], z in
-// [0,9]; see level/rooms/room-a.ts), straight ahead of the player's spawn
-// point along the path to the door (same x, facing yaw 0 looks directly at
-// it) and well clear of the walls. No general NPC-spawn data format yet,
-// per the issue.
-const NPC_SPAWN = { x: 1.5, z: 3.5 };
-const NPC_HALF_EXTENT = 0.4;
-const NPC_INITIAL_WANDER_PAUSE = 2; // seconds before its first idle wander leg
-const NPC_HEALTH = 30; // issue #48 — first thing that can actually be damaged; two 15-damage hits kill it
+// Mirrors `NpcState` (ecs/components.ts) by index, for the debug hook below —
+// `getNpcState` reports every NPC entity now (archetypes), not one hardcoded
+// test NPC, so it needs a human-readable name per state rather than a single
+// FOLLOWING/LOITERING ternary.
+const NPC_STATE_NAMES = ["LOITERING", "FOLLOWING", "CHASING", "ATTACKING"];
 
 /** Wires up the ECS world, level, player entity, input sources, and the
  * core game loop (input -> npc -> npc-animation -> movement -> collision ->
@@ -128,42 +126,10 @@ export function startGame(container: HTMLElement): void {
   Health.current[player] = 100;
   Health.max[player] = 100;
 
-  // Test NPC (issue #36): loiters near NPC_SPAWN by default; interacting
-  // with it (same raycast dispatch as doors, see doors.ts `tryInteract`)
-  // toggles it to follow the player instead. Moves via Velocity, driven
-  // through the normal movementSystem/collisionSystem pipeline just like
-  // the player — see ecs/systems/npc.ts.
-  const npc = addEntity(world);
-  addComponent(world, npc, Position);
-  addComponent(world, npc, Velocity);
-  addComponent(world, npc, Collider);
-  addComponent(world, npc, NPC);
-  addComponent(world, npc, Object3DRef);
-  addComponent(world, npc, Health);
-  Position.x[npc] = NPC_SPAWN.x;
-  Position.y[npc] = 0; // the humanoid rig's origin is at its feet, unlike the old cylinder's centered origin
-  Position.z[npc] = NPC_SPAWN.z;
-  Velocity.x[npc] = 0;
-  Velocity.z[npc] = 0;
-  Collider.hx[npc] = NPC_HALF_EXTENT;
-  Collider.hz[npc] = NPC_HALF_EXTENT;
-  NPC.state[npc] = NpcState.LOITERING;
-  NPC.homeX[npc] = NPC_SPAWN.x;
-  NPC.homeZ[npc] = NPC_SPAWN.z;
-  NPC.wanderTargetX[npc] = NPC_SPAWN.x;
-  NPC.wanderTargetZ[npc] = NPC_SPAWN.z;
-  NPC.wanderTimer[npc] = NPC_INITIAL_WANDER_PAUSE;
-  Health.current[npc] = NPC_HEALTH;
-  Health.max[npc] = NPC_HEALTH;
-
-  // Issue #54: animated idle/walk mesh instead of the old plain
-  // CylinderGeometry placeholder, backed by the procedural humanoid rig
-  // (issue #53, src/characters/humanoidRig.ts), which also carries the
-  // hit/death one-shots (issue #58) `createAnimatedNpcMesh` wires up.
-  const humanoidRig = createHumanoidRig();
-  const npcMesh = createAnimatedNpcMesh(humanoidRig, npc); // same userData.eid convention doors' slab meshes use
-  scene.add(npcMesh);
-  Object3DRef[npc] = npcMesh;
+  // NPCs (issue #36, extended into archetypes: docile villager + aggressive
+  // bandit — src/assets/npcs/*.ts) are spawned generically by `buildLevel`
+  // (level/level.ts's `spawnNpcs`) from `level/rooms/*.ts`'s data, same as
+  // world items/props. Nothing left to wire up here.
 
   // World items (issue #39: sword + gem; #75: lantern) are spawned generically
   // by `buildLevel` (level/level.ts's `spawnItems`) from `level/rooms/*.ts`'s
@@ -193,6 +159,33 @@ export function startGame(container: HTMLElement): void {
   };
   inventoryStore.bindActions(inventoryActions);
 
+  // Dialogue UI -> ECS action wiring, same shape as inventoryActions above:
+  // the only ECS mutation a dialogue choice can trigger today is the
+  // "toggleFollow" effect (see src/dialogue/store.ts, src/dialogue/types.ts).
+  const dialogueActions: DialogueActions = {
+    toggleFollow(npcEid) {
+      toggleNpcFollow(npcEid);
+    },
+  };
+  dialogueStore.bindActions(dialogueActions);
+
+  // Player death/respawn UI -> ECS action wiring, same shape again: resets
+  // the player back to the level's spawn point, full health, once the
+  // DeathOverlay's respawn button is tapped (hudStore.respawn()).
+  const hudActions: HudActions = {
+    respawn() {
+      Position.x[player] = level.spawn.x;
+      Position.y[player] = EYE_HEIGHT;
+      Position.z[player] = level.spawn.z;
+      Rotation.yaw[player] = level.spawn.yaw;
+      Rotation.pitch[player] = 0;
+      Velocity.x[player] = 0;
+      Velocity.z[player] = 0;
+      Health.current[player] = Health.max[player];
+    },
+  };
+  hudStore.bindActions(hudActions);
+
   // Minimal debug hook for manual/automated smoke testing (e.g. Playwright
   // checking that movement and collision actually affect position).
   (window as unknown as { __vibeDungeonDebug: unknown }).__vibeDungeonDebug = {
@@ -204,24 +197,30 @@ export function startGame(container: HTMLElement): void {
     getRotation: () => ({ yaw: Rotation.yaw[player], pitch: Rotation.pitch[player] }),
     getCurrentSector: () => currentSector,
     getHealth: () => ({ current: Health.current[player], max: Health.max[player] }),
-    getNpcState: () => ({
-      state: NPC.state[npc] === NpcState.FOLLOWING ? "FOLLOWING" : "LOITERING",
-      x: Position.x[npc],
-      y: Position.y[npc],
-      z: Position.z[npc],
-      health: Health.current[npc],
-      dead: hasComponent(world, npc, Dead),
-      meshInScene: npcMesh.parent !== null,
-      // Issue #59: the sector it died in (until corpseCleanupSystem clears
-      // it back to undefined once cleaned up), for confirming the corpse
-      // cleanup lifecycle end-to-end.
-      deathSector: hasComponent(world, npc, DeathSector) ? DeathSector.sectorId[npc] : undefined,
-    }),
-    // Issue #54: exposes the NPC's animation-mixer state (which of
-    // idle/walk is fading in, and the mixer's own clock) so automated
-    // (Playwright) tests can confirm the walk/idle crossfade actually
-    // happens instead of only inferring it from position deltas.
-    getNpcAnimationState: () => getNpcAnimationDebugState(npc),
+    // Issue #36, extended for archetypes (multiple NPCs, not one hardcoded
+    // test NPC) — one entry per NPC entity rather than a single object.
+    getNpcState: () =>
+      Array.from(query(world, [NPC, Position])).map((eid) => ({
+        eid,
+        archetypeId: NPC.archetypeId[eid],
+        state: NPC_STATE_NAMES[NPC.state[eid]] ?? "UNKNOWN",
+        x: Position.x[eid],
+        y: Position.y[eid],
+        z: Position.z[eid],
+        health: Health.current[eid],
+        dead: hasComponent(world, eid, Dead),
+        meshInScene: Object3DRef[eid]?.parent !== null,
+        // Issue #59: the sector it died in (until corpseCleanupSystem clears
+        // it back to undefined once cleaned up), for confirming the corpse
+        // cleanup lifecycle end-to-end.
+        deathSector: hasComponent(world, eid, DeathSector) ? DeathSector.sectorId[eid] : undefined,
+      })),
+    // Issue #54: exposes an NPC's animation-mixer state (which of idle/walk
+    // is fading in, and the mixer's own clock) so automated (Playwright)
+    // tests can confirm the walk/idle crossfade actually happens instead of
+    // only inferring it from position deltas. Takes an eid (see
+    // `getNpcState` above) now that there's more than one NPC.
+    getNpcAnimationState: (eid: number) => getNpcAnimationDebugState(eid),
     // Debug-only direct trigger for automated (Playwright) testing of melee
     // combat (issue #48) without needing to simulate real pointer-lock
     // clicks/touches — fires the exact same `tryMeleeAttack` the real
@@ -243,6 +242,20 @@ export function startGame(container: HTMLElement): void {
     // (see equipItem in ecs/systems/items.ts), so its child count doubles
     // as "how many viewmodels are currently shown".
     getViewmodelCount: () => camera.children.length,
+    // Dialogue debug hooks, for automated (Playwright) testing of the
+    // villager's dialogue tree without needing a real raycast + click.
+    getDialogueState: () => ({
+      isOpen: dialogueStore.isOpen,
+      npcName: dialogueStore.npcName,
+      nodeId: dialogueStore.currentNodeId,
+      line: dialogueStore.currentNode?.line,
+      choices: dialogueStore.currentNode?.choices.map((c) => c.text) ?? [],
+    }),
+    chooseDialogue: (index: number) => dialogueStore.choose(index),
+    // Player death/respawn debug hooks (aggressive NPC archetypes can now
+    // actually kill the player).
+    isPlayerDefeated: () => hudStore.playerDefeated,
+    respawn: () => hudStore.respawn(),
   };
 
   // Tracks (and logs, on change) the sector the player currently occupies —
@@ -250,19 +263,13 @@ export function startGame(container: HTMLElement): void {
   // issue #59 it also drives `corpseCleanupSystem` below.
   let currentSector: string | undefined;
 
-  // Edge-detects the NPC's Dead transition (issue #59), the same "was it
-  // already in that state last frame" shape `npcAnimation.ts`'s `moving`
-  // field uses for idle/walk — `tryMeleeAttack` (combat.ts) adds `Dead` but
-  // has no access to `level`, so the one-time `DeathSector` recording has to
-  // happen back here instead, right after the call below.
-  let npcWasDead = false;
-
   const keyboard = new Keyboard();
   const pointerLook = new PointerLook(renderer.domElement);
   const touch = new TouchControls(container);
   setupHint(container, renderer.domElement, pointerLook);
   mountHud(container);
   mountInventory(container);
+  mountDialogue(container);
 
   // Desktop melee attack trigger (issue #48): left-click, but only once
   // pointer lock is already engaged — `PointerLook`'s own click handler
@@ -287,35 +294,51 @@ export function startGame(container: HTMLElement): void {
     requestAnimationFrame(frame);
     const dt = Math.min(clock.getDelta(), 0.1);
 
-    inputSystem(world, dt, {
-      keyboard,
-      look: pointerLook,
-      moveStick: touch.moveStick,
-      touchLook: touch.lookDrag,
-    });
+    // A dialogue panel or the death overlay is a modal — the player
+    // shouldn't be able to walk off, attack, or open something else while
+    // either is up. Movement/attack/interact are gated on this below;
+    // look/camera rotation stays live either way (harmless), and other
+    // systems (doors, NPCs) keep running normally.
+    const modalActive = dialogueStore.isOpen || hudStore.playerDefeated;
+
+    if (modalActive) {
+      Velocity.x[player] = 0;
+      Velocity.z[player] = 0;
+    } else {
+      inputSystem(world, dt, {
+        keyboard,
+        look: pointerLook,
+        moveStick: touch.moveStick,
+        touchLook: touch.lookDrag,
+      });
+    }
     npcSystem(world, dt);
     npcAnimationSystem(world, dt);
     movementSystem(world, dt);
     collisionSystem(world);
     doorAnimationSystem(world, dt);
 
-    const interactPressed = keyboard.consumeJustPressed("KeyE") || touch.consumeInteractRequest();
-    if (interactPressed) tryInteract(world, camera);
+    const interactRequested = keyboard.consumeJustPressed("KeyE") || touch.consumeInteractRequest();
+    if (interactRequested && !modalActive) tryInteract(world, camera);
 
-    const attackPressed = attackRequested || touch.consumeAttackRequest();
+    const attackRequestedThisFrame = attackRequested || touch.consumeAttackRequest();
     attackRequested = false;
-    if (attackPressed) tryMeleeAttack(world, camera);
+    if (attackRequestedThisFrame && !modalActive) tryMeleeAttack(world, camera);
     viewmodelSwingSystem(dt);
 
-    // Issue #59: the NPC just became Dead this frame (edge-detected against
-    // `npcWasDead`) — record the sector it died in once, so
-    // `corpseCleanupSystem` below knows when the player has left it.
-    const npcIsDead = hasComponent(world, npc, Dead);
-    if (npcIsDead && !npcWasDead) {
-      addComponent(world, npc, DeathSector);
-      DeathSector.sectorId[npc] = level.sectorAt(Position.x[npc], Position.z[npc]);
+    // Issue #59, extended for archetypes (issue #36 follow-up): any NPC that
+    // just became Dead and doesn't have a `DeathSector` yet gets one
+    // recorded once — `tryMeleeAttack` (combat.ts) adds `Dead` but has no
+    // access to `level`, so this one-time recording has to happen back here
+    // instead, right after the call below. Checking "no DeathSector yet"
+    // rather than an edge-detected boolean works the same for any number of
+    // NPCs, not just one hardcoded test NPC.
+    for (const eid of query(world, [NPC, Dead])) {
+      if (!hasComponent(world, eid, DeathSector)) {
+        addComponent(world, eid, DeathSector);
+        DeathSector.sectorId[eid] = level.sectorAt(Position.x[eid], Position.z[eid]);
+      }
     }
-    npcWasDead = npcIsDead;
 
     // Debug-only health nudge (`[`/`]`) so the ECS -> MobX -> HUD plumbing
     // is visibly exercised before real combat (#16) exists. Harmless to

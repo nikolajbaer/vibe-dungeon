@@ -12,9 +12,10 @@ import type { RoomContent } from "../placementTypes";
 // [0,3]) and interior clear space roughly [-2.85,5.85] x [0.15,8.85] once
 // wall thickness is accounted for.
 //
-// Other hardcoded occupants of this room (src/game.ts): the player spawns
-// at (1.5,7.5) and the test NPC loiters around (1.5,3.5), wandering within
-// ~1.5m of that point — both sit on the room's x=1.5 north-south spine.
+// The player spawns at (1.5,7.5) and the villager NPC (issue #36, now the
+// first docile archetype — src/assets/npcs/villager.ts) loiters around
+// (1.5,3.5), wandering within ~1.5m of that point — both sit on the room's
+// x=1.5 north-south spine.
 //
 // The table+chairs+barrel grouping sits in the north-east corner (x roughly
 // 3.7-5.7, z roughly 6.0-8.6), comfortably clear of that spine, clear of the
@@ -67,6 +68,7 @@ const roomA: RoomContent = {
     { id: "sword", x: 4, z: 7 },
     { id: "gem", x: -1, z: 7 },
   ],
+  npcs: [{ id: "villager", x: 1.5, z: 3.5 }],
 };
 
 export default roomA;

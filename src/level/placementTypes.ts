@@ -46,6 +46,14 @@ export interface ItemSpawn {
   y?: number;
 }
 
+/** One NPC placed in the world. Lives in a `RoomContent.npcs` array. */
+export interface NpcSpawn {
+  /** References an `NpcArchetypeDef.id` (src/assets/npcs/*.ts). */
+  id: string;
+  x: number;
+  z: number;
+}
+
 /** Where the player starts: position plus initial facing (radians, same
  * convention as `Rotation.yaw`). Exactly one room file should declare this
  * — `src/level/rooms.ts` throws at build time if zero or more than one do,
@@ -72,5 +80,6 @@ export interface RoomContent {
   tiles?: TileInstance[];
   props?: PropPlacement[];
   items?: ItemSpawn[];
+  npcs?: NpcSpawn[];
   spawn?: LevelSpawn;
 }

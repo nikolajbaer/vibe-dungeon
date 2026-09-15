@@ -1,9 +1,10 @@
 import * as THREE from "three";
 import { addComponent, addEntity, type World } from "bitecs";
-import { Position, Collider, Solid, Object3DRef, Item } from "../ecs/components";
+import { Position, Velocity, Collider, Solid, Object3DRef, Item, NPC, NpcState, Health } from "../ecs/components";
 import { ITEM_REGISTRY } from "../assets/itemRegistry";
 import { FURNITURE_REGISTRY } from "../assets/furnitureRegistry";
-import type { PropPlacement, ItemSpawn } from "./placementTypes";
+import { NPC_REGISTRY } from "../assets/npcRegistry";
+import type { PropPlacement, ItemSpawn, NpcSpawn } from "./placementTypes";
 
 // Generic spawners for the asset-authoring system: turn plain `PropPlacement`/
 // `ItemSpawn` data (src/level/rooms/*.ts) into real ECS entities + three.js
@@ -91,6 +92,51 @@ export function spawnItems(world: World, scene: THREE.Scene, spawns: ItemSpawn[]
     const group = withPickupHitbox(mesh, eid);
     scene.add(group);
     Object3DRef[eid] = group;
+  }
+}
+
+const NPC_INITIAL_WANDER_PAUSE = 2; // seconds before its first idle wander leg
+
+/**
+ * Places every NPC spawn as a real `NPC` + `Position` + `Velocity` +
+ * `Collider` + `Health` + `Object3DRef` entity, starting `LOITERING` at its
+ * spawn point (its own initial "home" for wandering — see `NPC`'s doc
+ * comment in `ecs/components.ts`), built from its `NpcArchetypeDef.createMesh()`.
+ * Throws if a spawn references an unknown archetype id.
+ */
+export function spawnNpcs(world: World, scene: THREE.Scene, spawns: NpcSpawn[]): void {
+  for (const spawn of spawns) {
+    const archetype = NPC_REGISTRY[spawn.id];
+    if (!archetype) throw new Error(`spawnNpcs: unknown NPC archetype id "${spawn.id}"`);
+
+    const eid = addEntity(world);
+    addComponent(world, eid, Position);
+    addComponent(world, eid, Velocity);
+    addComponent(world, eid, Collider);
+    addComponent(world, eid, NPC);
+    addComponent(world, eid, Object3DRef);
+    addComponent(world, eid, Health);
+    Position.x[eid] = spawn.x;
+    Position.y[eid] = 0; // the humanoid rig's origin is at its feet
+    Position.z[eid] = spawn.z;
+    Velocity.x[eid] = 0;
+    Velocity.z[eid] = 0;
+    Collider.hx[eid] = archetype.halfExtent;
+    Collider.hz[eid] = archetype.halfExtent;
+    NPC.state[eid] = NpcState.LOITERING;
+    NPC.homeX[eid] = spawn.x;
+    NPC.homeZ[eid] = spawn.z;
+    NPC.wanderTargetX[eid] = spawn.x;
+    NPC.wanderTargetZ[eid] = spawn.z;
+    NPC.wanderTimer[eid] = NPC_INITIAL_WANDER_PAUSE;
+    NPC.archetypeId[eid] = archetype.id;
+    NPC.attackCooldownRemaining[eid] = 0;
+    Health.current[eid] = archetype.health;
+    Health.max[eid] = archetype.health;
+
+    const mesh = archetype.createMesh(eid);
+    scene.add(mesh);
+    Object3DRef[eid] = mesh;
   }
 }
 

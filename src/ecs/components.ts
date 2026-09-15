@@ -69,17 +69,29 @@ export const Object3DRef: (THREE.Object3D | undefined)[] = [];
 export const NpcState = {
   LOITERING: 0,
   FOLLOWING: 1,
+  /** Aggressive archetypes only (see `src/assets/npcRegistry.ts`): spotted
+   * the player and closing the distance. */
+  CHASING: 2,
+  /** Aggressive archetypes only: in range, dealing damage on a cooldown. */
+  ATTACKING: 3,
 } as const;
 
-/** A simple follow/loiter NPC (issue #36) — the first non-door consumer of
- * the generalized interact-raycast dispatch (see doors.ts `tryInteract` and
- * README's "Interact dispatch" design note). It moves by writing `Velocity`
- * (see `npc.ts`), same as the player, so it goes through the normal
- * `movementSystem`/`collisionSystem` pipeline rather than being hand-moved.
- * `homeX`/`homeZ` anchor its idle wander while `LOITERING` — re-anchored to
- * wherever it actually stopped when it drops out of `FOLLOWING`, not its
- * original spawn point (see issue #36's acceptance criteria). `wanderTargetX
- * /Z` and `wanderTimer` are `npc.ts`'s own scratch state for that wander. */
+/** An NPC entity (issue #36, extended for archetypes) — the first non-door
+ * consumer of the generalized interact-raycast dispatch (see doors.ts
+ * `tryInteract` and README's "Interact dispatch" design note). It moves by
+ * writing `Velocity` (see `npc.ts`), same as the player, so it goes through
+ * the normal `movementSystem`/`collisionSystem` pipeline rather than being
+ * hand-moved. `homeX`/`homeZ` anchor its idle wander while `LOITERING` —
+ * re-anchored to wherever it actually stopped when it drops out of
+ * `FOLLOWING`/`CHASING` (see issue #36's acceptance criteria, extended the
+ * same way for a de-aggro'd hostile). `wanderTargetX`/`Z` and `wanderTimer`
+ * are `npc.ts`'s own scratch state for that wander.
+ *
+ * `archetypeId` indexes `NPC_REGISTRY` (`src/assets/npcRegistry.ts`) for
+ * this instance's stats/behavior/mesh — the same per-instance-state-here,
+ * shared-type-data-in-its-own-registry split `Item.itemTypeId` uses.
+ * `attackCooldownRemaining` is an aggressive archetype's own scratch state
+ * (seconds until it can land another hit), unused by docile archetypes. */
 export const NPC = {
   state: [] as number[], // one of NpcState
   homeX: [] as number[],
@@ -87,6 +99,8 @@ export const NPC = {
   wanderTargetX: [] as number[],
   wanderTargetZ: [] as number[],
   wanderTimer: [] as number[], // seconds until the next wander re-target
+  archetypeId: [] as string[],
+  attackCooldownRemaining: [] as number[],
 };
 
 /** Hit points. Added ahead of real combat (#16) so the HUD health bar (#23)
