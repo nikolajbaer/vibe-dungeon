@@ -2,7 +2,7 @@ import * as THREE from "three";
 import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
 import { createWorld } from "bitecs";
 import { buildLevel } from "../level/level";
-import { buildOccupancyIndex, type OccupancyIndex } from "../level/occupancy";
+import { buildOccupancyIndex, parseWorldCellKey, type OccupancyIndex } from "../level/occupancy";
 import { UNIT } from "../level/tiles";
 import { ALL_TILE_INSTANCES, ALL_ITEM_SPAWNS, ALL_NPC_SPAWNS, LEVEL_SPAWN } from "../level/rooms";
 import { NPC_REGISTRY } from "../assets/npcRegistry";
@@ -72,7 +72,21 @@ function makeLabel(text: string, color: string): THREE.Sprite {
  * the fastest way to answer "which rooms did I actually group into which
  * sector" at a glance, since sector boundaries otherwise only show up as
  * authoring data with no visual today (see README "Sectors"). Returns the
- * id->color map used for the legend so the two stay in sync by construction. */
+ * id->color map used for the legend so the two stay in sync by construction.
+ *
+ * Issue #86 (multi-level/stairs): **only floor 0 is overlaid.** Once two
+ * floors can share an XZ column (a staircase's two landings), a naive "one
+ * quad per occupied cell" pass would drop an upper-floor tint directly on
+ * top of a ground-floor one at the same XZ, at roughly the same
+ * `SECTOR_OVERLAY_Y` height above *its own* floor — from a top-down orbit
+ * they'd visually stack and blend into a confusing double-tinted cell. A
+ * full fix (offsetting each floor's overlay to its own real world Y, adding
+ * a per-floor toggle to the viewer HUD) is more UI than this pass is
+ * scoped for; restricting to floor 0 is the cheap version that avoids the
+ * actively-misleading overlap without adding any new UI. Floor 1 still
+ * renders in full (walls/floors/ceilings/props/NPCs/items) — it's just not
+ * sector-tinted from above. See the PR description for what this
+ * deliberately leaves undone. */
 function addSectorOverlays(scene: THREE.Scene, occupancy: OccupancyIndex): Map<string, number> {
   const colors = new Map<string, number>();
   const geometry = new THREE.PlaneGeometry(UNIT * 0.92, UNIT * 0.92);
@@ -82,7 +96,8 @@ function addSectorOverlays(scene: THREE.Scene, occupancy: OccupancyIndex): Map<s
       color = hashColor(cell.sectorId);
       colors.set(cell.sectorId, color);
     }
-    const [x, z] = key.split(",").map(Number);
+    if (cell.floor !== 0) continue; // see doc comment above
+    const { x, z } = parseWorldCellKey(key);
     const mesh = new THREE.Mesh(geometry, new THREE.MeshBasicMaterial({ color, transparent: true, opacity: SECTOR_OVERLAY_OPACITY, depthWrite: false, side: THREE.DoubleSide }));
     mesh.rotation.x = -Math.PI / 2;
     mesh.position.set(x * UNIT + UNIT / 2, SECTOR_OVERLAY_Y, z * UNIT + UNIT / 2);
@@ -151,7 +166,7 @@ interface LevelBounds {
 function computeLevelBounds(occupancy: OccupancyIndex): LevelBounds {
   let minX = Infinity, maxX = -Infinity, minZ = Infinity, maxZ = -Infinity;
   for (const key of occupancy.keys()) {
-    const [x, z] = key.split(",").map(Number);
+    const { x, z } = parseWorldCellKey(key);
     minX = Math.min(minX, x);
     maxX = Math.max(maxX, x);
     minZ = Math.min(minZ, z);
