@@ -1,10 +1,11 @@
 import * as THREE from "three";
 import { addComponent, addEntity, type World } from "bitecs";
 import { Door, DoorState, Object3DRef, PhysicsBody } from "../ecs/components";
-import { UNIT } from "./tiles";
+import { UNIT, floorBaseline } from "./tiles";
 import type { FaceKind } from "./tiles";
 import { TILE_TYPES } from "./tileTypeRegistry";
 import type { OccupancyIndex } from "./occupancy";
+import { parseWorldCellKey, worldCellKey } from "./occupancy";
 import { wallMaterial, floorMaterial, ceilingMaterial, doorMaterial } from "./materials";
 import { addKinematicBox, addStaticBox, type Physics } from "../physics/world";
 
@@ -127,8 +128,9 @@ function addTorch(
   wallHeight: number,
   orientation: "x" | "z",
   interiorSign: 1 | -1,
+  floorBase: number,
 ): void {
-  const mountY = Math.min(TORCH_MOUNT_Y, wallHeight - 0.4);
+  const mountY = floorBase + Math.min(TORCH_MOUNT_Y, wallHeight - 0.4);
   const offsetX = orientation === "x" ? interiorSign : 0;
   const offsetZ = orientation === "z" ? interiorSign : 0;
 
@@ -193,8 +195,9 @@ function addDoorLeaf(
   hingeX: number,
   hingeZ: number,
   hingeSign: number,
+  floorBase: number,
 ): number {
-  const closedY = DOOR_HEIGHT / 2;
+  const closedY = floorBase + DOOR_HEIGHT / 2;
   const offsetX = leafCx - hingeX;
   const offsetZ = leafCz - hingeZ;
 
@@ -239,7 +242,7 @@ function addDoorLeaf(
  * doorway (see `addWall`). It's a separate box from the door leaves and
  * never affects leaf swinging, which still only occupies `0..DOOR_HEIGHT`.
  */
-function addDoorPair(world: World, physics: Physics, scene: THREE.Scene, orientation: "x" | "z", planeCoord: number, rangeStart: number, rangeEnd: number, wallHeight: number): void {
+function addDoorPair(world: World, physics: Physics, scene: THREE.Scene, orientation: "x" | "z", planeCoord: number, rangeStart: number, rangeEnd: number, wallHeight: number, floorBase: number): void {
   const leafHalf = (rangeEnd - rangeStart) / 4; // half-width of each ~1.5m leaf
 
   let eidA: number;
@@ -247,13 +250,13 @@ function addDoorPair(world: World, physics: Physics, scene: THREE.Scene, orienta
   if (orientation === "x") {
     // Wall plane at constant X (a +x/-x boundary); leaves split the Z span,
     // slab thickness runs along X.
-    eidA = addDoorLeaf(world, physics, scene, planeCoord, rangeStart + leafHalf, WALL_THICKNESS, leafHalf, planeCoord, rangeStart, 1);
-    eidB = addDoorLeaf(world, physics, scene, planeCoord, rangeEnd - leafHalf, WALL_THICKNESS, leafHalf, planeCoord, rangeEnd, -1);
+    eidA = addDoorLeaf(world, physics, scene, planeCoord, rangeStart + leafHalf, WALL_THICKNESS, leafHalf, planeCoord, rangeStart, 1, floorBase);
+    eidB = addDoorLeaf(world, physics, scene, planeCoord, rangeEnd - leafHalf, WALL_THICKNESS, leafHalf, planeCoord, rangeEnd, -1, floorBase);
   } else {
     // Wall plane at constant Z (a +z/-z boundary); leaves split the X span,
     // slab thickness runs along Z.
-    eidA = addDoorLeaf(world, physics, scene, rangeStart + leafHalf, planeCoord, leafHalf, WALL_THICKNESS, rangeStart, planeCoord, 1);
-    eidB = addDoorLeaf(world, physics, scene, rangeEnd - leafHalf, planeCoord, leafHalf, WALL_THICKNESS, rangeEnd, planeCoord, -1);
+    eidA = addDoorLeaf(world, physics, scene, rangeStart + leafHalf, planeCoord, leafHalf, WALL_THICKNESS, rangeStart, planeCoord, 1, floorBase);
+    eidB = addDoorLeaf(world, physics, scene, rangeEnd - leafHalf, planeCoord, leafHalf, WALL_THICKNESS, rangeEnd, planeCoord, -1, floorBase);
   }
   Door.pairId[eidA] = eidA;
   Door.pairId[eidB] = eidA;
@@ -263,9 +266,9 @@ function addDoorPair(world: World, physics: Physics, scene: THREE.Scene, orienta
     const cRange = (rangeStart + rangeEnd) / 2;
     const hRange = (rangeEnd - rangeStart) / 2;
     if (orientation === "x") {
-      addWall(physics, scene, planeCoord, cRange, WALL_THICKNESS, hRange, headerHeight, DOOR_HEIGHT);
+      addWall(physics, scene, planeCoord, cRange, WALL_THICKNESS, hRange, headerHeight, floorBase + DOOR_HEIGHT);
     } else {
-      addWall(physics, scene, cRange, planeCoord, hRange, WALL_THICKNESS, headerHeight, DOOR_HEIGHT);
+      addWall(physics, scene, cRange, planeCoord, hRange, WALL_THICKNESS, headerHeight, floorBase + DOOR_HEIGHT);
     }
   }
 }
@@ -276,6 +279,13 @@ interface InstanceBounds {
   minZ: number;
   maxZ: number;
   heightCells: number;
+  /** Which floor this instance is on (see `TileInstance.floor`) — sets the
+   * world Y its floor/ceiling slabs actually sit at (`floorBaseline`). */
+  floor: number;
+  /** The instance's tile type id, so its floor/ceiling slabs can be skipped
+   * per `TileType.skipFloorSlab`/`skipCeilingSlab` (a staircase's landings —
+   * see `stair_lower.ts`/`stair_upper.ts`). */
+  tileTypeId: string;
 }
 
 /** A pending wall or door segment, collected in cell-grid units during the
@@ -291,6 +301,9 @@ interface Segment {
   instanceId: string; // owning tile instance (the cell this segment was emitted from) — used to place torches per-room, not per-segment
   roomSized: boolean; // true for a "room-sized" tile instance (both footprint dimensions > 1 cell) — corridors (e.g. hallway, 1 cell wide) are never torch-eligible
   interiorSign: 1 | -1; // which way, along this segment's perpendicular axis, the owning cell's interior (the room) lies relative to the wall plane
+  /** Which floor the owning cell is on — sets the world Y this segment's
+   * wall (and any torch on it) is actually built at (`floorBaseline`). */
+  floor: number;
 }
 
 /** A tile instance counts as "room-sized" (torch-eligible) when its footprint
@@ -401,23 +414,25 @@ function emitWalls(physics: Physics, scene: THREE.Scene, segments: Segment[]): v
     // corner mitering never nudges it visibly off-center on its wall face.
     const along = (seg.rangeStartCell + 0.5) * UNIT;
 
+    const floorBase = floorBaseline(seg.floor);
+
     if (seg.orientation === "x") {
       if (zWallCorners.has(cornerKey(seg.planeCell, seg.rangeStartCell))) rangeStart -= WALL_THICKNESS;
       if (zWallCorners.has(cornerKey(seg.planeCell, seg.rangeStartCell + 1))) rangeEnd += WALL_THICKNESS;
       const cz = (rangeStart + rangeEnd) / 2;
       const hz = (rangeEnd - rangeStart) / 2;
-      addWall(physics, scene, planeCoord, cz, WALL_THICKNESS, hz, seg.wallHeight);
+      addWall(physics, scene, planeCoord, cz, WALL_THICKNESS, hz, seg.wallHeight, floorBase);
       if (torchSegments.has(seg)) {
-        addTorch(scene, planeCoord + seg.interiorSign * WALL_THICKNESS, along, seg.wallHeight, "x", seg.interiorSign);
+        addTorch(scene, planeCoord + seg.interiorSign * WALL_THICKNESS, along, seg.wallHeight, "x", seg.interiorSign, floorBase);
       }
     } else {
       if (xWallCorners.has(cornerKey(seg.rangeStartCell, seg.planeCell))) rangeStart -= WALL_THICKNESS;
       if (xWallCorners.has(cornerKey(seg.rangeStartCell + 1, seg.planeCell))) rangeEnd += WALL_THICKNESS;
       const cx = (rangeStart + rangeEnd) / 2;
       const hx = (rangeEnd - rangeStart) / 2;
-      addWall(physics, scene, cx, planeCoord, hx, WALL_THICKNESS, seg.wallHeight);
+      addWall(physics, scene, cx, planeCoord, hx, WALL_THICKNESS, seg.wallHeight, floorBase);
       if (torchSegments.has(seg)) {
-        addTorch(scene, along, planeCoord + seg.interiorSign * WALL_THICKNESS, seg.wallHeight, "z", seg.interiorSign);
+        addTorch(scene, along, planeCoord + seg.interiorSign * WALL_THICKNESS, seg.wallHeight, "z", seg.interiorSign, floorBase);
       }
     }
   }
@@ -433,10 +448,10 @@ export function buildGeometryFromOccupancy(world: World, physics: Physics, scene
   // footprint (matches how the old level.ts built one slab per room). ---
   const bounds = new Map<string, InstanceBounds>();
   for (const [key, cell] of index) {
-    const [x, z] = key.split(",").map(Number);
+    const { x, z } = parseWorldCellKey(key);
     const b = bounds.get(cell.instanceId);
     if (!b) {
-      bounds.set(cell.instanceId, { minX: x, maxX: x, minZ: z, maxZ: z, heightCells: cell.heightCells });
+      bounds.set(cell.instanceId, { minX: x, maxX: x, minZ: z, maxZ: z, heightCells: cell.heightCells, floor: cell.floor, tileTypeId: cell.tileTypeId });
     } else {
       b.minX = Math.min(b.minX, x);
       b.maxX = Math.max(b.maxX, x);
@@ -449,9 +464,16 @@ export function buildGeometryFromOccupancy(world: World, physics: Physics, scene
     const hz = ((b.maxZ - b.minZ + 1) * UNIT) / 2;
     const cx = b.minX * UNIT + hx;
     const cz = b.minZ * UNIT + hz;
-    const ceilingY = b.heightCells * UNIT;
-    addSlab(physics, scene, cx, cz, hx, hz, -0.1, floorMaterial(), "floor");
-    addSlab(physics, scene, cx, cz, hx, hz, ceilingY + 0.1, ceilingMaterial(), "ceiling");
+    const floorBase = floorBaseline(b.floor);
+    const ceilingY = floorBase + b.heightCells * UNIT;
+    const type = TILE_TYPES[b.tileTypeId];
+    // Issue #86: a staircase's two landings each skip one of their own
+    // slabs — the lower landing has no ceiling (the shaft continues up
+    // through where one would sit) and the upper landing has no floor (it
+    // stands on riser geometry instead — see `stairBuilder.ts`). Every other
+    // tile type leaves both flags unset and gets the normal pair of slabs.
+    if (!type?.skipFloorSlab) addSlab(physics, scene, cx, cz, hx, hz, floorBase - 0.1, floorMaterial(), "floor");
+    if (!type?.skipCeilingSlab) addSlab(physics, scene, cx, cz, hx, hz, ceilingY + 0.1, ceilingMaterial(), "ceiling");
   }
 
   // --- Walls & doors, one segment per unit-cell face. A shared boundary
@@ -464,14 +486,17 @@ export function buildGeometryFromOccupancy(world: World, physics: Physics, scene
   const wallSegments: Segment[] = [];
 
   for (const [key, cell] of index) {
-    const [x, z] = key.split(",").map(Number);
+    const { x, z } = parseWorldCellKey(key);
     const wallHeight = cell.heightCells * UNIT;
+    const floorBase = floorBaseline(cell.floor);
 
     for (const dir of WALL_DIRS) {
       const kind = cell.sides[dir.side];
       if (kind === null) continue; // interior to this tile instance
 
-      const neighbor = index.get(`${x + dir.dx},${z + dir.dz}`);
+      // Same-floor neighbor only — see validateOccupancy's identical
+      // reasoning for why a wall/door boundary never crosses floors.
+      const neighbor = index.get(worldCellKey(x + dir.dx, z + dir.dz, cell.floor));
       let effective: FaceKind;
       if (neighbor) {
         if (!dir.owner) continue; // the neighbor's opposite pass owns this boundary
@@ -502,9 +527,10 @@ export function buildGeometryFromOccupancy(world: World, physics: Physics, scene
             instanceId: cell.instanceId,
             roomSized: isRoomSizedTileType(cell.tileTypeId),
             interiorSign: (dir.dx > 0 ? -1 : 1) as 1 | -1,
+            floor: cell.floor,
           });
         } else {
-          addDoorPair(world, physics, scene, "x", planeCell * UNIT, z * UNIT, (z + 1) * UNIT, doorHeaderHeight);
+          addDoorPair(world, physics, scene, "x", planeCell * UNIT, z * UNIT, (z + 1) * UNIT, doorHeaderHeight, floorBase);
         }
       } else {
         // +z or -z boundary: a plane of constant Z, spanning this cell's X extent.
@@ -518,9 +544,10 @@ export function buildGeometryFromOccupancy(world: World, physics: Physics, scene
             instanceId: cell.instanceId,
             roomSized: isRoomSizedTileType(cell.tileTypeId),
             interiorSign: (dir.dz > 0 ? -1 : 1) as 1 | -1,
+            floor: cell.floor,
           });
         } else {
-          addDoorPair(world, physics, scene, "z", planeCell * UNIT, x * UNIT, (x + 1) * UNIT, doorHeaderHeight);
+          addDoorPair(world, physics, scene, "z", planeCell * UNIT, x * UNIT, (x + 1) * UNIT, doorHeaderHeight, floorBase);
         }
       }
     }
