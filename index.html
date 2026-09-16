@@ -19,25 +19,6 @@
         position: relative;
         touch-action: none;
       }
-      #controls-hint {
-        position: fixed;
-        left: 50%;
-        top: 16px;
-        transform: translateX(-50%);
-        max-width: calc(100vw - 32px);
-        width: max-content;
-        text-align: center;
-        color: #eee;
-        font: 14px/1.4 system-ui, sans-serif;
-        background: rgba(0, 0, 0, 0.45);
-        padding: 6px 14px;
-        border-radius: 6px;
-        pointer-events: none;
-        transition: opacity 0.3s ease;
-      }
-      #controls-hint.hidden {
-        opacity: 0;
-      }
       .touch-joystick {
         position: fixed;
         bottom: 20px;
@@ -188,10 +169,7 @@
       #inventory-root {
         position: fixed;
         right: max(12px, env(safe-area-inset-right));
-        /* Clears the "click to look around"/touch-controls hint banner
-           (#controls-hint), which is centered near the top of the screen
-           and can be wide enough to reach the right edge on narrow phones. */
-        top: calc(52px + env(safe-area-inset-top));
+        top: max(12px, env(safe-area-inset-top));
         width: clamp(150px, 34vw, 220px);
         display: flex;
         flex-direction: column;

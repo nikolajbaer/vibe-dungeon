@@ -30,8 +30,8 @@ export function buildLevel(world: World, physics: Physics, scene: THREE.Scene): 
   const occupancy: OccupancyIndex = buildOccupancyIndex(ALL_TILE_INSTANCES);
   validateOccupancy(occupancy);
   buildGeometryFromOccupancy(world, physics, scene, occupancy);
-  spawnProps(physics, scene, ALL_PROPS);
-  spawnItems(world, scene, ALL_ITEM_SPAWNS);
+  spawnProps(world, physics, scene, ALL_PROPS);
+  spawnItems(world, physics, scene, ALL_ITEM_SPAWNS);
   spawnNpcs(world, physics, scene, ALL_NPC_SPAWNS);
 
   return {

@@ -1,5 +1,5 @@
 import { TouchJoystick } from "./touchJoystick";
-import { TouchLookDrag } from "./touchLookDrag";
+import { TouchLookDrag, type TapPoint } from "./touchLookDrag";
 
 export function isTouchDevice(): boolean {
   return "ontouchstart" in window || navigator.maxTouchPoints > 0;
@@ -74,9 +74,11 @@ export class TouchControls {
     this.lookDrag = new TouchLookDrag(gameSurface);
   }
 
-  /** True once for the tap that requested a door interaction. */
-  consumeInteractRequest(): boolean {
-    return this.lookDrag?.consumeTapRequest() ?? false;
+  /** Where the tap that requested an interaction landed on screen (normalized
+   * device coordinates), or `null` if there's no pending one — see
+   * `TouchLookDrag.consumeTapRequest()`. */
+  consumeInteractRequest(): TapPoint | null {
+    return this.lookDrag?.consumeTapRequest() ?? null;
   }
 
   /** True once for the tap that requested a melee attack. */

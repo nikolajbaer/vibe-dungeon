@@ -54,6 +54,10 @@ const table: FurnitureAssetDef = {
   id: "table",
   createMesh: () => createTableMesh(),
   footprint: { hx: TABLE_WIDTH / 2, hz: TABLE_DEPTH / 2 },
+  // Heavy enough that shouldering past it nudges it a few centimeters rather
+  // than sending it sliding — it should read as furniture you have to work
+  // around, not a prop that scatters.
+  dynamic: { mass: 45 },
 };
 
 export default table;

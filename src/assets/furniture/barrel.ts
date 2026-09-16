@@ -46,6 +46,8 @@ const barrel: FurnitureAssetDef = {
   id: "barrel",
   createMesh: () => createBarrelMesh(),
   footprint: { hx: BARREL_RADIUS_BULGE, hz: BARREL_RADIUS_BULGE },
+  // A full barrel — shovable, but it takes a deliberate push.
+  dynamic: { mass: 28 },
 };
 
 export default barrel;

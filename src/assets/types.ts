@@ -67,6 +67,14 @@ export interface ItemAssetDef {
    * lit item is lit; the light turns on and off exactly when its group is
    * added to/removed from the camera. */
   createViewmodelMesh?(): THREE.Object3D;
+  /** Mass (kg) of this item's simulated world body. Every world item is a
+   * dynamic rigid body — it falls, lands, and skitters when kicked — and
+   * this is the only knob an asset needs to feel right, since the collider
+   * box itself is measured off the finished mesh (`boxShapeOf` in
+   * level/spawning.ts). Defaults to a generic light-object mass when
+   * omitted; set it when an item should read as notably heavy (a sword) or
+   * notably slight (a gem). */
+  mass?: number;
 }
 
 /** Half-extents (meters) of the box a furniture asset blocks movement with.
@@ -102,6 +110,20 @@ export interface FurnitureAssetDef<P = unknown> {
    * Almost always a plain constant; the function form only exists for the
    * rare asset whose footprint genuinely depends on `params`. */
   footprint?: Footprint | ((params?: P) => Footprint | undefined);
+  /** Opts this asset into being a *simulated* prop rather than immovable
+   * scenery: it falls under gravity, stacks on whatever's beneath it, tips
+   * over, and gets shoved by a character walking into it.
+   *
+   * Omit for anything that should feel like part of the architecture — a
+   * wall-mounted banner, a candelabra whose light would swing wildly if it
+   * fell over. A dynamic asset ignores `footprint` entirely: its collider is
+   * measured off the finished mesh instead (`boxShapeOf` in
+   * level/spawning.ts), because a real 3D body needs its true height and
+   * center, not just a floor plan.
+   *
+   * `mass` is in kg and is what actually sets the feel — it's the difference
+   * between a chair that scoots and a table that barely budges. */
+  dynamic?: { mass: number };
 }
 
 /**

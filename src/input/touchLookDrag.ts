@@ -7,6 +7,17 @@
 const SENSITIVITY = 0.00525; // radians per CSS px of drag (bumped 50% per feedback), analogous to PointerLook's SENSITIVITY
 const TAP_THRESHOLD_PX = 10; // total displacement from touch-start below which a touch counts as a tap, not a drag
 
+/** Where a tap landed, in normalized device coordinates ([-1, 1] on each
+ * axis, y-up) — exactly the shape `THREE.Raycaster.setFromCamera` expects,
+ * computed here (against `gameSurface`'s own bounding rect) rather than
+ * exposing raw client coordinates, so this module's only DOM dependency
+ * stays local to it and nothing downstream needs to know about the canvas
+ * element at all. */
+export interface TapPoint {
+  x: number;
+  y: number;
+}
+
 /**
  * Tracks a single "look" touch at a time (identified by its touch
  * identifier), only starting one for a touch that begins directly on
@@ -37,7 +48,7 @@ export class TouchLookDrag {
   private lastX = 0;
   private lastY = 0;
   private movedPastThreshold = false;
-  private tapRequested = false;
+  private tapPoint: TapPoint | null = null;
 
   constructor(private readonly gameSurface: HTMLElement) {
     window.addEventListener("touchstart", this.onTouchStart, { passive: true });
@@ -54,13 +65,18 @@ export class TouchLookDrag {
     return delta;
   }
 
-  /** True once for a touch that ended having stayed within the tap threshold. */
-  consumeTapRequest(): boolean {
-    if (this.tapRequested) {
-      this.tapRequested = false;
-      return true;
-    }
-    return false;
+  /** Where a touch that ended having stayed within the tap threshold landed,
+   * once — or `null` if there's no pending tap. Returning the actual tap
+   * location (rather than a plain boolean, as this used to) is what lets
+   * `tryInteract` (doors.ts) raycast from wherever the player actually
+   * tapped instead of always the screen center: a mouse-and-keyboard player
+   * behind pointer lock has no real cursor to point at anything but the
+   * reticle, but a touch has always carried a real screen position, so
+   * tap-to-interact can target exactly what's under the finger. */
+  consumeTapRequest(): TapPoint | null {
+    const point = this.tapPoint;
+    this.tapPoint = null;
+    return point;
   }
 
   private onTouchStart = (e: TouchEvent): void => {
@@ -99,7 +115,13 @@ export class TouchLookDrag {
   private onTouchEnd = (e: TouchEvent): void => {
     for (let i = 0; i < e.changedTouches.length; i++) {
       if (e.changedTouches[i].identifier === this.touchId) {
-        if (!this.movedPastThreshold) this.tapRequested = true;
+        if (!this.movedPastThreshold) {
+          const rect = this.gameSurface.getBoundingClientRect();
+          this.tapPoint = {
+            x: ((this.lastX - rect.left) / rect.width) * 2 - 1,
+            y: -((this.lastY - rect.top) / rect.height) * 2 + 1,
+          };
+        }
         this.touchId = null;
         return;
       }

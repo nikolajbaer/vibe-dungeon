@@ -1,9 +1,10 @@
 import * as THREE from "three";
 import { addComponent, addEntity, createWorld, hasComponent } from "bitecs";
 import { query } from "bitecs";
-import { Position, Velocity, Rotation, CharacterBody, PhysicsBody, PhysicsCollider, RenderOffsetY, PlayerControlled, Object3DRef, Door, Dead, DeathSector, Health, NPC, Item, Carried } from "./ecs/components";
+import { Position, Velocity, Rotation, CharacterBody, DynamicBody, PhysicsBody, PhysicsCollider, PhysicsRotation, RenderOffsetY, PlayerControlled, Object3DRef, Door, Dead, DeathSector, Health, NPC, Item, Carried } from "./ecs/components";
 import { inputSystem } from "./ecs/systems/input";
 import { characterSystem, physicsSyncSystem, teleportCharacter } from "./ecs/systems/character";
+import { dynamicSyncSystem } from "./ecs/systems/dynamics";
 import { addCharacter, createPhysics, PHYSICS_DT } from "./physics/world";
 import { doorAnimationSystem, tryInteract } from "./ecs/systems/doors";
 import { tryMeleeAttack } from "./ecs/systems/combat";
@@ -224,8 +225,39 @@ export function startGame(container: HTMLElement): void {
     }),
     getDoorStates: () =>
       Array.from(query(world, [Door])).map((eid) => ({ state: Door.state[eid], progress: Door.progress[eid] })),
+    // Every simulated prop/item body, for confirming things actually settle
+    // on the floor, stack, and move when shoved rather than hovering at
+    // their authored spawn transform.
+    getDynamicBodies: () =>
+      Array.from(query(world, [DynamicBody, Position, PhysicsRotation])).map((eid) => {
+        const body = PhysicsBody[eid];
+        const linvel = body?.linvel();
+        return {
+          eid,
+          itemTypeId: hasComponent(world, eid, Item) ? Item.itemTypeId[eid] : undefined,
+          x: Position.x[eid],
+          y: Position.y[eid],
+          z: Position.z[eid],
+          quat: [PhysicsRotation.x[eid], PhysicsRotation.y[eid], PhysicsRotation.z[eid], PhysicsRotation.w[eid]],
+          speed: linvel ? Math.hypot(linvel.x, linvel.y, linvel.z) : 0,
+          sleeping: body?.isSleeping() ?? false,
+          enabled: body?.isEnabled() ?? false,
+        };
+      }),
     setYaw: (yaw: number) => { Rotation.yaw[player] = yaw; },
     setPitch: (pitch: number) => { Rotation.pitch[player] = pitch; },
+    // Projects a world position to CSS pixel coordinates on the canvas —
+    // for automated (Playwright) testing of tap-to-interact-off-center,
+    // which needs to compute exactly where an object renders on screen
+    // without duplicating three.js's own projection math in the test.
+    worldToScreen: (x: number, y: number, z: number) => {
+      const ndcPoint = new THREE.Vector3(x, y, z).project(camera);
+      const rect = renderer.domElement.getBoundingClientRect();
+      return {
+        x: rect.left + ((ndcPoint.x + 1) / 2) * rect.width,
+        y: rect.top + ((1 - ndcPoint.y) / 2) * rect.height,
+      };
+    },
     getRotation: () => ({ yaw: Rotation.yaw[player], pitch: Rotation.pitch[player] }),
     getCurrentSector: () => currentSector,
     getHealth: () => ({ current: Health.current[player], max: Health.max[player] }),
@@ -307,7 +339,6 @@ export function startGame(container: HTMLElement): void {
   const keyboard = new Keyboard();
   const pointerLook = new PointerLook(renderer.domElement);
   const touch = new TouchControls(container, renderer.domElement);
-  setupHint(container, renderer.domElement, pointerLook);
   mountHud(container);
   mountInventory(container);
   mountDialogue(container);
@@ -390,6 +421,7 @@ export function startGame(container: HTMLElement): void {
         doorAnimationSystem(world, PHYSICS_DT);
         physics.world.step();
         physicsSyncSystem(world);
+        dynamicSyncSystem(world);
       }
       if (steps === MAX_PHYSICS_STEPS_PER_FRAME) accumulator = 0;
     }
@@ -398,8 +430,19 @@ export function startGame(container: HTMLElement): void {
     // pause even though ambient idle/walk freezes with everything else.
     npcAnimationSystem(world, dt, modalActive);
 
-    const interactRequested = keyboard.consumeJustPressed("KeyE") || touch.consumeInteractRequest();
-    if (interactRequested && !isModalActive()) tryInteract(world, camera);
+    // Consumed unconditionally (not inside the `||` below) so a pending
+    // touch tap is never left unconsumed by short-circuit evaluation — not
+    // that desktop and touch input are ever live at once, but there's no
+    // reason to rely on that.
+    const touchInteractPoint = touch.consumeInteractRequest();
+    const interactRequested = keyboard.consumeJustPressed("KeyE") || touchInteractPoint !== null;
+    // A touch tap raycasts from wherever it actually landed on screen
+    // (letting you interact with something off to the side without turning
+    // to face it); `KeyE` has no such point — under pointer lock there's no
+    // real cursor position to give it — so it falls back to the reticle.
+    // See `tryInteract`'s own doc comment for why these are genuinely
+    // different rays, not the same one in disguise.
+    if (interactRequested && !isModalActive()) tryInteract(world, camera, touchInteractPoint ?? undefined);
 
     const attackRequestedThisFrame = attackRequested || touch.consumeAttackRequest();
     attackRequested = false;
@@ -456,20 +499,3 @@ export function startGame(container: HTMLElement): void {
   frame();
 }
 
-/** A small "click to enable mouse-look" hint, shown until pointer lock
- * engages (or immediately hidden on touch devices, which don't use it). */
-function setupHint(container: HTMLElement, domElement: HTMLElement, look: PointerLook): void {
-  const hint = document.createElement("div");
-  hint.id = "controls-hint";
-  hint.textContent = isTouchDevice()
-    ? "Drag the pads to move & look · tap elsewhere to open doors · ATK to attack"
-    : "Click to look around · WASD move · E opens doors · click to attack";
-  container.appendChild(hint);
-
-  if (isTouchDevice()) return;
-
-  domElement.addEventListener("click", () => hint.classList.add("hidden"));
-  document.addEventListener("pointerlockchange", () => {
-    hint.classList.toggle("hidden", look.locked);
-  });
-}
