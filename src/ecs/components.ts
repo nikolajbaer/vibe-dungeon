@@ -93,11 +93,13 @@ export const Door = {
 export const Object3DRef: (THREE.Object3D | undefined)[] = [];
 
 /** Backing Rapier rigid body, for entities the physics world actually moves
- * or is moved by: characters (kinematic, driven by `characterSystem`) and
- * door leaves (kinematic, rotated by `doorAnimationSystem`). Static level
- * geometry — walls, floors, ceilings, props — deliberately has *no* ECS
- * entity at all any more: Rapier owns those colliders outright, and nothing
- * else ever needed them as entities (see `buildGeometryFromOccupancy`).
+ * or is moved by: characters (kinematic, driven by `characterSystem`), door
+ * leaves (kinematic, rotated by `doorAnimationSystem`), and dynamic props and
+ * world items (simulated — see `DynamicBody`). Static level geometry — walls,
+ * floors, ceilings, and any prop that doesn't declare itself dynamic —
+ * deliberately has *no* ECS entity at all: Rapier owns those colliders
+ * outright, and nothing else ever needed them as entities (see
+ * `buildGeometryFromOccupancy`).
  *
  * Same AoS-by-reference shape as `Object3DRef`, for the same reason: these
  * are object handles, not numeric component data. */
@@ -107,6 +109,34 @@ export const PhysicsBody: (RigidBody | undefined)[] = [];
  * because `KinematicCharacterController.computeColliderMovement` takes the
  * *collider*, not the body. */
 export const PhysicsCollider: (RapierCollider | undefined)[] = [];
+
+/** Marks an entity whose transform is produced by the physics simulation
+ * rather than written by gameplay code — a pushable prop, a dropped sword.
+ * The direction of data flow is the whole point of the tag and is the
+ * opposite of a character's: a character's `Velocity` is an *input* Rapier
+ * resolves, whereas a dynamic body is moved entirely by gravity, contacts,
+ * and shoves, and `Position`/`PhysicsRotation` are read back out of it
+ * afterward (`ecs/systems/dynamics.ts`).
+ *
+ * Which assets get this is authored data, not a code path: see
+ * `FurnitureAssetDef.dynamic` in assets/types.ts (every world item is
+ * dynamic; a prop opts in). */
+export const DynamicBody: Record<string, never> = {};
+
+/** Full orientation as a quaternion, for entities that can rotate about any
+ * axis — which `Rotation`'s yaw/pitch pair deliberately can't express. Only
+ * dynamic bodies have it: a chair knocked over lands on its side, and no
+ * amount of yaw describes that.
+ *
+ * Kept as a component rather than written straight onto the `Object3DRef`
+ * from the physics step so that `syncSystem` stays the single place any
+ * three.js transform is written, the same as every other visual property. */
+export const PhysicsRotation = {
+  x: [] as number[],
+  y: [] as number[],
+  z: [] as number[],
+  w: [] as number[],
+};
 
 export const NpcState = {
   LOITERING: 0,

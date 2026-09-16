@@ -19,6 +19,7 @@ const gem: ItemAssetDef = {
   name: "Gem",
   icon: "💎",
   slot: null,
+  mass: 0.3, // barely anything — it bounces away from the lightest contact
   createWorldMesh: () => new THREE.Mesh(new THREE.OctahedronGeometry(0.2), gemMaterial()),
 };
 

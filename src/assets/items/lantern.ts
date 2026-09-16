@@ -136,6 +136,7 @@ const lantern: ItemAssetDef = {
   name: "Lantern",
   icon: "🏮",
   slot: "hand",
+  mass: 1.4, // metal frame and glass — heavier than it looks, but kickable
   createWorldMesh: () => createLanternMesh(),
   createViewmodelMesh: () => {
     // A `THREE.Group` holding the lantern mesh *and* a real

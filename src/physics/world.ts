@@ -11,15 +11,23 @@ import type { Collider, KinematicCharacterController, RigidBody, World } from "@
 // colliders are real boxes, floors are surfaces you actually stand on, and a
 // door's collider genuinely swings on its hinge.
 //
-// Everything here is deliberately kept to two shapes — static cuboids for
-// level geometry, capsules for characters — because this dungeon is built
+// Everything here is deliberately kept to two shapes — cuboids for level
+// geometry and props, capsules for characters — because this dungeon is built
 // entirely from axis-aligned boxes, which cuboid colliders represent exactly
-// and cheaply. No dynamic (force-simulated) bodies exist yet: the player and
-// NPCs are *kinematic* bodies driven by Rapier's `KinematicCharacterController`,
-// which is the right primitive for FPS-style movement (raw rigid-body
-// dynamics feel floaty and bounce off walls). Adding genuinely dynamic props
-// (pushable crates, thrown items) later is a matter of adding a third factory
-// here, not reworking this.
+// and cheaply.
+//
+// There are three body kinds, and which one a thing gets is a gameplay
+// decision rather than a technical one:
+//
+// - **Fixed** (`addStaticBox`) — walls, floors, ceilings, and any prop that
+//   should feel like part of the architecture.
+// - **Kinematic** (`addKinematicBox`, `addCharacter`) — moved by explicit
+//   code rather than by simulation: door leaves, and the player/NPCs, who
+//   run through Rapier's `KinematicCharacterController` because raw rigid-body
+//   dynamics feel floaty and bouncy for FPS movement.
+// - **Dynamic** (`addDynamicBox`) — genuinely simulated: furniture and loose
+//   world items, which fall, stack, tip over, and get shoved around by a
+//   character walking into them.
 
 /** Physics runs on a fixed timestep — Rapier's solver is only stable with a
  * constant `dt`, unlike the old hand-rolled integration which just took
@@ -57,14 +65,34 @@ const MAX_SLOPE_CLIMB_DEGREES = 50;
 //
 // Characters deliberately do NOT interact with each other — the pre-Rapier
 // collision pass resolved movers against level geometry only, never against
-// one another (an NPC and the player could overlap freely), and this
-// migration is meant to be behavior-neutral. Making characters solid to each
-// other is now a one-line change here rather than a system rewrite, but it's
-// a gameplay decision, not a migration one.
+// one another (an NPC and the player could overlap freely), and the migration
+// kept that. Making characters solid to each other is a one-line change here
+// rather than a system rewrite, but it's a gameplay decision, not a physics
+// one. Everything else interacts with everything: props collide with the
+// level, with characters (who push them), and with each other (so they
+// stack).
 const GROUP_LEVEL = 0x0001;
 const GROUP_CHARACTER = 0x0002;
-const LEVEL_GROUPS = (GROUP_LEVEL << 16) | (GROUP_LEVEL | GROUP_CHARACTER);
-export const CHARACTER_GROUPS = (GROUP_CHARACTER << 16) | GROUP_LEVEL;
+const GROUP_PROP = 0x0004;
+const LEVEL_GROUPS = (GROUP_LEVEL << 16) | (GROUP_LEVEL | GROUP_CHARACTER | GROUP_PROP);
+export const CHARACTER_GROUPS = (GROUP_CHARACTER << 16) | (GROUP_LEVEL | GROUP_PROP);
+const PROP_GROUPS = (GROUP_PROP << 16) | (GROUP_LEVEL | GROUP_CHARACTER | GROUP_PROP);
+
+/** What a character "weighs" when it shoves a dynamic body. Not a real mass
+ * — the character controller is kinematic and never itself pushed — just the
+ * impulse budget it gets to push with, tuned so walking into a chair scoots
+ * it convincingly while a loaded table barely shifts. */
+const CHARACTER_MASS = 80;
+
+/** Props are damped well past realism: an undamped box shoved across a
+ * frictionless-feeling stone floor slides for meters and reads as ice.
+ * These bleed off momentum fast enough that a nudged chair travels a
+ * believable few centimeters and settles (at which point Rapier sleeps the
+ * body, so a room full of furniture costs nothing once it's at rest). */
+const PROP_LINEAR_DAMPING = 0.9;
+const PROP_ANGULAR_DAMPING = 1.4;
+const PROP_FRICTION = 0.8;
+const PROP_RESTITUTION = 0; // dungeon furniture does not bounce
 
 type RapierModule = typeof import("@dimforge/rapier3d-compat");
 
@@ -114,7 +142,11 @@ export function createPhysics(): Physics {
   controller.enableAutostep(AUTOSTEP_MAX_HEIGHT, AUTOSTEP_MIN_WIDTH, true);
   controller.enableSnapToGround(SNAP_TO_GROUND_DISTANCE);
   controller.setMaxSlopeClimbAngle((MAX_SLOPE_CLIMB_DEGREES * Math.PI) / 180);
-  controller.setApplyImpulsesToDynamicBodies(false); // nothing dynamic to push yet
+  // Walking into a chair should move the chair. Without this the controller
+  // treats every dynamic body as immovable scenery and the player just stops
+  // dead against it.
+  controller.setApplyImpulsesToDynamicBodies(true);
+  controller.setCharacterMass(CHARACTER_MASS);
 
   return { world, controller };
 }
@@ -213,4 +245,72 @@ export function addCharacter(
  * end, and Rapier positions it from the center. */
 export function capsuleCenterOffset(radius: number, halfHeight: number): number {
   return halfHeight + radius;
+}
+
+/**
+ * The box a mesh occupies, in that mesh's own local space: half-extents plus
+ * the center's offset from the mesh origin. Most assets in this repo are
+ * built around an origin that isn't their visual center (a prop's origin sits
+ * on the floor; the sword's sits at its grip, with most of its length out
+ * along +Z), so a collider needs both numbers, not just a size.
+ *
+ * Measured off the finished mesh rather than authored per asset — see
+ * `boxShapeOf` in level/spawning.ts.
+ */
+export interface BoxShape {
+  hx: number;
+  hy: number;
+  hz: number;
+  cx: number;
+  cy: number;
+  cz: number;
+}
+
+/**
+ * A genuinely simulated box — furniture and loose world items. Falls under
+ * gravity, stacks, tips, and gets shoved by a character walking into it.
+ *
+ * `x`/`y`/`z` is where the *mesh origin* goes and `yaw` is its heading, so a
+ * caller passes exactly the transform it would have given the mesh; the
+ * collider is offset within the body by `shape`'s center, which keeps the
+ * body's own frame aligned with the mesh's and makes syncing the two back
+ * (`ecs/systems/dynamics.ts`) a straight copy of translation and rotation
+ * with no per-asset correction.
+ *
+ * `mass` is set explicitly rather than derived from Rapier's default density,
+ * which would make a table-sized box weigh most of a tonne and turn every
+ * prop into immovable scenery.
+ */
+export function addDynamicBox(
+  physics: Physics,
+  x: number,
+  y: number,
+  z: number,
+  yaw: number,
+  shape: BoxShape,
+  mass: number,
+): RigidBody {
+  const R = rapier();
+  const body = physics.world.createRigidBody(
+    R.RigidBodyDesc.dynamic()
+      .setTranslation(x, y, z)
+      .setRotation({ x: 0, y: Math.sin(yaw / 2), z: 0, w: Math.cos(yaw / 2) })
+      .setLinearDamping(PROP_LINEAR_DAMPING)
+      .setAngularDamping(PROP_ANGULAR_DAMPING)
+      // A light item shoved hard can cover more ground in one 1/60s step
+      // than a floor slab is thick; CCD sweeps the motion instead of
+      // sampling its endpoints, so nothing squirts through the floor. Cheap
+      // at this body count.
+      .setCcdEnabled(true),
+  );
+  physics.world.createCollider(
+    R.ColliderDesc.cuboid(shape.hx, shape.hy, shape.hz)
+      .setTranslation(shape.cx, shape.cy, shape.cz)
+      .setMass(mass)
+      .setFriction(PROP_FRICTION)
+      .setRestitution(PROP_RESTITUTION)
+      .setCollisionGroups(PROP_GROUPS),
+    body,
+  );
+  return body;
 }
