@@ -327,7 +327,6 @@ export function startGame(container: HTMLElement): void {
   const keyboard = new Keyboard();
   const pointerLook = new PointerLook(renderer.domElement);
   const touch = new TouchControls(container, renderer.domElement);
-  setupHint(container, renderer.domElement, pointerLook);
   mountHud(container);
   mountInventory(container);
   mountDialogue(container);
@@ -477,20 +476,3 @@ export function startGame(container: HTMLElement): void {
   frame();
 }
 
-/** A small "click to enable mouse-look" hint, shown until pointer lock
- * engages (or immediately hidden on touch devices, which don't use it). */
-function setupHint(container: HTMLElement, domElement: HTMLElement, look: PointerLook): void {
-  const hint = document.createElement("div");
-  hint.id = "controls-hint";
-  hint.textContent = isTouchDevice()
-    ? "Drag the pads to move & look · tap elsewhere to open doors · ATK to attack"
-    : "Click to look around · WASD move · E opens doors · click to attack";
-  container.appendChild(hint);
-
-  if (isTouchDevice()) return;
-
-  domElement.addEventListener("click", () => hint.classList.add("hidden"));
-  document.addEventListener("pointerlockchange", () => {
-    hint.classList.toggle("hidden", look.locked);
-  });
-}
