@@ -113,10 +113,26 @@ specific things that trip people up:
   with a specific cell/instance/direction in it, not a silent visual bug.
   Always let this run (don't catch/suppress it) when authoring new tiles;
   it's the whole point of the format.
-- **Floors stay at a single baseline for v1.** A tile's `h` sets ceiling
-  height (via `UNIT * h`), never a floor offset — every tile's floor is at
-  world `y ≈ 0`. Stairs/multi-level height is explicitly out of scope for
-  now (a real future feature, not a hack to bolt on here).
+- **Floors can now sit at real height offsets (issue #86).** A tile's `h`
+  still only sets *ceiling* height (via `UNIT * h`), never a floor offset —
+  that part is unchanged. What's new is `TileInstance.floor` (default `0`,
+  so every pre-#86 room, which never set it, keeps rendering at exactly the
+  world position it always did): a whole-number floor index whose world Y
+  baseline is `floorBaseline(floor)` (`tiles.ts`, `= floor * FLOOR_RISE`,
+  `FLOOR_RISE` fixed at `2 * UNIT` = 6m, matching `great_hall`'s own 6m
+  ceiling so an upstairs room reads at the same scale as the tallest room
+  downstairs). The occupancy index's cell key folds `floor` in
+  (`worldCellKey`, occupancy.ts), specifically so two tile instances can
+  legitimately claim the *same* `(x, z)` cell as long as they're on
+  different floors — the one deliberate use of this today is a staircase's
+  two landings (see "Worked example: a vertical connection" below).
+  `sectorAt` takes the position's Y too now and derives which floor a query
+  actually means via `floorForY` (rounds `y / FLOOR_RISE` to the nearest
+  floor) rather than trusting XZ alone, which matters the moment two floors
+  share an XZ column. See the worked example below for the concrete
+  mechanics — a new `TileType.skipFloorSlab`/`skipCeilingSlab` pair, and a
+  `StairConnector` (`placementTypes.ts`) that builds the actual climbable
+  geometry between two paired landings.
 - **Torches are automatic, not authored.** `tileBuilder.ts` decides torch
   placement itself, per tile *instance*, from the already-built wall
   segments — nothing under `tileTypes/`/`rooms/` places a torch directly.
@@ -164,6 +180,18 @@ limitation won't bite you (each new type/instance can be shaped however you
 like from the start). It bites the moment you want to branch *off* an
 already-placed straight run — which is exactly when a level starts feeling
 less like a hallway and more like a dungeon.
+
+**Update (issue #86): multi-floor/stairs is no longer out of scope.** An
+earlier version of this section (and of the README) flatly said floors stay
+at a single baseline and stairs are future work. That's no longer true —
+`TileInstance.floor`, `FLOOR_RISE`, and a `StairConnector` now give a real,
+Playwright-verified way to place a second floor and a real climbable
+staircase between them. See "The tile system's actual rules" above for the
+mechanics and "Worked example: a vertical connection" below for how the
+first one was actually built. The horizontal-branching limitation this
+section is otherwise about is unchanged and unrelated — a vertical
+connection has no face-map/opening concept at all (faces are north/south/
+east/west only), so it doesn't interact with this limitation either way.
 
 ## How rotation works (worked from the existing level)
 
@@ -314,3 +342,132 @@ continue straight to `room-b`, or turn off into the side chamber.
 `side_chamber` is room-sized (`w,d > 1`) so it picks up torches
 automatically; it also gets one bespoke decorative touch (that same
 `side-chamber.ts` file's `props`) for the "distinct feel" pillar.
+
+## Worked example: a vertical connection (issue #86)
+
+The level's first floor change, built alongside this doc's update — a
+second retrofit of the exact same corridor instance the side-chamber branch
+used, plus a genuinely new concept (a floor) this system had never
+exercised before. See `src/level/rooms/stairwell.ts` for the full authored
+layout; this section walks through the *decisions*, not just the result.
+
+**Retrofitting the junction into a crossroads.** `corridor.ts`'s one
+instance had already been retrofitted once (`hallway` -> `hallway_junction`,
+the worked example above). Adding a second branch, directly opposite the
+first, is the exact same technique applied again: `hallway_junction`'s face
+map (one opening on the middle segment of its east face) needed a matching
+opening on the middle segment of its **west** face too. Since
+`hallway_junction` had exactly one instance and nothing else could
+plausibly want the narrower three-opening shape once this instance needs a
+fourth opening, this retrofit evolved the type in place rather than leaving
+an now-permanently-unused type file around: renamed to `hallway_cross`
+(`src/level/tileTypes/hallway_cross.ts`), the old `hallway_junction.ts`
+file deleted, `corridor.ts`'s instance's `tileTypeId` updated to match — its
+`id`/`originCell`/`rotation`/`sectorId` never moved. Either approach (evolve
+in place vs. add a new type and swap the id) is valid per the original
+worked example's own guidance; this is the other reasonable reading of "you
+decide" for a type with a single, otherwise-orphaned instance.
+
+**Placing the new wing away from everything else.** The task that drove
+this work specified "opposite the side room with the barrel" for a reason
+worth restating: cell `(-1,-2)` — directly west of the junction, mirroring
+the existing east branch — was unclaimed, and building the whole new wing
+(corridor, stairs, landing, four rooms) further west from there runs into
+open space rather than needing to route around `room-b` or anything else
+already on the map. **Work out your own new wing's placement the same
+way**: check the occupancy index (or just this doc's running tally of
+claimed cells) before picking coordinates, and prefer growing into open
+space over threading a new feature between existing ones.
+
+**Why a real architecture change, not a per-instance hack.** Before this,
+`sectorAt`/the occupancy index/`buildGeometryFromOccupancy` had no notion of
+height at all — every tile's floor was implicitly `y ≈ 0`, and the cell key
+was pure `(x, z)`. A staircase's two landings need to occupy the *same*
+`(x, z)` on two different floors (see below), which an XZ-only key would
+reject as an overlap. So this added, once, generically:
+
+- `TileInstance.floor` (occupancy.ts) — which floor an instance is on;
+  defaults to `0` so every existing room needed zero changes.
+- `floorBaseline(floor)`/`floorForY(y)`/`FLOOR_RISE` (tiles.ts) — the one
+  place "how far apart are floors" and "which floor is this Y" are defined.
+- The occupancy index's key became `worldCellKey(x, z, floor)`
+  (occupancy.ts) instead of `(x, z)` alone — this is *the* change that makes
+  two floors sharing an XZ column not an overlap error.
+- `sectorAt` (occupancy.ts) takes a world Y now and resolves the query's
+  floor from it via `floorForY`, rather than only ever looking at XZ.
+- `TileType.skipFloorSlab`/`skipCeilingSlab` (tiles.ts) — a type can opt out
+  of the automatic floor or ceiling slab `buildGeometryFromOccupancy`
+  otherwise builds per instance, for the one situation that needs it: a
+  vertical shaft passing through where a slab would otherwise seal it.
+- `PropPlacement`/`ItemSpawn`/`NpcSpawn.floor` (placementTypes.ts) — a
+  placement's `y` is relative to its own floor's baseline, so every existing
+  room's props/items (all implicitly floor 0) keep spawning exactly where
+  they always did.
+
+**The staircase itself: two paired tile instances, not one spanning tile.**
+`stair_lower` (`src/level/tileTypes/stair_lower.ts`, floor 0) and
+`stair_upper` (floor 1) share the *same* `originCell` — a 3-cell-long, 1-wide
+shaft — linked by one `StairConnector` entry (`placementTypes.ts`) in
+`stairwell.ts`'s `stairs` array, which is what actually builds the climbable
+geometry between them (`src/level/stairBuilder.ts`). `stair_lower` sets
+`skipCeilingSlab` (the shaft continues up through where its ceiling would
+sit); `stair_upper` sets `skipFloorSlab` (its floor is the ramp geometry,
+not a poured slab). A single tile spanning both floors couldn't express
+this at all — occupancy cells belong to exactly one floor, and a "this
+instance's floor slab is optional" flag has to apply per-floor-terminus, not
+per-staircase.
+
+**The collision is a smooth ramp; the visual is real stair steps — and this
+was not the first design.** The original approach here was real stepped
+risers sized to the character controller's autostep (`AUTOSTEP_MAX_HEIGHT`,
+`physics/world.ts`) — exactly what that constant's own doc comment
+describes as its purpose. It rendered correctly, the occupancy/face-map data
+validated clean, and it still completely failed an actual Playwright
+walk-up: the character stopped dead at the first riser and never climbed at
+all. Isolating the cause with a throwaway static test box unrelated to any
+tile in this level showed autostep does not engage *at all* in this
+project's current Rapier build, for any step height tried — a real,
+previously-unverified characteristic of this environment, not a bug in the
+staircase's own geometry. The fix was switching to the controller's other
+climbing feature, `setMaxSlopeClimbAngle`, which an isolated ramp test
+confirmed does work: `stairBuilder.ts` builds one static box tilted so its
+top face passes exactly through the shaft's entry and exit points (`~33.7°`
+for this staircase's `FLOOR_RISE`/`STAIR_RUN_CELLS`, comfortably under the
+controller's 50° max), and *separately* builds a purely cosmetic set of
+non-overlapping stepped boxes (mesh only, no collider) whose outer corners
+sit exactly on that same slope line — mismatched "simpler collision than
+visual" geometry, a standard technique for exactly this situation. **The
+practical lesson for the next person touching movement-adjacent physics
+here: verify a real walk-up before trusting a constant's doc comment about
+what it enables** — `AUTOSTEP_MAX_HEIGHT`'s comment calling out stairs as
+its use case was written before anyone had actually tried building stairs
+with it.
+
+**Sector id for the pair.** `stair-lower`/`stair-upper` share one sector id
+(`"stairwell"`) rather than getting their own — deliberate, since
+`floorForY`'s Y-to-floor rounding means a position genuinely mid-climb could
+resolve to either landing's floor depending on exactly where the 50/50
+rounding line falls; giving both the same sector makes that not matter for
+sector tracking (corpse cleanup, the `[sector]` console log) either way.
+
+**The upper floor's four rooms.** `upper_landing` (`src/level/tileTypes/
+upper_landing.ts`, a 2x2 room-sized hub, so it gets automatic torches) sits
+at the top of the stairs with five openings — one back down the stairs, four
+out to small 1x1 `nook` rooms (`src/level/tileTypes/nook.ts`), one per
+compass direction, reused via rotation exactly like `great_hall` is for
+`room-a`/`room-b`. Only the hub got a bespoke decorative touch (one
+candelabra); the four nooks stay bare, per the task's own "proving the
+traversal works is the point, not filling every room" framing — bare is a
+valid, deliberate choice here, not an oversight.
+
+**What this doesn't fix.** `npcSystem`'s aggro/leash checks (`ecs/systems/
+npc.ts`) are still pure XZ distance, blind to Y/floor — an aggressive NPC
+placed directly above (or below) another one's aggro radius could sense
+through the floor. Not exercised by this wing (no aggressive NPC placed
+here, and it's far from `room-b`'s bandit), and not fixed in general —
+flagged on `NpcSpawn.floor`'s doc comment for the next person placing a
+hostile near an existing one on a different floor. The level viewer's
+sector overlay also only tints floor-0 cells now (see
+`levelViewer.ts`'s `addSectorOverlays`) rather than fully supporting
+per-floor display — a deliberate, documented "cheap version," not a full
+fix.
