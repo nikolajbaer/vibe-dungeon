@@ -69,12 +69,15 @@ export interface ItemAssetDef {
   createViewmodelMesh?(): THREE.Object3D;
 }
 
-/** Floor-plan half-extents (meters) for a furniture asset's `Collider` —
- * matches the axis-aligned-box shape `ecs/components.ts`'s `Collider`
- * already only supports. */
+/** Half-extents (meters) of the box a furniture asset blocks movement with.
+ * `hx`/`hz` are its floor plan; `hy` is how tall it stands, measured from
+ * the floor up (a prop's mesh origin sits on the floor), and defaults to a
+ * generic table/barrel height when omitted — every existing asset predates
+ * real 3D collision and simply doesn't declare one yet. */
 export interface Footprint {
   hx: number;
   hz: number;
+  hy?: number;
 }
 
 /**
@@ -122,7 +125,8 @@ export interface NpcArchetypeDef {
   name: string;
   health: number;
   behavior: "docile" | "aggressive";
-  /** Collision half-extent (meters), same meaning as `Collider.hx`/`hz`. */
+  /** Radius (meters) of this archetype's physics capsule — how much room it
+   * takes up walking through a doorway. */
   halfExtent: number;
   /** Docile only: a dialogue tree id (`src/dialogue/dialogueRegistry.ts`)
    * to open on interact, instead of the legacy `toggleNpcFollow` demo

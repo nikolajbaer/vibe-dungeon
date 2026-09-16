@@ -6,6 +6,7 @@ import { buildGeometryFromOccupancy } from "./tileBuilder";
 import { spawnProps, spawnItems, spawnNpcs } from "./spawning";
 import { ALL_TILE_INSTANCES, ALL_PROPS, ALL_ITEM_SPAWNS, ALL_NPC_SPAWNS, LEVEL_SPAWN } from "./rooms";
 import type { LevelSpawn } from "./placementTypes";
+import type { Physics } from "../physics/world";
 
 // Builds the level from tile instances (issue #21): places every room's
 // tile instances (`ALL_TILE_INSTANCES`, auto-aggregated from
@@ -25,13 +26,13 @@ export interface Level {
   sectorAt(worldX: number, worldZ: number): string | undefined;
 }
 
-export function buildLevel(world: World, scene: THREE.Scene): Level {
+export function buildLevel(world: World, physics: Physics, scene: THREE.Scene): Level {
   const occupancy: OccupancyIndex = buildOccupancyIndex(ALL_TILE_INSTANCES);
   validateOccupancy(occupancy);
-  buildGeometryFromOccupancy(world, scene, occupancy);
-  spawnProps(world, scene, ALL_PROPS);
+  buildGeometryFromOccupancy(world, physics, scene, occupancy);
+  spawnProps(physics, scene, ALL_PROPS);
   spawnItems(world, scene, ALL_ITEM_SPAWNS);
-  spawnNpcs(world, scene, ALL_NPC_SPAWNS);
+  spawnNpcs(world, physics, scene, ALL_NPC_SPAWNS);
 
   return {
     spawn: LEVEL_SPAWN,

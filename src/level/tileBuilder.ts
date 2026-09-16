@@ -1,18 +1,25 @@
 import * as THREE from "three";
 import { addComponent, addEntity, type World } from "bitecs";
-import { Position, Collider, Solid, Door, DoorState, Object3DRef } from "../ecs/components";
+import { Door, DoorState, Object3DRef, PhysicsBody } from "../ecs/components";
 import { UNIT } from "./tiles";
 import type { FaceKind } from "./tiles";
 import { TILE_TYPES } from "./tileTypeRegistry";
 import type { OccupancyIndex } from "./occupancy";
 import { wallMaterial, floorMaterial, ceilingMaterial, doorMaterial } from "./materials";
+import { addKinematicBox, addStaticBox, type Physics } from "../physics/world";
 
-// Decomposes a validated tile occupancy index into the same kind of
-// wall/floor/ceiling/door boxes (with Collider/Solid/Door ECS components)
-// that the old hand-placed src/level/level.ts used to build directly. This
-// is the only thing issue #21 replaces — the collision, door-interaction,
-// movement, and input ECS systems are untouched and don't know or care
-// that geometry now comes from tiles.
+// Decomposes a validated tile occupancy index into the wall/floor/ceiling/
+// door boxes the old hand-placed src/level/level.ts used to build directly
+// (issue #21) — meshes for three.js, plus matching Rapier colliders for
+// physics.
+//
+// Static geometry (walls, floors, ceilings) deliberately gets *no ECS
+// entity*: it used to need one purely to carry a `Collider`/`Solid` for the
+// old collision pass, and nothing else ever read it — so with Rapier owning
+// those colliders, the entities were pure overhead (including a pointless
+// per-frame `syncSystem` write of a position that never changes). Doors
+// still get one, since `Door` is real per-entity state the interact/
+// animation systems drive.
 
 const WALL_THICKNESS = 0.15; // half-thickness of a wall/door slab, meters
 const DOOR_HEIGHT = 2.2;
@@ -23,19 +30,17 @@ const DOOR_HEIGHT = 2.2;
  * wall). A header wall above a doorway passes `baseY = DOOR_HEIGHT` to sit
  * above the door leaf instead of starting at the floor.
  *
- * `solid` (default `true`) controls whether it also gets a static
- * `Collider`/`Solid` ECS entity. A **header** wall passes `solid = false`:
- * `Position`/`Collider` are XZ-only (see components.ts — "collision only
- * considers x/z") with no notion of vertical extent, so a Solid collider
- * placed above a doorway would still block the player at floor level across
- * its full XZ footprint — i.e. it would seal the doorway shut even with both
- * leaves open. A header is purely decorative geometry filling the visual gap
- * to the ceiling; nothing can reach that height to require colliding with
- * it anyway.
+ * Headers are now solid like any other wall. Under the old XZ-only collision
+ * they had to be deliberately non-solid: a collider with no vertical extent
+ * would have blocked the doorway at floor level across the header's whole
+ * footprint, sealing it shut even with both leaves open. A real 3D box
+ * sitting from `DOOR_HEIGHT` up simply doesn't intersect anything walking
+ * underneath it.
  */
-function addWall(world: World, scene: THREE.Scene, cx: number, cz: number, hx: number, hz: number, height: number, baseY: number = 0, solid: boolean = true): void {
+function addWall(physics: Physics, scene: THREE.Scene, cx: number, cz: number, hx: number, hz: number, height: number, baseY: number = 0): void {
+  const centerY = baseY + height / 2;
   const mesh = new THREE.Mesh(new THREE.BoxGeometry(hx * 2, height, hz * 2), wallMaterial());
-  mesh.position.set(cx, baseY + height / 2, cz);
+  mesh.position.set(cx, centerY, cz);
   // Issue #64: lets torch PointLights (see addTorch below) actually cast
   // shadows off walls — the moody "pools of light" look falls flat without
   // them, since a flat-lit wall face reads the same near a torch or far
@@ -44,28 +49,20 @@ function addWall(world: World, scene: THREE.Scene, cx: number, cz: number, hx: n
   mesh.receiveShadow = true;
   scene.add(mesh);
 
-  if (!solid) return;
-
-  const eid = addEntity(world);
-  addComponent(world, eid, Position);
-  addComponent(world, eid, Collider);
-  addComponent(world, eid, Solid);
-  addComponent(world, eid, Object3DRef);
-  Position.x[eid] = cx;
-  Position.y[eid] = baseY + height / 2;
-  Position.z[eid] = cz;
-  Collider.hx[eid] = hx;
-  Collider.hz[eid] = hz;
-  Object3DRef[eid] = mesh;
+  addStaticBox(physics, cx, centerY, cz, hx, height / 2, hz);
 }
 
-/** Adds a purely visual floor or ceiling slab (no collider — collision is
- * wall/door geometry only, and these never move so they need no ECS entity).
- * `kind` is stamped onto `userData.slabKind` purely as an identification tag
+const SLAB_HALF_THICKNESS = 0.1;
+
+/** Adds a floor or ceiling slab. These are now genuinely solid: a floor is
+ * the surface characters actually stand on (gravity is real — see
+ * physics/world.ts), where the old XZ-only collision had no concept of a
+ * ground plane at all and simply pinned everything to a fixed height.
+ * `kind` is also stamped onto `userData.slabKind` as an identification tag
  * for external consumers (the level viewer hides ceilings to see inside a
- * room from outside — see `src/viewer/`) — nothing here reads it back. */
-function addSlab(scene: THREE.Scene, cx: number, cz: number, hx: number, hz: number, y: number, material: THREE.Material, kind: "floor" | "ceiling"): void {
-  const mesh = new THREE.Mesh(new THREE.BoxGeometry(hx * 2, 0.2, hz * 2), material);
+ * room from outside — see `src/viewer/`). */
+function addSlab(physics: Physics, scene: THREE.Scene, cx: number, cz: number, hx: number, hz: number, y: number, material: THREE.Material, kind: "floor" | "ceiling"): void {
+  const mesh = new THREE.Mesh(new THREE.BoxGeometry(hx * 2, SLAB_HALF_THICKNESS * 2, hz * 2), material);
   mesh.position.set(cx, y, cz);
   mesh.userData.slabKind = kind;
   // Issue #64: floors/ceilings receive torch shadows (a ceiling can also
@@ -73,6 +70,8 @@ function addSlab(scene: THREE.Scene, cx: number, cz: number, hx: number, hz: num
   // cast since nothing subsequently placed relies on their shadow.
   mesh.receiveShadow = true;
   scene.add(mesh);
+
+  addStaticBox(physics, cx, y, cz, hx, SLAB_HALF_THICKNESS, hz);
 }
 
 // --- Wall-mounted torches (issue #41) -------------------------------------
@@ -170,19 +169,22 @@ function addTorch(
 }
 
 /**
- * Adds one door leaf: a collider (static AABB, centered at the leaf's
- * closed-position center `(leafCx, leafCz)` — exactly like a wall) plus a
- * visual hinge: a `THREE.Group` positioned at the world hinge point
- * `(hingeX, hingeZ)` with the slab mesh as a child offset by half the
- * leaf's width, so rotating the *group* around Y swings the slab on that
- * hinge instead of spinning it in place. `Position`/`Collider` never move —
- * `doorAnimationSystem` only ever rotates the group (see doors.ts), and
- * `syncSystem` knows to leave a `Door` entity's Object3DRef position alone
- * (see sync.ts) so it doesn't stomp the group back onto `Position` (the
- * leaf center, not the hinge point) every frame.
+ * Adds one door leaf as a matched pair of hinges — a visual `THREE.Group`
+ * and a kinematic Rapier body — both positioned at the world hinge point
+ * `(hingeX, hingeZ)`, each carrying the slab offset by half the leaf's width
+ * so that rotating the hinge swings the slab rather than spinning it in
+ * place. `doorAnimationSystem` (doors.ts) drives both in lockstep, so the
+ * collider tracks exactly what's on screen.
+ *
+ * That collider-on-the-hinge arrangement is what the old static-AABB version
+ * couldn't do: its collider sat at the leaf's *closed* position and never
+ * moved, so passing through an open doorway needed collisionSystem to
+ * special-case "ignore a door that's ≥90% open". Here the door is simply
+ * not in the way any more once it's swung aside.
  */
 function addDoorLeaf(
   world: World,
+  physics: Physics,
   scene: THREE.Scene,
   leafCx: number,
   leafCz: number,
@@ -193,30 +195,27 @@ function addDoorLeaf(
   hingeSign: number,
 ): number {
   const closedY = DOOR_HEIGHT / 2;
+  const offsetX = leafCx - hingeX;
+  const offsetZ = leafCz - hingeZ;
 
   const group = new THREE.Group();
   group.position.set(hingeX, closedY, hingeZ);
   scene.add(group);
 
   const mesh = new THREE.Mesh(new THREE.BoxGeometry(hx * 2, DOOR_HEIGHT, hz * 2), doorMaterial());
-  mesh.position.set(leafCx - hingeX, 0, leafCz - hingeZ);
+  mesh.position.set(offsetX, 0, offsetZ);
   group.add(mesh);
 
   const eid = addEntity(world);
-  addComponent(world, eid, Position);
-  addComponent(world, eid, Collider);
   addComponent(world, eid, Door);
   addComponent(world, eid, Object3DRef);
-  Position.x[eid] = leafCx;
-  Position.y[eid] = closedY;
-  Position.z[eid] = leafCz;
-  Collider.hx[eid] = hx;
-  Collider.hz[eid] = hz;
+  addComponent(world, eid, PhysicsBody);
   Door.state[eid] = DoorState.CLOSED;
   Door.progress[eid] = 0;
   Door.hingeSign[eid] = hingeSign;
   Door.pairId[eid] = eid; // fixed up by addDoorPair to the shared pair id
   Object3DRef[eid] = group;
+  PhysicsBody[eid] = addKinematicBox(physics, hingeX, closedY, hingeZ, offsetX, 0, offsetZ, hx, DOOR_HEIGHT / 2, hz);
   mesh.userData.eid = eid; // lets tryInteract's recursive raycast find the eid
 
   return eid;
@@ -233,15 +232,14 @@ function addDoorLeaf(
  * the doorway, from `DOOR_HEIGHT` up to `wallHeight` (the room's actual
  * ceiling height), so the doorway doesn't leave an open gap to the ceiling
  * in tall rooms (e.g. a 6m great_hall vs. a 2.2m door leaf). Skipped when
- * `wallHeight <= DOOR_HEIGHT` (no gap to fill). It's built with
- * `addWall(..., solid: false)` — visual geometry only, no ECS entity — since
- * XZ-only collision would otherwise treat its footprint as blocking the
- * doorway at floor level even though it sits well above head height (see
- * `addWall`'s doc comment). It's otherwise a separate static mesh from the
- * door leaves and never affects leaf swinging, which still only occupies
- * `0..DOOR_HEIGHT`.
+ * `wallHeight <= DOOR_HEIGHT` (no gap to fill). It's an ordinary solid wall
+ * box — a real 3D collider sitting from `DOOR_HEIGHT` up simply doesn't
+ * intersect anything walking underneath it, so unlike under the old XZ-only
+ * collision it no longer has to be built non-solid to avoid sealing the
+ * doorway (see `addWall`). It's a separate box from the door leaves and
+ * never affects leaf swinging, which still only occupies `0..DOOR_HEIGHT`.
  */
-function addDoorPair(world: World, scene: THREE.Scene, orientation: "x" | "z", planeCoord: number, rangeStart: number, rangeEnd: number, wallHeight: number): void {
+function addDoorPair(world: World, physics: Physics, scene: THREE.Scene, orientation: "x" | "z", planeCoord: number, rangeStart: number, rangeEnd: number, wallHeight: number): void {
   const leafHalf = (rangeEnd - rangeStart) / 4; // half-width of each ~1.5m leaf
 
   let eidA: number;
@@ -249,13 +247,13 @@ function addDoorPair(world: World, scene: THREE.Scene, orientation: "x" | "z", p
   if (orientation === "x") {
     // Wall plane at constant X (a +x/-x boundary); leaves split the Z span,
     // slab thickness runs along X.
-    eidA = addDoorLeaf(world, scene, planeCoord, rangeStart + leafHalf, WALL_THICKNESS, leafHalf, planeCoord, rangeStart, 1);
-    eidB = addDoorLeaf(world, scene, planeCoord, rangeEnd - leafHalf, WALL_THICKNESS, leafHalf, planeCoord, rangeEnd, -1);
+    eidA = addDoorLeaf(world, physics, scene, planeCoord, rangeStart + leafHalf, WALL_THICKNESS, leafHalf, planeCoord, rangeStart, 1);
+    eidB = addDoorLeaf(world, physics, scene, planeCoord, rangeEnd - leafHalf, WALL_THICKNESS, leafHalf, planeCoord, rangeEnd, -1);
   } else {
     // Wall plane at constant Z (a +z/-z boundary); leaves split the X span,
     // slab thickness runs along Z.
-    eidA = addDoorLeaf(world, scene, rangeStart + leafHalf, planeCoord, leafHalf, WALL_THICKNESS, rangeStart, planeCoord, 1);
-    eidB = addDoorLeaf(world, scene, rangeEnd - leafHalf, planeCoord, leafHalf, WALL_THICKNESS, rangeEnd, planeCoord, -1);
+    eidA = addDoorLeaf(world, physics, scene, rangeStart + leafHalf, planeCoord, leafHalf, WALL_THICKNESS, rangeStart, planeCoord, 1);
+    eidB = addDoorLeaf(world, physics, scene, rangeEnd - leafHalf, planeCoord, leafHalf, WALL_THICKNESS, rangeEnd, planeCoord, -1);
   }
   Door.pairId[eidA] = eidA;
   Door.pairId[eidB] = eidA;
@@ -265,9 +263,9 @@ function addDoorPair(world: World, scene: THREE.Scene, orientation: "x" | "z", p
     const cRange = (rangeStart + rangeEnd) / 2;
     const hRange = (rangeEnd - rangeStart) / 2;
     if (orientation === "x") {
-      addWall(world, scene, planeCoord, cRange, WALL_THICKNESS, hRange, headerHeight, DOOR_HEIGHT, false);
+      addWall(physics, scene, planeCoord, cRange, WALL_THICKNESS, hRange, headerHeight, DOOR_HEIGHT);
     } else {
-      addWall(world, scene, cRange, planeCoord, hRange, WALL_THICKNESS, headerHeight, DOOR_HEIGHT, false);
+      addWall(physics, scene, cRange, planeCoord, hRange, WALL_THICKNESS, headerHeight, DOOR_HEIGHT);
     }
   }
 }
@@ -379,7 +377,7 @@ function pickTorchSegments(segments: Segment[]): Set<Segment> {
   return chosen;
 }
 
-function emitWalls(world: World, scene: THREE.Scene, segments: Segment[]): void {
+function emitWalls(physics: Physics, scene: THREE.Scene, segments: Segment[]): void {
   const xWallCorners = new Set<string>(); // corners touched by an x-oriented (plane-at-constant-X) wall
   const zWallCorners = new Set<string>(); // corners touched by a z-oriented (plane-at-constant-Z) wall
 
@@ -408,7 +406,7 @@ function emitWalls(world: World, scene: THREE.Scene, segments: Segment[]): void 
       if (zWallCorners.has(cornerKey(seg.planeCell, seg.rangeStartCell + 1))) rangeEnd += WALL_THICKNESS;
       const cz = (rangeStart + rangeEnd) / 2;
       const hz = (rangeEnd - rangeStart) / 2;
-      addWall(world, scene, planeCoord, cz, WALL_THICKNESS, hz, seg.wallHeight);
+      addWall(physics, scene, planeCoord, cz, WALL_THICKNESS, hz, seg.wallHeight);
       if (torchSegments.has(seg)) {
         addTorch(scene, planeCoord + seg.interiorSign * WALL_THICKNESS, along, seg.wallHeight, "x", seg.interiorSign);
       }
@@ -417,7 +415,7 @@ function emitWalls(world: World, scene: THREE.Scene, segments: Segment[]): void 
       if (xWallCorners.has(cornerKey(seg.rangeStartCell + 1, seg.planeCell))) rangeEnd += WALL_THICKNESS;
       const cx = (rangeStart + rangeEnd) / 2;
       const hx = (rangeEnd - rangeStart) / 2;
-      addWall(world, scene, cx, planeCoord, hx, WALL_THICKNESS, seg.wallHeight);
+      addWall(physics, scene, cx, planeCoord, hx, WALL_THICKNESS, seg.wallHeight);
       if (torchSegments.has(seg)) {
         addTorch(scene, along, planeCoord + seg.interiorSign * WALL_THICKNESS, seg.wallHeight, "z", seg.interiorSign);
       }
@@ -430,7 +428,7 @@ function emitWalls(world: World, scene: THREE.Scene, segments: Segment[]): void 
  * placed in `index`. Call `validateOccupancy(index)` first — this function
  * assumes the occupancy index is already known-good.
  */
-export function buildGeometryFromOccupancy(world: World, scene: THREE.Scene, index: OccupancyIndex): void {
+export function buildGeometryFromOccupancy(world: World, physics: Physics, scene: THREE.Scene, index: OccupancyIndex): void {
   // --- Floors & ceilings: one slab per tile instance, spanning its full
   // footprint (matches how the old level.ts built one slab per room). ---
   const bounds = new Map<string, InstanceBounds>();
@@ -452,8 +450,8 @@ export function buildGeometryFromOccupancy(world: World, scene: THREE.Scene, ind
     const cx = b.minX * UNIT + hx;
     const cz = b.minZ * UNIT + hz;
     const ceilingY = b.heightCells * UNIT;
-    addSlab(scene, cx, cz, hx, hz, -0.1, floorMaterial(), "floor");
-    addSlab(scene, cx, cz, hx, hz, ceilingY + 0.1, ceilingMaterial(), "ceiling");
+    addSlab(physics, scene, cx, cz, hx, hz, -0.1, floorMaterial(), "floor");
+    addSlab(physics, scene, cx, cz, hx, hz, ceilingY + 0.1, ceilingMaterial(), "ceiling");
   }
 
   // --- Walls & doors, one segment per unit-cell face. A shared boundary
@@ -506,7 +504,7 @@ export function buildGeometryFromOccupancy(world: World, scene: THREE.Scene, ind
             interiorSign: (dir.dx > 0 ? -1 : 1) as 1 | -1,
           });
         } else {
-          addDoorPair(world, scene, "x", planeCell * UNIT, z * UNIT, (z + 1) * UNIT, doorHeaderHeight);
+          addDoorPair(world, physics, scene, "x", planeCell * UNIT, z * UNIT, (z + 1) * UNIT, doorHeaderHeight);
         }
       } else {
         // +z or -z boundary: a plane of constant Z, spanning this cell's X extent.
@@ -522,11 +520,11 @@ export function buildGeometryFromOccupancy(world: World, scene: THREE.Scene, ind
             interiorSign: (dir.dz > 0 ? -1 : 1) as 1 | -1,
           });
         } else {
-          addDoorPair(world, scene, "z", planeCell * UNIT, x * UNIT, (x + 1) * UNIT, doorHeaderHeight);
+          addDoorPair(world, physics, scene, "z", planeCell * UNIT, x * UNIT, (x + 1) * UNIT, doorHeaderHeight);
         }
       }
     }
   }
 
-  emitWalls(world, scene, wallSegments);
+  emitWalls(physics, scene, wallSegments);
 }
