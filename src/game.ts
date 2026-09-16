@@ -247,6 +247,13 @@ export function startGame(container: HTMLElement): void {
       }),
     setYaw: (yaw: number) => { Rotation.yaw[player] = yaw; },
     setPitch: (pitch: number) => { Rotation.pitch[player] = pitch; },
+    // Debug-only hard teleport (bypasses normal movement/collision
+    // resolution entirely), for automated tests that need to reach specific
+    // coordinates directly rather than walk there -- e.g. confirming a wall
+    // exists in space that ordinary ramp-walking can't reach, or skipping
+    // past pure transit to the area actually under test (see
+    // tests/integration/stairwell-wall-gaps.spec.mjs and bandit-combat.spec.mjs).
+    teleportPlayer: (x: number, feetY: number, z: number) => { teleportCharacter(player, x, feetY, z); },
     // Projects a world position to CSS pixel coordinates on the canvas —
     // for automated (Playwright) testing of tap-to-interact-off-center,
     // which needs to compute exactly where an object renders on screen
