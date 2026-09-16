@@ -3,7 +3,7 @@ import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
 import { createWorld } from "bitecs";
 import { buildLevel } from "../level/level";
 import { buildOccupancyIndex, parseWorldCellKey, type OccupancyIndex } from "../level/occupancy";
-import { UNIT } from "../level/tiles";
+import { UNIT, floorBaseline } from "../level/tiles";
 import { ALL_TILE_INSTANCES, ALL_ITEM_SPAWNS, ALL_NPC_SPAWNS, LEVEL_SPAWN } from "../level/rooms";
 import { NPC_REGISTRY } from "../assets/npcRegistry";
 import { ITEM_REGISTRY } from "../assets/itemRegistry";
@@ -110,12 +110,18 @@ function addNpcMarkers(scene: THREE.Scene): void {
   for (const spawn of ALL_NPC_SPAWNS) {
     const archetype = NPC_REGISTRY[spawn.id];
     const aggressive = archetype?.behavior === "aggressive";
+    // Issue #86: a spawn's authored `y`/height is relative to its own
+    // floor's baseline (see `NpcSpawn.floor`'s doc comment), same as the
+    // real spawner (`spawning.ts`) — without adding it back here, a marker
+    // for an NPC on any floor above 0 would draw at ground-floor height
+    // instead of where that NPC actually spawns.
+    const floorY = floorBaseline(spawn.floor ?? 0);
     const mesh = new THREE.Mesh(new THREE.ConeGeometry(0.3, 0.6, 6), new THREE.MeshBasicMaterial({ color: aggressive ? 0xd9433f : 0x4caf7d }));
-    mesh.position.set(spawn.x, 2.3, spawn.z);
+    mesh.position.set(spawn.x, floorY + 2.3, spawn.z);
     scene.add(mesh);
 
     const label = makeLabel(`${archetype?.name ?? spawn.id} (${archetype?.behavior ?? "unknown"})`, "#fff");
-    label.position.set(spawn.x, 2.85, spawn.z);
+    label.position.set(spawn.x, floorY + 2.85, spawn.z);
     scene.add(label);
   }
 }
@@ -123,8 +129,10 @@ function addNpcMarkers(scene: THREE.Scene): void {
 function addItemMarkers(scene: THREE.Scene): void {
   for (const spawn of ALL_ITEM_SPAWNS) {
     const item = ITEM_REGISTRY[spawn.id];
+    // See addNpcMarkers' comment above — same floor-relative-height convention.
+    const floorY = floorBaseline(spawn.floor ?? 0);
     const mesh = new THREE.Mesh(new THREE.OctahedronGeometry(0.22), new THREE.MeshBasicMaterial({ color: 0xffcc44 }));
-    mesh.position.set(spawn.x, spawn.y ?? 1, spawn.z);
+    mesh.position.set(spawn.x, floorY + (spawn.y ?? 1), spawn.z);
     mesh.position.y += 0.7; // float above the item's own world mesh, not through it
     scene.add(mesh);
 
