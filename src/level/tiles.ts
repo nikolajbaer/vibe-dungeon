@@ -35,6 +35,18 @@ export const UNIT = 3;
  */
 export const FLOOR_RISE = 2 * UNIT;
 
+/**
+ * How many grid cells tall a staircase landing's own wall segment reaches
+ * above its own floor baseline — `stair_lower.ts`/`stair_upper.ts` both
+ * declare `h: STAIR_LANDING_HEIGHT_CELLS` rather than a literal `1`, so
+ * `stairBuilder.ts`'s `buildShaftGuardWalls` can compute exactly how much
+ * of the shaft's total `FLOOR_RISE` those per-landing walls *don't* reach
+ * (see that function's own doc comment for why that gap matters and why
+ * it's filled separately rather than by just making the landings' own `h`
+ * taller) without hardcoding a second copy of a number that would silently
+ * drift out of sync with those two tile types' own declared height. */
+export const STAIR_LANDING_HEIGHT_CELLS = 1;
+
 /** World Y (meters) of floor `floor`'s baseline — the height at which that
  * floor's own `y≈0` conventions (its floor slab, its wall base, every prop/
  * item/NPC authored at `y: 0` on that floor) actually sit in world space.

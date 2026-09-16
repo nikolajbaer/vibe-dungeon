@@ -1,5 +1,5 @@
 import type { TileType } from "../tiles";
-import { wallsOf } from "../tiles";
+import { wallsOf, STAIR_LANDING_HEIGHT_CELLS } from "../tiles";
 
 /**
  * The upper terminus of a staircase (issue #86) — the mirror of
@@ -18,12 +18,18 @@ import { wallsOf } from "../tiles";
  * for the ramp itself). The instance's own ceiling is normal — once you've
  * climbed the stairs, the space above your head here should read like any
  * other floor's, not like another open shaft.
+ *
+ * Like `stair_lower`, this type's own `h` (`STAIR_LANDING_HEIGHT_CELLS`)
+ * only reaches down partway from this floor's baseline, not all the way to
+ * `stair_lower`'s own wall below — see that type's doc comment and
+ * `stairBuilder.ts`'s `buildShaftGuardWalls` for why the gap in between is
+ * closed with separate, purpose-built geometry instead.
  */
 const stairUpper: TileType = {
   id: "stair_upper",
   w: 3,
   d: 1,
-  h: 1,
+  h: STAIR_LANDING_HEIGHT_CELLS,
   faces: {
     north: wallsOf(3),
     south: wallsOf(3),
