@@ -246,6 +246,18 @@ export function startGame(container: HTMLElement): void {
       }),
     setYaw: (yaw: number) => { Rotation.yaw[player] = yaw; },
     setPitch: (pitch: number) => { Rotation.pitch[player] = pitch; },
+    // Projects a world position to CSS pixel coordinates on the canvas —
+    // for automated (Playwright) testing of tap-to-interact-off-center,
+    // which needs to compute exactly where an object renders on screen
+    // without duplicating three.js's own projection math in the test.
+    worldToScreen: (x: number, y: number, z: number) => {
+      const ndcPoint = new THREE.Vector3(x, y, z).project(camera);
+      const rect = renderer.domElement.getBoundingClientRect();
+      return {
+        x: rect.left + ((ndcPoint.x + 1) / 2) * rect.width,
+        y: rect.top + ((1 - ndcPoint.y) / 2) * rect.height,
+      };
+    },
     getRotation: () => ({ yaw: Rotation.yaw[player], pitch: Rotation.pitch[player] }),
     getCurrentSector: () => currentSector,
     getHealth: () => ({ current: Health.current[player], max: Health.max[player] }),
@@ -418,8 +430,19 @@ export function startGame(container: HTMLElement): void {
     // pause even though ambient idle/walk freezes with everything else.
     npcAnimationSystem(world, dt, modalActive);
 
-    const interactRequested = keyboard.consumeJustPressed("KeyE") || touch.consumeInteractRequest();
-    if (interactRequested && !isModalActive()) tryInteract(world, camera);
+    // Consumed unconditionally (not inside the `||` below) so a pending
+    // touch tap is never left unconsumed by short-circuit evaluation — not
+    // that desktop and touch input are ever live at once, but there's no
+    // reason to rely on that.
+    const touchInteractPoint = touch.consumeInteractRequest();
+    const interactRequested = keyboard.consumeJustPressed("KeyE") || touchInteractPoint !== null;
+    // A touch tap raycasts from wherever it actually landed on screen
+    // (letting you interact with something off to the side without turning
+    // to face it); `KeyE` has no such point — under pointer lock there's no
+    // real cursor position to give it — so it falls back to the reticle.
+    // See `tryInteract`'s own doc comment for why these are genuinely
+    // different rays, not the same one in disguise.
+    if (interactRequested && !isModalActive()) tryInteract(world, camera, touchInteractPoint ?? undefined);
 
     const attackRequestedThisFrame = attackRequested || touch.consumeAttackRequest();
     attackRequested = false;
