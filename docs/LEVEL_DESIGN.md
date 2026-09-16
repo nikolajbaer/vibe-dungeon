@@ -472,6 +472,38 @@ leave off, so this stays correct even if a landing's own height changes).
 has one home, shared by `stair_lower.ts`/`stair_upper.ts`'s own `h` and this
 gap calculation, rather than three places that could silently drift apart.
 
+**A third bug, found after the second one shipped: one more gap at the
+entry end, above the doorway.** `buildShaftGuardWalls` closes the shaft's
+two *long* sides, but the shaft's *short* ends are a different situation —
+each is a real opening (`stair_lower`'s east face, `stair_upper`'s west
+face) that has to stay open at doorway height for the climb to pass
+through, so nothing analogous to the long-side fix could just wall them
+off outright. `stair_upper`'s far (east) end has no hallway beyond it, so
+its own `h`-tall wall being short of `FLOOR_RISE` never mattered there —
+there's nothing to fall into. But the *entry* end (`stair_lower`'s east
+face, where `west-corridor` meets the shaft) does have a hallway beyond
+it, and that hallway's own ceiling only reaches its own `h`
+(`STAIR_LANDING_HEIGHT_CELLS`) above *its* floor — the same height as
+`stair_lower`'s own walls. That left the band from y=3 to y=6, directly
+above the entry doorway, with no wall at all on that boundary: real space
+open to the corridor's own ceiling void one floor up, on the one shaft end
+that actually borders another occupied room.
+
+The fix (`stairBuilder.ts`'s `buildEntryHeader`) is the same pattern
+`tileBuilder.ts`'s `addDoorPair` already uses for sealing space above a
+door opening while leaving the opening itself clear: one static wall
+segment spanning only the y=3-to-6 band at the entry's x boundary, full
+cell width, flush with `WALL_THICKNESS`. It only needs to exist at the
+entry end — the exit always lands exactly on the upper floor's own
+baseline by construction (`rampGeometryOf`), so there's no equivalent gap
+to seal there. Confirmed via Playwright (teleporting into the gap band
+itself, since it turns out not to be reachable by simply walking off the
+ramp — the climb's own slope ties X and Y together, so walking "back
+toward the hallway" from mid-climb just follows the ramp back down to floor
+level) that the band is now blocked, that normal doorway passage at
+y=0-3 is unaffected, and that the full climb still lands cleanly on floor
+1.
+
 **Sector id for the pair.** `stair-lower`/`stair-upper` share one sector id
 (`"stairwell"`) rather than getting their own — deliberate, since
 `floorForY`'s Y-to-floor rounding means a position genuinely mid-climb could

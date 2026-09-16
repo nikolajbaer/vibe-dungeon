@@ -1,5 +1,5 @@
 import * as THREE from "three";
-import { UNIT, floorBaseline } from "./tiles";
+import { UNIT, STAIR_LANDING_HEIGHT_CELLS, floorBaseline } from "./tiles";
 import { wallMaterial } from "./materials";
 import { WALL_THICKNESS } from "./tileBuilder";
 import { addStaticBox, addStaticRampBox, MAX_SLOPE_CLIMB_DEGREES, type Physics } from "../physics/world";
@@ -246,15 +246,67 @@ function buildShaftGuardWalls(physics: Physics, scene: THREE.Scene, geo: RampGeo
   }
 }
 
+/**
+ * A "header" wall at the shaft's entry (hallway-side) boundary — the same
+ * problem, and the same fix, as a door's own header (`tileBuilder.ts`'s
+ * `addDoorPair`): the opening below has to stay clear (a player needs to be
+ * able to walk in), but nothing bounds the space *above* a connecting
+ * room's ceiling once the shaft on the other side of that opening has no
+ * ceiling of its own.
+ *
+ * Concretely: the room on the entry side (a plain hallway here) has a
+ * normal ceiling at `STAIR_LANDING_HEIGHT_CELLS * UNIT` above its own floor
+ * — the same height `stair_lower`'s own (skipped) ceiling would have sat
+ * at — but nothing on the shaft's side stops movement from spilling
+ * sideways into that room's open-air roof once a climbing player is above
+ * that height (`buildShaftGuardWalls` above only walls the shaft's own two
+ * long sides, never its ends). Found the same way as that gap: not by
+ * reasoning about the geometry, but by actually standing partway up the
+ * climb and turning back toward the hallway at that height — nothing
+ * stopped it, though ordinary forward/backward walking on the ramp itself
+ * can't actually land there (the ramp ties height to horizontal position,
+ * so walking "back down" just follows the slope to the ground); this seals
+ * the gap regardless of whether every path to it is reachable through
+ * normal movement.
+ *
+ * Only needed at the *entry* end, never the exit: `rampGeometryOf` always
+ * lands the exit exactly at the upper floor's own baseline, which is
+ * exactly where that floor's own room continues normally — there is no
+ * equivalent height mismatch to seal there, for any staircase.
+ */
+function buildEntryHeader(physics: Physics, scene: THREE.Scene, geo: RampGeometry): void {
+  const loY = geo.entry.y + STAIR_LANDING_HEIGHT_CELLS * UNIT;
+  const hiY = geo.exit.y;
+  if (hiY <= loY) return; // nothing to seal for a rise this short
+  const cy = (loY + hiY) / 2;
+  const halfHeight = (hiY - loY) / 2;
+
+  const along = geo.climbAxis === "x" ? geo.entry.x : geo.entry.z;
+  const perpHalf = UNIT / 2; // full cell width, flush with the shaft's own walls
+
+  const cx = geo.climbAxis === "x" ? along : geo.perpCoord;
+  const cz = geo.climbAxis === "x" ? geo.perpCoord : along;
+  const hx = geo.climbAxis === "x" ? WALL_THICKNESS : perpHalf;
+  const hz = geo.climbAxis === "x" ? perpHalf : WALL_THICKNESS;
+
+  addStaticBox(physics, cx, cy, cz, hx, halfHeight, hz);
+  const mesh = new THREE.Mesh(new THREE.BoxGeometry(hx * 2, halfHeight * 2, hz * 2), wallMaterial());
+  mesh.position.set(cx, cy, cz);
+  mesh.castShadow = true;
+  mesh.receiveShadow = true;
+  scene.add(mesh);
+}
+
 /** Builds one staircase's real ramp collider, its cosmetic stepped visual,
- * and the guard walls that keep a climbing player from stepping off its
- * sides into empty space, between the two floors a `StairConnector`
- * names. */
+ * and the guard walls (long sides plus the entry-side header) that keep a
+ * climbing player from stepping off it into empty space, between the two
+ * floors a `StairConnector` names. */
 export function buildStaircase(physics: Physics, scene: THREE.Scene, connector: StairConnector): void {
   const geo = rampGeometryOf(connector);
   buildRampCollider(physics, geo);
   buildStairVisual(scene, geo);
   buildShaftGuardWalls(physics, scene, geo);
+  buildEntryHeader(physics, scene, geo);
 }
 
 /** Builds every staircase in the level (issue #86) — called once from
