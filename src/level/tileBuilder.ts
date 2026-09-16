@@ -60,10 +60,14 @@ function addWall(world: World, scene: THREE.Scene, cx: number, cz: number, hx: n
 }
 
 /** Adds a purely visual floor or ceiling slab (no collider — collision is
- * wall/door geometry only, and these never move so they need no ECS entity). */
-function addSlab(scene: THREE.Scene, cx: number, cz: number, hx: number, hz: number, y: number, material: THREE.Material): void {
+ * wall/door geometry only, and these never move so they need no ECS entity).
+ * `kind` is stamped onto `userData.slabKind` purely as an identification tag
+ * for external consumers (the level viewer hides ceilings to see inside a
+ * room from outside — see `src/viewer/`) — nothing here reads it back. */
+function addSlab(scene: THREE.Scene, cx: number, cz: number, hx: number, hz: number, y: number, material: THREE.Material, kind: "floor" | "ceiling"): void {
   const mesh = new THREE.Mesh(new THREE.BoxGeometry(hx * 2, 0.2, hz * 2), material);
   mesh.position.set(cx, y, cz);
+  mesh.userData.slabKind = kind;
   // Issue #64: floors/ceilings receive torch shadows (a ceiling can also
   // receive from anything below it, harmless either way); neither needs to
   // cast since nothing subsequently placed relies on their shadow.
@@ -448,8 +452,8 @@ export function buildGeometryFromOccupancy(world: World, scene: THREE.Scene, ind
     const cx = b.minX * UNIT + hx;
     const cz = b.minZ * UNIT + hz;
     const ceilingY = b.heightCells * UNIT;
-    addSlab(scene, cx, cz, hx, hz, -0.1, floorMaterial());
-    addSlab(scene, cx, cz, hx, hz, ceilingY + 0.1, ceilingMaterial());
+    addSlab(scene, cx, cz, hx, hz, -0.1, floorMaterial(), "floor");
+    addSlab(scene, cx, cz, hx, hz, ceilingY + 0.1, ceilingMaterial(), "ceiling");
   }
 
   // --- Walls & doors, one segment per unit-cell face. A shared boundary

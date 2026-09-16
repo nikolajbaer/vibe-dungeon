@@ -5,12 +5,12 @@
  * handful of buttons. Follows the HUD's mounting/overlay convention (see
  * `mount.tsx`) rather than its state pattern.
  *
- * Only "Play" is functional for this pass; "View Tiles" and "Edit Level"
- * are real, visibly-disabled placeholders for future tasks (a tile/level
- * viewer, and the level editor tracked in issue #14) rather than silently
- * inert buttons.
+ * "Play" and "View Tiles" (the level viewer, `src/viewer/levelViewer.ts`)
+ * are both functional; "Edit Level" is still a real, visibly-disabled
+ * placeholder for the level editor tracked in issue #14, rather than a
+ * silently inert button.
  */
-export function MainMenu({ onPlay }: { onPlay: () => void }) {
+export function MainMenu({ onPlay, onViewTiles }: { onPlay: () => void; onViewTiles: () => void }) {
   return (
     <div class="menu-root" data-testid="menu-root">
       <div class="menu-panel">
@@ -26,13 +26,11 @@ export function MainMenu({ onPlay }: { onPlay: () => void }) {
           </button>
           <button
             type="button"
-            class="menu-btn menu-btn-disabled"
+            class="menu-btn"
             data-testid="menu-view-tiles"
-            disabled
-            aria-disabled="true"
+            onClick={onViewTiles}
           >
             View Tiles
-            <span class="menu-btn-note">(coming soon)</span>
           </button>
           <button
             type="button"

@@ -329,6 +329,57 @@
       .death-respawn-btn:active {
         background: rgba(255, 255, 255, 0.22);
       }
+      /* Level viewer (menu's "View Tiles", src/viewer/levelViewer.ts): a
+         plain DOM overlay (not Preact — no reactive state here, same
+         reasoning as the click-to-look hint) for the back button and the
+         sector-color legend, layered over its own orbit-camera canvas. */
+      #viewer-hud {
+        position: fixed;
+        inset: 0;
+        pointer-events: none;
+      }
+      .viewer-back-btn {
+        position: fixed;
+        left: max(12px, env(safe-area-inset-left));
+        top: calc(12px + env(safe-area-inset-top));
+        font: 600 14px/1 system-ui, sans-serif;
+        color: #fff;
+        padding: 10px 16px;
+        background: rgba(0, 0, 0, 0.55);
+        border: 1px solid rgba(255, 255, 255, 0.35);
+        border-radius: 8px;
+        cursor: pointer;
+        pointer-events: auto;
+      }
+      .viewer-back-btn:active {
+        background: rgba(255, 255, 255, 0.18);
+      }
+      .viewer-legend {
+        position: fixed;
+        right: max(12px, env(safe-area-inset-right));
+        top: calc(12px + env(safe-area-inset-top));
+        min-width: 120px;
+        font: 12px/1.5 system-ui, sans-serif;
+        color: #eee;
+        background: rgba(0, 0, 0, 0.55);
+        border: 1px solid rgba(255, 255, 255, 0.25);
+        border-radius: 8px;
+        padding: 8px 12px;
+        pointer-events: auto;
+      }
+      .viewer-legend-row {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        white-space: nowrap;
+      }
+      .viewer-legend-swatch {
+        display: inline-block;
+        width: 10px;
+        height: 10px;
+        border-radius: 2px;
+        flex: none;
+      }
     </style>
   </head>
   <body>
