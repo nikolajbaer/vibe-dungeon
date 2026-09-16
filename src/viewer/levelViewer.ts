@@ -8,6 +8,7 @@ import { ALL_TILE_INSTANCES, ALL_ITEM_SPAWNS, ALL_NPC_SPAWNS, LEVEL_SPAWN } from
 import { NPC_REGISTRY } from "../assets/npcRegistry";
 import { ITEM_REGISTRY } from "../assets/itemRegistry";
 import { npcAnimationSystem } from "../ecs/systems/npcAnimation";
+import { createPhysics } from "../physics/world";
 
 // The level viewer (menu's "View Tiles"): an external, free-orbit look at
 // the *authored* level — every tile instance, sector, and NPC/item spawn —
@@ -221,8 +222,12 @@ export function startLevelViewer(container: HTMLElement, onExit: () => void): vo
   renderer.setSize(window.innerWidth, window.innerHeight);
   container.appendChild(renderer.domElement);
 
+  // The viewer never steps physics — nothing here moves — but `buildLevel`
+  // creates Rapier colliders alongside its meshes, so it still needs a world
+  // to put them in. Building one throwaway world is well worth keeping a
+  // single level-construction path that can't drift from the real game's.
   const world = createWorld();
-  buildLevel(world, scene); // same geometry/entities a real playthrough gets
+  buildLevel(world, createPhysics(), scene); // same geometry/entities a real playthrough gets
 
   const occupancy = buildOccupancyIndex(ALL_TILE_INSTANCES);
   hideCeilings(scene);

@@ -1,10 +1,11 @@
 import * as THREE from "three";
 import { addComponent, addEntity, type World } from "bitecs";
-import { Position, Velocity, Collider, Solid, Object3DRef, Item, NPC, NpcState, Health } from "../ecs/components";
+import { Position, Velocity, CharacterBody, PhysicsBody, PhysicsCollider, Object3DRef, Item, NPC, NpcState, Health } from "../ecs/components";
 import { ITEM_REGISTRY } from "../assets/itemRegistry";
 import { FURNITURE_REGISTRY } from "../assets/furnitureRegistry";
 import { NPC_REGISTRY } from "../assets/npcRegistry";
 import type { PropPlacement, ItemSpawn, NpcSpawn } from "./placementTypes";
+import { addCharacter, addStaticBox, type Physics } from "../physics/world";
 
 // Generic spawners for the asset-authoring system: turn plain `PropPlacement`/
 // `ItemSpawn` data (src/level/rooms/*.ts) into real ECS entities + three.js
@@ -47,22 +48,19 @@ function withPickupHitbox(mesh: THREE.Object3D, eid: number): THREE.Group {
   return group;
 }
 
-/** Adds one prop's `Position`+`Collider`+`Solid` ECS entity — the same three
- * components a wall segment gets (see tileBuilder.ts's `addWall`) — plus its
- * `Object3DRef`, so it's picked up by the existing generic `Solid` collision
- * path with no changes to collisionSystem. */
-function addPropCollider(world: World, mesh: THREE.Object3D, x: number, z: number, hx: number, hz: number): void {
-  const eid = addEntity(world);
-  addComponent(world, eid, Position);
-  addComponent(world, eid, Collider);
-  addComponent(world, eid, Solid);
-  addComponent(world, eid, Object3DRef);
-  Position.x[eid] = x;
-  Position.y[eid] = 0; // group root sits at floor level; children carry their own y offsets
-  Position.z[eid] = z;
-  Collider.hx[eid] = hx;
-  Collider.hz[eid] = hz;
-  Object3DRef[eid] = mesh;
+/** Height (meters) of a prop's collider when its asset doesn't declare one —
+ * roughly table/barrel height, tall enough to block a walking character
+ * without being climbable via the character controller's autostep. Only a
+ * default: an asset with a `footprint.hy` gets exactly that instead. */
+const DEFAULT_PROP_HALF_HEIGHT = 0.6;
+
+/** Adds one prop's static Rapier box — no ECS entity, exactly like a wall
+ * segment (see tileBuilder.ts's `addWall`): a prop never moves and nothing
+ * queries it as an entity, so the collider is all it actually needs. Props
+ * sit with their mesh origin on the floor, so the box is centered half its
+ * height up. */
+function addPropCollider(physics: Physics, x: number, z: number, hx: number, hy: number, hz: number): void {
+  addStaticBox(physics, x, hy, z, hx, hy, hz);
 }
 
 /**
@@ -97,14 +95,23 @@ export function spawnItems(world: World, scene: THREE.Scene, spawns: ItemSpawn[]
 
 const NPC_INITIAL_WANDER_PAUSE = 2; // seconds before its first idle wander leg
 
+/** Total height (meters) of the humanoid rig every NPC archetype currently
+ * shares — matches `HEAD_TOP_Y` in characters/humanoidRig.ts. Used to size
+ * the physics capsule; an archetype with a genuinely different body would
+ * want this on `NpcArchetypeDef` instead. */
+const HUMANOID_HEIGHT = 1.75;
+
 /**
  * Places every NPC spawn as a real `NPC` + `Position` + `Velocity` +
- * `Collider` + `Health` + `Object3DRef` entity, starting `LOITERING` at its
- * spawn point (its own initial "home" for wandering — see `NPC`'s doc
+ * `CharacterBody` + `Health` + `Object3DRef` entity, starting `LOITERING` at
+ * its spawn point (its own initial "home" for wandering — see `NPC`'s doc
  * comment in `ecs/components.ts`), built from its `NpcArchetypeDef.createMesh()`.
- * Throws if a spawn references an unknown archetype id.
+ * Each also gets a kinematic capsule body driven by the same character
+ * controller the player uses (`ecs/systems/character.ts`), so an NPC walks
+ * into walls, stands on floors and falls under gravity exactly like the
+ * player does. Throws if a spawn references an unknown archetype id.
  */
-export function spawnNpcs(world: World, scene: THREE.Scene, spawns: NpcSpawn[]): void {
+export function spawnNpcs(world: World, physics: Physics, scene: THREE.Scene, spawns: NpcSpawn[]): void {
   for (const spawn of spawns) {
     const archetype = NPC_REGISTRY[spawn.id];
     if (!archetype) throw new Error(`spawnNpcs: unknown NPC archetype id "${spawn.id}"`);
@@ -112,7 +119,9 @@ export function spawnNpcs(world: World, scene: THREE.Scene, spawns: NpcSpawn[]):
     const eid = addEntity(world);
     addComponent(world, eid, Position);
     addComponent(world, eid, Velocity);
-    addComponent(world, eid, Collider);
+    addComponent(world, eid, CharacterBody);
+    addComponent(world, eid, PhysicsBody);
+    addComponent(world, eid, PhysicsCollider);
     addComponent(world, eid, NPC);
     addComponent(world, eid, Object3DRef);
     addComponent(world, eid, Health);
@@ -121,8 +130,17 @@ export function spawnNpcs(world: World, scene: THREE.Scene, spawns: NpcSpawn[]):
     Position.z[eid] = spawn.z;
     Velocity.x[eid] = 0;
     Velocity.z[eid] = 0;
-    Collider.hx[eid] = archetype.halfExtent;
-    Collider.hz[eid] = archetype.halfExtent;
+
+    const radius = archetype.halfExtent;
+    const halfHeight = Math.max(0.05, HUMANOID_HEIGHT / 2 - radius);
+    CharacterBody.radius[eid] = radius;
+    CharacterBody.halfHeight[eid] = halfHeight;
+    CharacterBody.verticalVelocity[eid] = 0;
+    CharacterBody.grounded[eid] = 0;
+    const handles = addCharacter(physics, spawn.x, 0, spawn.z, radius, halfHeight);
+    PhysicsBody[eid] = handles.body;
+    PhysicsCollider[eid] = handles.collider;
+
     NPC.state[eid] = NpcState.LOITERING;
     NPC.homeX[eid] = spawn.x;
     NPC.homeZ[eid] = spawn.z;
@@ -141,15 +159,15 @@ export function spawnNpcs(world: World, scene: THREE.Scene, spawns: NpcSpawn[]):
 }
 
 /**
- * Places every prop placement as a mesh in the scene, plus a matching
- * `Collider` entity for any asset that declares a `footprint` — unless the
- * placement is elevated (`y` > 0), e.g. the second crate of a stack, which
- * would otherwise get a redundant collider at the same x/z as the crate
- * beneath it (collision is XZ-only — see `Collider`'s doc comment — so an
- * elevated duplicate would just be dead weight, not a correctness fix).
- * Throws if a placement references an unknown furniture id.
+ * Places every prop placement as a mesh in the scene, plus a matching static
+ * collider for any asset that declares a `footprint` — unless the placement
+ * is elevated (`y` > 0), e.g. the second crate of a stack, which would
+ * otherwise get a redundant collider sitting inside the one beneath it.
+ * (Stacked props are visual-only for now: giving each its own collider at
+ * its real height is a small follow-up, not something this physics migration
+ * needed to change.) Throws if a placement references an unknown furniture id.
  */
-export function spawnProps(world: World, scene: THREE.Scene, placements: PropPlacement[]): void {
+export function spawnProps(physics: Physics, scene: THREE.Scene, placements: PropPlacement[]): void {
   for (const placement of placements) {
     const def = FURNITURE_REGISTRY[placement.id];
     if (!def) throw new Error(`spawnProps: unknown furniture id "${placement.id}"`);
@@ -162,7 +180,9 @@ export function spawnProps(world: World, scene: THREE.Scene, placements: PropPla
 
     if (y === 0 && def.footprint) {
       const footprint = typeof def.footprint === "function" ? def.footprint(placement.params) : def.footprint;
-      if (footprint) addPropCollider(world, mesh, placement.x, placement.z, footprint.hx, footprint.hz);
+      if (footprint) {
+        addPropCollider(physics, placement.x, placement.z, footprint.hx, footprint.hy ?? DEFAULT_PROP_HALF_HEIGHT, footprint.hz);
+      }
     }
   }
 }

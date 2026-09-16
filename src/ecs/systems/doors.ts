@@ -1,6 +1,6 @@
 import * as THREE from "three";
 import { hasComponent, query, type World } from "bitecs";
-import { Dead, Door, DoorState, Object3DRef, NPC, Item, Carried, PlayerControlled } from "../components";
+import { Dead, Door, DoorState, Object3DRef, PhysicsBody, NPC, Item, Carried, PlayerControlled } from "../components";
 import { toggleNpcFollow } from "./npc";
 import { pickUpItem } from "./items";
 import { NPC_REGISTRY } from "../../assets/npcRegistry";
@@ -14,21 +14,28 @@ function easeOutCubic(t: number): number {
   return 1 - Math.pow(1 - t, 3);
 }
 
-/** Advances any door leaf currently opening, swinging its hinge Group
- * (Object3DRef) around Y from closed (0 rad) to `hingeSign * OPEN_ANGLE`.
- * Doors only open (no auto-close) — that's the full scope of the "open
- * doors" slice of issue #7. Position is untouched (see components.ts /
- * sync.ts) — only the visual rotation moves. */
+/** Advances any door leaf currently opening, swinging both its hinge Group
+ * (Object3DRef) and its kinematic physics body (PhysicsBody) around Y from
+ * closed (0 rad) to `hingeSign * OPEN_ANGLE`. Driving both from the same
+ * angle is what keeps the collider exactly where the slab is drawn, so a
+ * half-open door blocks exactly as much of the doorway as it looks like it
+ * does. Doors only open (no auto-close) — that's the full scope of the
+ * "open doors" slice of issue #7. */
 export function doorAnimationSystem(world: World, dt: number): void {
   for (const eid of query(world, [Door, Object3DRef])) {
     if (Door.state[eid] !== DoorState.OPENING) continue;
 
     Door.progress[eid] = Math.min(1, Door.progress[eid] + dt / OPEN_DURATION);
+    const angle = Door.hingeSign[eid] * OPEN_ANGLE * easeOutCubic(Door.progress[eid]);
 
     const obj = Object3DRef[eid];
-    if (obj) {
-      obj.rotation.y = Door.hingeSign[eid] * OPEN_ANGLE * easeOutCubic(Door.progress[eid]);
-    }
+    if (obj) obj.rotation.y = angle;
+
+    // Rapier takes a quaternion; these leaves only ever rotate about Y, so
+    // building it directly is cheaper and clearer than routing through a
+    // THREE.Quaternion just to copy its components back out.
+    const body = PhysicsBody[eid];
+    if (body) body.setNextKinematicRotation({ x: 0, y: Math.sin(angle / 2), z: 0, w: Math.cos(angle / 2) });
 
     if (Door.progress[eid] >= 1) {
       Door.state[eid] = DoorState.OPEN;

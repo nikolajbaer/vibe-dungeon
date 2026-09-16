@@ -1,10 +1,10 @@
 import * as THREE from "three";
 import { addComponent, addEntity, createWorld, hasComponent } from "bitecs";
 import { query } from "bitecs";
-import { Position, Velocity, Rotation, Collider, PlayerControlled, Object3DRef, Door, Dead, DeathSector, Health, NPC, Item, Carried } from "./ecs/components";
+import { Position, Velocity, Rotation, CharacterBody, PhysicsBody, PhysicsCollider, RenderOffsetY, PlayerControlled, Object3DRef, Door, Dead, DeathSector, Health, NPC, Item, Carried } from "./ecs/components";
 import { inputSystem } from "./ecs/systems/input";
-import { movementSystem } from "./ecs/systems/movement";
-import { collisionSystem } from "./ecs/systems/collision";
+import { characterSystem, physicsSyncSystem, teleportCharacter } from "./ecs/systems/character";
+import { addCharacter, createPhysics, PHYSICS_DT } from "./physics/world";
 import { doorAnimationSystem, tryInteract } from "./ecs/systems/doors";
 import { tryMeleeAttack } from "./ecs/systems/combat";
 import { npcSystem, toggleNpcFollow } from "./ecs/systems/npc";
@@ -26,9 +26,17 @@ import { inventoryStore, type InventoryActions } from "./inventory/store";
 import { mountDialogue } from "./dialogue/mount";
 import { dialogueStore, type DialogueActions } from "./dialogue/store";
 
-const EYE_HEIGHT = 1.6;
-const PLAYER_HALF_EXTENT = 0.35;
+const EYE_HEIGHT = 1.6; // camera height above the player's feet
+const PLAYER_RADIUS = 0.35;
+const PLAYER_HEIGHT = 1.8;
+/** Half-height of the capsule's straight section; the two `PLAYER_RADIUS`
+ * caps make up the rest of `PLAYER_HEIGHT`. */
+const PLAYER_HALF_HEIGHT = PLAYER_HEIGHT / 2 - PLAYER_RADIUS;
 const DEBUG_HEALTH_STEP = 10; // debug-only nudge, see `[`/`]` handling below
+
+/** Ceiling on physics steps per rendered frame — see the accumulator in
+ * `frame` for why (spiral-of-death guard). */
+const MAX_PHYSICS_STEPS_PER_FRAME = 5;
 
 // Mirrors `NpcState` (ecs/components.ts) by index, for the debug hook below —
 // `getNpcState` reports every NPC entity now (archetypes), not one hardcoded
@@ -103,25 +111,38 @@ export function startGame(container: HTMLElement): void {
   scene.add(skyFill);
 
   const world = createWorld();
-  const level = buildLevel(world, scene);
+  const physics = createPhysics();
+  const level = buildLevel(world, physics, scene);
 
   const player = addEntity(world);
   addComponent(world, player, Position);
   addComponent(world, player, Velocity);
   addComponent(world, player, Rotation);
-  addComponent(world, player, Collider);
+  addComponent(world, player, CharacterBody);
+  addComponent(world, player, PhysicsBody);
+  addComponent(world, player, PhysicsCollider);
   addComponent(world, player, PlayerControlled);
   addComponent(world, player, Object3DRef);
   addComponent(world, player, Health);
+  // `Position` is the player's *feet* now, not the camera — see
+  // `CharacterBody` in components.ts. The camera is offset back up to eye
+  // height by `RenderOffsetY` at sync time, which also makes the player's
+  // position mean the same thing an NPC's does (it never did before).
   Position.x[player] = level.spawn.x;
-  Position.y[player] = EYE_HEIGHT;
+  Position.y[player] = 0;
   Position.z[player] = level.spawn.z;
   Velocity.x[player] = 0;
   Velocity.z[player] = 0;
   Rotation.yaw[player] = level.spawn.yaw;
   Rotation.pitch[player] = 0;
-  Collider.hx[player] = PLAYER_HALF_EXTENT;
-  Collider.hz[player] = PLAYER_HALF_EXTENT;
+  CharacterBody.radius[player] = PLAYER_RADIUS;
+  CharacterBody.halfHeight[player] = PLAYER_HALF_HEIGHT;
+  CharacterBody.verticalVelocity[player] = 0;
+  CharacterBody.grounded[player] = 0;
+  const playerBody = addCharacter(physics, level.spawn.x, 0, level.spawn.z, PLAYER_RADIUS, PLAYER_HALF_HEIGHT);
+  PhysicsBody[player] = playerBody.body;
+  PhysicsCollider[player] = playerBody.collider;
+  RenderOffsetY[player] = EYE_HEIGHT;
   Object3DRef[player] = camera;
   Health.current[player] = 100;
   Health.max[player] = 100;
@@ -174,9 +195,11 @@ export function startGame(container: HTMLElement): void {
   // DeathOverlay's respawn button is tapped (hudStore.respawn()).
   const hudActions: HudActions = {
     respawn() {
-      Position.x[player] = level.spawn.x;
-      Position.y[player] = EYE_HEIGHT;
-      Position.z[player] = level.spawn.z;
+      // Has to go through the physics body, not just `Position` — Rapier is
+      // the authority on where a character is, so writing `Position` alone
+      // would be overwritten by the next `physicsSyncSystem` and the player
+      // would snap right back to where they died.
+      teleportCharacter(player, level.spawn.x, 0, level.spawn.z);
       Rotation.yaw[player] = level.spawn.yaw;
       Rotation.pitch[player] = 0;
       Velocity.x[player] = 0;
@@ -189,7 +212,16 @@ export function startGame(container: HTMLElement): void {
   // Minimal debug hook for manual/automated smoke testing (e.g. Playwright
   // checking that movement and collision actually affect position).
   (window as unknown as { __vibeDungeonDebug: unknown }).__vibeDungeonDebug = {
+    // `y` is the player's feet (see `CharacterBody`), not the camera — the
+    // camera sits EYE_HEIGHT above it.
     getPlayerPosition: () => ({ x: Position.x[player], y: Position.y[player], z: Position.z[player] }),
+    // Physics state, for confirming the character controller is actually
+    // resting on the floor rather than falling through it or hovering.
+    getPlayerPhysics: () => ({
+      grounded: CharacterBody.grounded[player] === 1,
+      verticalVelocity: CharacterBody.verticalVelocity[player],
+      cameraY: camera.position.y,
+    }),
     getDoorStates: () =>
       Array.from(query(world, [Door])).map((eid) => ({ state: Door.state[eid], progress: Door.progress[eid] })),
     setYaw: (yaw: number) => { Rotation.yaw[player] = yaw; },
@@ -257,6 +289,10 @@ export function startGame(container: HTMLElement): void {
       choices: dialogueStore.currentNode?.choices.map((c) => c.text) ?? [],
     }),
     chooseDialogue: (index: number) => dialogueStore.choose(index),
+    // Lets an automated test dismiss a dialogue it opened incidentally —
+    // e.g. while walking past the villager pressing E to open doors, which
+    // is exactly what a real player mashing interact would do too.
+    closeDialogue: () => dialogueStore.close(),
     // Player death/respawn debug hooks (aggressive NPC archetypes can now
     // actually kill the player).
     isPlayerDefeated: () => hudStore.playerDefeated,
@@ -304,6 +340,7 @@ export function startGame(container: HTMLElement): void {
   });
 
   const clock = new THREE.Clock();
+  let accumulator = 0;
   function frame() {
     requestAnimationFrame(frame);
     const dt = Math.min(clock.getDelta(), 0.1);
@@ -325,17 +362,36 @@ export function startGame(container: HTMLElement): void {
     if (modalActive) {
       Velocity.x[player] = 0;
       Velocity.z[player] = 0;
+      // Don't bank real time while paused, or the sim would fast-forward
+      // through the backlog the instant the dialogue closes.
+      accumulator = 0;
     } else {
+      // Look/move input is read once per rendered frame (it consumes
+      // accumulated mouse/touch deltas), not once per physics step.
       inputSystem(world, dt, {
         keyboard,
         look: pointerLook,
         moveStick: touch.moveStick,
         touchLook: touch.lookDrag,
       });
-      npcSystem(world, dt);
-      movementSystem(world, dt);
-      collisionSystem(world);
-      doorAnimationSystem(world, dt);
+
+      // Rapier needs a fixed timestep to stay stable, so real frame time is
+      // accumulated and spent in constant-size steps. The step cap stops a
+      // long frame (a tab regaining focus, a slow software-rendered frame)
+      // from queueing up more simulation than the next frame can afford and
+      // spiralling; the leftover is dropped rather than paid back.
+      accumulator += dt;
+      let steps = 0;
+      while (accumulator >= PHYSICS_DT && steps < MAX_PHYSICS_STEPS_PER_FRAME) {
+        accumulator -= PHYSICS_DT;
+        steps++;
+        npcSystem(world, PHYSICS_DT);
+        characterSystem(world, physics, PHYSICS_DT);
+        doorAnimationSystem(world, PHYSICS_DT);
+        physics.world.step();
+        physicsSyncSystem(world);
+      }
+      if (steps === MAX_PHYSICS_STEPS_PER_FRAME) accumulator = 0;
     }
     // Runs every frame regardless of `modalActive` — see its own doc
     // comment for why a death/hit one-shot has to keep playing through a

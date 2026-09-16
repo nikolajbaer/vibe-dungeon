@@ -1,4 +1,5 @@
 import * as THREE from "three";
+import type { RigidBody, Collider as RapierCollider } from "@dimforge/rapier3d-compat";
 
 // bitECS components. Following bitECS's recommended structure-of-arrays (SoA)
 // style: a component is a plain object of parallel arrays indexed by entity
@@ -7,8 +8,10 @@ import * as THREE from "three";
 // Kept intentionally small — this is the ECS foundation for the vertical
 // slice (player controller + collision + doors), not a general engine.
 
-/** World-space position (meters). y is included for completeness (e.g. a
- * door's vertical slide) even though collision only considers x/z. */
+/** World-space position (meters), all three axes meaningful now that
+ * collision is real 3D (Rapier — see src/physics/world.ts). For a character
+ * this is its **feet**, not its center or its eye level; see
+ * `CharacterBody`. */
 export const Position = {
   x: [] as number[],
   y: [] as number[],
@@ -29,18 +32,39 @@ export const Rotation = {
   pitch: [] as number[],
 };
 
-/** Axis-aligned bounding box collider in the XZ plane, centered on Position.
- * hx/hz are half-extents (full width = 2*hx, full depth = 2*hz). */
-export const Collider = {
-  hx: [] as number[],
-  hz: [] as number[],
+/** A character's capsule and the controller state that goes with it (see
+ * `ecs/systems/character.ts`). Replaces the old XZ-only `Collider`, which
+ * described a floor-plan box with no vertical extent at all; a character is
+ * now a real 3D capsule owned by Rapier, and this is the ECS-side
+ * description of it plus the bits of per-step state the controller produces.
+ *
+ * `Position` for a character means its **feet** — the capsule's center sits
+ * `radius + halfHeight` above that (`capsuleCenterOffset` in
+ * physics/world.ts). That's also why the player's camera is offset by
+ * `RenderOffsetY` rather than `Position` being eye-level as it used to be:
+ * with real ground contact, "where the character stands" is the useful
+ * anchor, and it now means the same thing for the player and for NPCs. */
+export const CharacterBody = {
+  radius: [] as number[],
+  /** Half-height of the capsule's straight middle section, excluding the two
+   * hemisphere caps — total height is `2 * (halfHeight + radius)`. */
+  halfHeight: [] as number[],
+  /** Accumulated fall speed (m/s, negative = falling), integrated by
+   * `characterSystem` and zeroed on landing. */
+  verticalVelocity: [] as number[],
+  /** 1 when Rapier's controller reported ground contact on the last step. */
+  grounded: [] as number[],
 };
-
-/** Tag: this entity's collider always blocks movement (walls). */
-export const Solid: Record<string, never> = {};
 
 /** Tag: the single player-controlled entity. */
 export const PlayerControlled: Record<string, never> = {};
+
+/** Vertical offset (meters) added to `Position.y` when `syncSystem` writes
+ * this entity's `Object3DRef` — for an entity whose visual origin isn't its
+ * physics origin. Only the player uses it today (its `Object3DRef` is the
+ * camera, which belongs at eye height rather than at the feet); absent
+ * entries read as 0, so nothing else has to opt out. */
+export const RenderOffsetY: number[] = [];
 
 export const DoorState = {
   CLOSED: 0,
@@ -48,12 +72,14 @@ export const DoorState = {
   OPEN: 2,
 } as const;
 
-/** A door leaf: a collider that swings open on a vertical hinge (see
- * doors.ts). `Position`/`Collider` stay fixed at the leaf's closed-position
- * center (used for the static collision AABB, same as a wall) — only the
- * leaf's visual `Object3DRef` (a hinge `THREE.Group`, see tileBuilder.ts)
- * rotates as it opens; `syncSystem` skips position-sync for `Door` entities
- * so it doesn't fight that group's fixed hinge-point position. */
+/** A door leaf that swings open on a vertical hinge (see doors.ts). Both its
+ * visual `Object3DRef` (a hinge `THREE.Group`, see tileBuilder.ts) and its
+ * kinematic `PhysicsBody` sit *at the hinge* and rotate in lockstep as it
+ * opens, so the collider genuinely swings out of the doorway. That's what
+ * retired the old "treat a door as non-solid once it's 90% open" fudge,
+ * which only existed because a fixed AABB at the leaf's closed position
+ * could never move aside. A door has no `Position` of its own — nothing
+ * needs one now that its collider lives on the hinge body. */
 export const Door = {
   state: [] as number[], // one of DoorState
   progress: [] as number[], // 0 (closed) .. 1 (fully open)
@@ -65,6 +91,22 @@ export const Door = {
  * (AoS-by-reference component — see bitECS docs on component storage).
  * Synced from Position/Rotation each frame by syncSystem. */
 export const Object3DRef: (THREE.Object3D | undefined)[] = [];
+
+/** Backing Rapier rigid body, for entities the physics world actually moves
+ * or is moved by: characters (kinematic, driven by `characterSystem`) and
+ * door leaves (kinematic, rotated by `doorAnimationSystem`). Static level
+ * geometry — walls, floors, ceilings, props — deliberately has *no* ECS
+ * entity at all any more: Rapier owns those colliders outright, and nothing
+ * else ever needed them as entities (see `buildGeometryFromOccupancy`).
+ *
+ * Same AoS-by-reference shape as `Object3DRef`, for the same reason: these
+ * are object handles, not numeric component data. */
+export const PhysicsBody: (RigidBody | undefined)[] = [];
+
+/** A character's own Rapier collider — held separately from `PhysicsBody`
+ * because `KinematicCharacterController.computeColliderMovement` takes the
+ * *collider*, not the body. */
+export const PhysicsCollider: (RapierCollider | undefined)[] = [];
 
 export const NpcState = {
   LOITERING: 0,
