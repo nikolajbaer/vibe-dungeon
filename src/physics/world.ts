@@ -1,5 +1,16 @@
 import type { Collider, KinematicCharacterController, RigidBody, World } from "@dimforge/rapier3d-compat";
 
+/** A plain quaternion `{x,y,z,w}` — used instead of importing `THREE.Quaternion`
+ * here, since this module deliberately stays framework-free (three.js and
+ * bitecs both live above it); callers building one with three.js (see
+ * `level/stairBuilder.ts`) just spread its `.x/.y/.z/.w` fields. */
+export interface Quat {
+  x: number;
+  y: number;
+  z: number;
+  w: number;
+}
+
 // Real 3D physics, via Rapier (Rust, compiled to WASM), replacing the
 // original XZ-only AABB collision pass (the old `ecs/systems/collision.ts`,
 // deleted with this module's arrival). The old system had no vertical extent
@@ -49,15 +60,23 @@ const CHARACTER_SKIN = 0.01;
 /** Max height a character steps up without jumping. Sized for the doorway
  * lips and slab seams that exist today; it's also exactly the knob a future
  * stair tile leans on, so stairs become "author the geometry" rather than
- * "write a bespoke traversal system". */
-const AUTOSTEP_MAX_HEIGHT = 0.4;
-const AUTOSTEP_MIN_WIDTH = 0.2;
+ * "write a bespoke traversal system". Exported so `level/stairBuilder.ts`
+ * can size real riser geometry with a safety margin under this value rather
+ * than hardcoding a second copy of it that could silently drift out of sync
+ * with the controller's actual configuration. */
+export const AUTOSTEP_MAX_HEIGHT = 0.4;
+/** Minimum horizontal tread width autostep needs to engage on a step —
+ * exported for the same reason as `AUTOSTEP_MAX_HEIGHT` above. */
+export const AUTOSTEP_MIN_WIDTH = 0.2;
 
 /** Keeps a character glued to the floor when walking down a small drop
  * rather than briefly going ballistic off every edge. */
 const SNAP_TO_GROUND_DISTANCE = 0.3;
 
-const MAX_SLOPE_CLIMB_DEGREES = 50;
+/** Exported (alongside `AUTOSTEP_MAX_HEIGHT`/`AUTOSTEP_MIN_WIDTH` above) so
+ * `level/stairBuilder.ts` can size a ramp's angle with a real margin under
+ * this instead of a second hardcoded copy. */
+export const MAX_SLOPE_CLIMB_DEGREES = 50;
 
 // Collision groups. Rapier packs these into one 32-bit int: the high 16 bits
 // are "which groups am I a member of", the low 16 are "which groups do I
@@ -168,6 +187,48 @@ export function addStaticBox(
 ): void {
   const R = rapier();
   const body = physics.world.createRigidBody(R.RigidBodyDesc.fixed().setTranslation(cx, cy, cz));
+  physics.world.createCollider(R.ColliderDesc.cuboid(hx, hy, hz).setCollisionGroups(LEVEL_GROUPS), body);
+}
+
+/**
+ * A fixed box at an arbitrary `rotation` — the collider a sloped ramp needs
+ * (see `level/stairBuilder.ts`), which a plain axis-aligned `addStaticBox`
+ * can't express. Takes a full quaternion rather than a single pitch angle
+ * plus an assumed rotation axis specifically because getting a pitch's
+ * *sign* right for an arbitrary climb direction (does climbing toward +X or
+ * -X need a positive or negative rotation around Z?) is easy to get backwards
+ * — `stairBuilder.ts` instead builds the quaternion with three.js's
+ * `Quaternion.setFromUnitVectors`, which sidesteps sign bookkeeping entirely
+ * by just pointing the box's local climb axis at the real world direction
+ * from the ramp's entry to its exit.
+ *
+ * `hx`/`hy`/`hz` are the box's half-extents *before* rotation is applied —
+ * critically, whichever one runs along the climb direction must be half the
+ * ramp's *slope length* (`sqrt(run² + rise²) / 2`), **not** half its
+ * horizontal run. Passing half the horizontal run here instead — an easy
+ * mistake, since horizontal run is the number a level author actually has
+ * to hand — under-sizes the rotated box along its own local axis, which
+ * projects to an even *shorter* horizontal run once rotated and leaves the
+ * ramp's near/far edges floating off the actual floor levels by a wrong
+ * amount (confirmed by an actual Playwright walk-up: at a shallow angle the
+ * error was small enough to not matter, but at a steeper one it floated the
+ * ramp's entrance edge into a small vertical cliff the character couldn't
+ * climb at all).
+ */
+export function addStaticRampBox(
+  physics: Physics,
+  cx: number,
+  cy: number,
+  cz: number,
+  hx: number,
+  hy: number,
+  hz: number,
+  rotation: Quat,
+): void {
+  const R = rapier();
+  const body = physics.world.createRigidBody(
+    R.RigidBodyDesc.fixed().setTranslation(cx, cy, cz).setRotation(rotation),
+  );
   physics.world.createCollider(R.ColliderDesc.cuboid(hx, hy, hz).setCollisionGroups(LEVEL_GROUPS), body);
 }
 

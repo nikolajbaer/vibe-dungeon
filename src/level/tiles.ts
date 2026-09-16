@@ -16,6 +16,56 @@
  * the grid is a uniform 3m cube, not just a 2D floor grid). */
 export const UNIT = 3;
 
+/**
+ * Vertical rise, in meters, from one floor's baseline to the next (issue
+ * #86 — multi-level/verticality support). A tile's own `h` still only sets
+ * *ceiling* height above its own floor (see `TileType` below); this is the
+ * separate, level-wide constant that says how far *up* floor N+1's baseline
+ * sits above floor N's. Fixed at two grid cells (6m) rather than derived per
+ * staircase, because every floor in this game shares one uniform rise —
+ * there's no reason for two different staircases to climb by different
+ * amounts, and a shared constant is what lets `sectorAt`'s Y->floor guess
+ * (`floorForY` below) work without per-instance data.
+ *
+ * Deliberately matches `great_hall`'s existing `h=2` (6m) ceiling: a
+ * player standing in the tallest room downstairs and a player standing on
+ * the upper floor experience the same absolute scale, so nothing about the
+ * new floor reads as "extra tall" or "extra short" relative to what's
+ * already there.
+ */
+export const FLOOR_RISE = 2 * UNIT;
+
+/** World Y (meters) of floor `floor`'s baseline — the height at which that
+ * floor's own `y≈0` conventions (its floor slab, its wall base, every prop/
+ * item/NPC authored at `y: 0` on that floor) actually sit in world space.
+ * Floor 0 (the original, only-ever-existed-until-now ground floor) is
+ * baseline 0, exactly reproducing every existing room's untouched world
+ * position — this is what makes `floor` an *additive* concept rather than a
+ * breaking change to every already-authored `RoomContent`. */
+export function floorBaseline(floor: number): number {
+  return floor * FLOOR_RISE;
+}
+
+/**
+ * The inverse of `floorBaseline`, used where code only has a world Y (the
+ * player's feet, an NPC's position) and needs to know which floor that
+ * actually corresponds to — critically, *not* the same question as "which
+ * XZ cell", since two floors can now legitimately share XZ space (a
+ * staircase's landing sits at the same `(x, z)` on both floors it connects —
+ * see `stair_lower.ts`/`stair_upper.ts`). Rounds to the nearest floor rather
+ * than flooring, so a position anywhere in the upper half of one floor's
+ * rise (e.g. partway up a staircase) already reads as "the floor above" —
+ * harmless here because every vertical connection (see `StairConnector` in
+ * `placementTypes.ts`) deliberately shares one `sectorId` between its two
+ * landings, so which side of the rounding a mid-climb position falls on
+ * doesn't change the answer sector tracking actually cares about. Clamped
+ * to 0 so a momentary sub-baseline value (e.g. a falling ragdoll a few
+ * centimeters under a floor slab before physics resolves it) doesn't read
+ * as a nonsensical negative floor. */
+export function floorForY(y: number): number {
+  return Math.max(0, Math.round(y / FLOOR_RISE));
+}
+
 /** What a single unit-cell-wide segment of a tile's perimeter is. Doors and
  * openings are always exactly one segment (never a whole multi-unit wall) —
  * enforced by the face map's shape (one entry per unit-cell segment), not
@@ -44,6 +94,21 @@ export interface TileType {
   d: number;
   h: number;
   faces: Record<Side, FaceKind[]>;
+  /** Skips this type's usual automatic floor slab (`buildGeometryFromOccupancy`
+   * in `tileBuilder.ts` builds one per instance, spanning its footprint at
+   * its floor's baseline) — for a tile instance that sits directly *above* a
+   * vertical shaft (a staircase's upper landing, see `stair_upper.ts`) and
+   * whose "floor" is really whatever's structurally underneath it (riser
+   * geometry, see `stairBuilder.ts`) rather than a poured slab. Almost every
+   * type wants the default (a real floor); leave this unset unless a type is
+   * specifically the top terminus of a vertical connection. */
+  skipFloorSlab?: boolean;
+  /** Skips this type's usual automatic ceiling slab, the mirror of
+   * `skipFloorSlab` — for a tile instance that a vertical shaft continues
+   * *up through* (a staircase's lower landing, see `stair_lower.ts`), where
+   * a normal ceiling would seal the player inside instead of letting them
+   * climb into the floor above. */
+  skipCeilingSlab?: boolean;
 }
 
 /** Builds an all-`"wall"` face-map entry of the given length — most tile

@@ -5,6 +5,7 @@ import { ITEM_REGISTRY } from "../assets/itemRegistry";
 import { FURNITURE_REGISTRY } from "../assets/furnitureRegistry";
 import { NPC_REGISTRY } from "../assets/npcRegistry";
 import type { PropPlacement, ItemSpawn, NpcSpawn } from "./placementTypes";
+import { floorBaseline } from "./tiles";
 import { addCharacter, addDynamicBox, addStaticBox, type BoxShape, type Physics } from "../physics/world";
 
 // Generic spawners for the asset-authoring system: turn plain `PropPlacement`/
@@ -100,8 +101,8 @@ const DEFAULT_PROP_HALF_HEIGHT = 0.6;
  * props sit with their mesh origin on the floor, so the box is centered half
  * its height up. (A dynamic prop takes a different path entirely — see
  * `spawnProps`.) */
-function addPropCollider(physics: Physics, x: number, z: number, hx: number, hy: number, hz: number): void {
-  addStaticBox(physics, x, hy, z, hx, hy, hz);
+function addPropCollider(physics: Physics, x: number, z: number, hx: number, hy: number, hz: number, floorY: number): void {
+  addStaticBox(physics, x, floorY + hy, z, hx, hy, hz);
 }
 
 /**
@@ -143,7 +144,7 @@ export function spawnItems(world: World, physics: Physics, scene: THREE.Scene, s
     const group = withPickupHitbox(mesh, eid);
 
     const x = spawn.x;
-    const y = spawn.y ?? ITEM_HEIGHT;
+    const y = floorBaseline(spawn.floor ?? 0) + (spawn.y ?? ITEM_HEIGHT);
     const z = spawn.z;
     Position.x[eid] = x;
     Position.y[eid] = y;
@@ -189,8 +190,9 @@ export function spawnNpcs(world: World, physics: Physics, scene: THREE.Scene, sp
     addComponent(world, eid, NPC);
     addComponent(world, eid, Object3DRef);
     addComponent(world, eid, Health);
+    const floorY = floorBaseline(spawn.floor ?? 0);
     Position.x[eid] = spawn.x;
-    Position.y[eid] = 0; // the humanoid rig's origin is at its feet
+    Position.y[eid] = floorY; // the humanoid rig's origin is at its feet
     Position.z[eid] = spawn.z;
     Velocity.x[eid] = 0;
     Velocity.z[eid] = 0;
@@ -201,7 +203,7 @@ export function spawnNpcs(world: World, physics: Physics, scene: THREE.Scene, sp
     CharacterBody.halfHeight[eid] = halfHeight;
     CharacterBody.verticalVelocity[eid] = 0;
     CharacterBody.grounded[eid] = 0;
-    const handles = addCharacter(physics, spawn.x, 0, spawn.z, radius, halfHeight);
+    const handles = addCharacter(physics, spawn.x, floorY, spawn.z, radius, halfHeight);
     PhysicsBody[eid] = handles.body;
     PhysicsCollider[eid] = handles.collider;
 
@@ -251,7 +253,7 @@ export function spawnProps(world: World, physics: Physics, scene: THREE.Scene, p
 
     const mesh = def.createMesh(placement.params);
     const x = placement.x;
-    const y = placement.y ?? 0;
+    const y = floorBaseline(placement.floor ?? 0) + (placement.y ?? 0);
     const z = placement.z;
     const yaw = placement.rotation ?? 0;
 
@@ -283,10 +285,14 @@ export function spawnProps(world: World, physics: Physics, scene: THREE.Scene, p
     mesh.rotation.y = yaw;
     scene.add(mesh);
 
-    if (y === 0 && def.footprint) {
+    // Compared against the *placement's own* relative height, not the
+    // absolute world `y` above — a ground-level prop on the upper floor has
+    // `placement.y` unset (0) but an absolute `y` of `floorBaseline(1)` (6m),
+    // and still wants its floor-plan collider exactly like one on floor 0.
+    if ((placement.y ?? 0) === 0 && def.footprint) {
       const footprint = typeof def.footprint === "function" ? def.footprint(placement.params) : def.footprint;
       if (footprint) {
-        addPropCollider(physics, x, z, footprint.hx, footprint.hy ?? DEFAULT_PROP_HALF_HEIGHT, footprint.hz);
+        addPropCollider(physics, x, z, footprint.hx, footprint.hy ?? DEFAULT_PROP_HALF_HEIGHT, footprint.hz, floorBaseline(placement.floor ?? 0));
       }
     }
   }

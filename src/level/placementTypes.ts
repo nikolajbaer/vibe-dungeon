@@ -21,15 +21,23 @@ export interface PropPlacement {
   id: string;
   x: number;
   z: number;
-  /** Height off the floor, meters — default 0. A collider is only attached
-   * at y=0 (see `spawnProps` in `level/spawning.ts`): a decorative piece
-   * stacked above another (e.g. a second crate on top of the first) doesn't
-   * get a redundant second floor-plan collider at the same x/z. */
+  /** Height off the floor, meters — default 0, *relative to `floor`'s own
+   * baseline* (see below), not an absolute world Y. A collider is only
+   * attached at this-floor-relative y=0 (see `spawnProps` in
+   * `level/spawning.ts`): a decorative piece stacked above another (e.g. a
+   * second crate on top of the first) doesn't get a redundant second
+   * floor-plan collider at the same x/z. */
   y?: number;
   /** Radians around Y, applied to the built mesh generically — default 0.
    * Every furniture asset builds facing local +z; this is how a placement
    * points it at whichever wall/direction it actually needs. */
   rotation?: number;
+  /** Which floor (see `TileInstance.floor`, `tiles.ts`'s `floorBaseline`)
+   * this prop sits on — default 0 (the ground floor, and the only value
+   * that existed before issue #86). `spawnProps` adds `floorBaseline(floor)`
+   * to `y` once, so every existing placement (all implicitly floor 0) keeps
+   * spawning at exactly the world Y it always did. */
+  floor?: number;
   /** Asset-specific extra data (e.g. banner.ts's `BannerParams` colors) —
    * see the referenced asset's own module for its shape. */
   params?: unknown;
@@ -42,8 +50,12 @@ export interface ItemSpawn {
   id: string;
   x: number;
   z: number;
-  /** Height off the floor, meters — default `ITEM_HEIGHT` (level/spawning.ts). */
+  /** Height off the floor, meters — default `ITEM_HEIGHT` (level/spawning.ts),
+   * relative to `floor`'s own baseline (see `PropPlacement.floor`'s doc
+   * comment — same convention). */
   y?: number;
+  /** Which floor this item sits on — default 0. See `PropPlacement.floor`. */
+  floor?: number;
 }
 
 /** One NPC placed in the world. Lives in a `RoomContent.npcs` array. */
@@ -52,6 +64,15 @@ export interface NpcSpawn {
   id: string;
   x: number;
   z: number;
+  /** Which floor this NPC sits on — default 0. See `PropPlacement.floor`.
+   * Worth a second look before placing an aggressive archetype upstairs:
+   * `npcSystem`'s aggro check (`ecs/systems/npc.ts`) is pure XZ distance,
+   * blind to Y/floor entirely (see README's "Tile-based level system" /
+   * this file's own `RoomContent` doc comment for the wider caveat) — an
+   * aggressive NPC placed directly above (or below) another one's aggro
+   * radius could sense through the floor. Not fixed here; just don't make a
+   * new placement collide with it. */
+  floor?: number;
 }
 
 /** Where the player starts: position plus initial facing (radians, same
@@ -63,6 +84,42 @@ export interface LevelSpawn {
   x: number;
   z: number;
   yaw: number;
+}
+
+/**
+ * Describes one physical staircase connecting two adjacent floors (issue
+ * #86) — the actual climbable riser geometry (real stepped Rapier boxes,
+ * see `stairBuilder.ts`'s `buildStaircase`) that a `stair_lower.ts`/
+ * `stair_upper.ts` tile *pair* needs in addition to their own wall/floor/
+ * ceiling geometry (which `buildGeometryFromOccupancy` already builds
+ * generically from the occupancy index, same as every other tile).
+ *
+ * This is plain placement data, following the exact same "a room's file
+ * describes what it needs, a generic builder turns it into real geometry"
+ * shape as `PropPlacement`/`ItemSpawn` — a new staircase is a new
+ * `RoomContent.stairs` entry, never a change to `stairBuilder.ts` itself.
+ *
+ * `x`/`z` is the world *cell* (not meters) both landings share — see
+ * `TileInstance.floor`'s doc comment on why a staircase's two tile
+ * instances legitimately occupy the same `(x, z)` on different floors.
+ * `axis`/`direction` describe, in world space, which way the stairs climb
+ * as you ascend from `floorBelow` to `floorAbove`: `axis: "x"` climbs along
+ * X (`direction: 1` = toward +X, `-1` = toward -X), `axis: "z"` likewise
+ * along Z. This is authored directly in world space (unlike a tile type's
+ * face map, which is authored in local space and rotated per instance)
+ * because a staircase's *physical* climb direction has to be one single
+ * consistent world direction shared by both of its tile instances — see
+ * `stairBuilder.ts`'s header comment for why deriving it from each
+ * instance's own (potentially different) `rotation` instead would be
+ * fragile rather than simpler.
+ */
+export interface StairConnector {
+  x: number;
+  z: number;
+  floorBelow: number;
+  floorAbove: number;
+  axis: "x" | "z";
+  direction: 1 | -1;
 }
 
 /** Everything one room/area places in the level — the default export of
@@ -82,4 +139,9 @@ export interface RoomContent {
   items?: ItemSpawn[];
   npcs?: NpcSpawn[];
   spawn?: LevelSpawn;
+  /** Physical staircase connectors this room/area needs built (issue #86) —
+   * see `StairConnector`'s doc comment. Usually paired one-for-one with a
+   * `stair_lower`/`stair_upper` tile instance pair in this same file's
+   * `tiles` array. */
+  stairs?: StairConnector[];
 }

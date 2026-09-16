@@ -15,6 +15,7 @@ import { equipItem, equipToOpenHandSlot, unequipItem, viewmodelSwingSystem } fro
 import { syncSystem } from "./ecs/systems/sync";
 import { hudSync } from "./ecs/systems/hudSync";
 import { buildLevel } from "./level/level";
+import { floorForY } from "./level/tiles";
 import { ALL_ITEM_SPAWNS } from "./level/rooms";
 import { Keyboard } from "./input/keyboard";
 import { PointerLook } from "./input/pointerLook";
@@ -260,6 +261,11 @@ export function startGame(container: HTMLElement): void {
     },
     getRotation: () => ({ yaw: Rotation.yaw[player], pitch: Rotation.pitch[player] }),
     getCurrentSector: () => currentSector,
+    // Issue #86 (multi-level/stairs): which floor the player's current Y
+    // resolves to (see `floorForY`, level/tiles.ts) — for automated
+    // (Playwright) verification that climbing a staircase actually lands on
+    // the upper floor, not just "moved upward some amount".
+    getPlayerFloor: () => floorForY(Position.y[player]),
     getHealth: () => ({ current: Health.current[player], max: Health.max[player] }),
     // Debug-only direct health set, for automated (Playwright) testing that
     // needs the player's health to hit 0 in one step (e.g. forcing the
@@ -466,7 +472,7 @@ export function startGame(container: HTMLElement): void {
     for (const eid of query(world, [NPC, Dead])) {
       if (!hasComponent(world, eid, DeathSector)) {
         addComponent(world, eid, DeathSector);
-        DeathSector.sectorId[eid] = level.sectorAt(Position.x[eid], Position.z[eid]);
+        DeathSector.sectorId[eid] = level.sectorAt(Position.x[eid], Position.y[eid], Position.z[eid]);
         DeathSector.lingerRemaining[eid] = MIN_LINGER_SECONDS;
       }
     }
@@ -481,7 +487,7 @@ export function startGame(container: HTMLElement): void {
       Health.current[player] = Math.min(Health.max[player], Health.current[player] + DEBUG_HEALTH_STEP);
     }
 
-    const sector = level.sectorAt(Position.x[player], Position.z[player]);
+    const sector = level.sectorAt(Position.x[player], Position.y[player], Position.z[player]);
     if (sector !== currentSector) {
       currentSector = sector;
       console.log(`[sector] entered "${currentSector ?? "(none)"}"`);

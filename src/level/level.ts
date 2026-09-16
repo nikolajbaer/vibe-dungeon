@@ -3,8 +3,9 @@ import type { World } from "bitecs";
 import { UNIT } from "./tiles";
 import { buildOccupancyIndex, validateOccupancy, sectorAt, type OccupancyIndex } from "./occupancy";
 import { buildGeometryFromOccupancy } from "./tileBuilder";
+import { buildStaircases } from "./stairBuilder";
 import { spawnProps, spawnItems, spawnNpcs } from "./spawning";
-import { ALL_TILE_INSTANCES, ALL_PROPS, ALL_ITEM_SPAWNS, ALL_NPC_SPAWNS, LEVEL_SPAWN } from "./rooms";
+import { ALL_TILE_INSTANCES, ALL_PROPS, ALL_ITEM_SPAWNS, ALL_NPC_SPAWNS, ALL_STAIR_CONNECTORS, LEVEL_SPAWN } from "./rooms";
 import type { LevelSpawn } from "./placementTypes";
 import type { Physics } from "../physics/world";
 
@@ -22,20 +23,23 @@ export interface Level {
   spawn: LevelSpawn;
   /** The player's current sector, looked up from the occupancy index by
    * world position. Authoring/tracking data only (see README "Sectors") —
-   * nothing gates simulation on this; it's for debugging/future tooling. */
-  sectorAt(worldX: number, worldZ: number): string | undefined;
+   * nothing gates simulation on this; it's for debugging/future tooling.
+   * Takes `worldY` (issue #86) so it can tell which *floor* a position is on
+   * when two floors share XZ space — see `occupancy.ts`'s `sectorAt`. */
+  sectorAt(worldX: number, worldY: number, worldZ: number): string | undefined;
 }
 
 export function buildLevel(world: World, physics: Physics, scene: THREE.Scene): Level {
   const occupancy: OccupancyIndex = buildOccupancyIndex(ALL_TILE_INSTANCES);
   validateOccupancy(occupancy);
   buildGeometryFromOccupancy(world, physics, scene, occupancy);
+  buildStaircases(physics, scene, ALL_STAIR_CONNECTORS);
   spawnProps(world, physics, scene, ALL_PROPS);
   spawnItems(world, physics, scene, ALL_ITEM_SPAWNS);
   spawnNpcs(world, physics, scene, ALL_NPC_SPAWNS);
 
   return {
     spawn: LEVEL_SPAWN,
-    sectorAt: (worldX, worldZ) => sectorAt(occupancy, worldX, worldZ, UNIT),
+    sectorAt: (worldX, worldY, worldZ) => sectorAt(occupancy, worldX, worldY, worldZ, UNIT),
   };
 }
