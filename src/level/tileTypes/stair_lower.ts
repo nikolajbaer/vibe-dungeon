@@ -1,5 +1,5 @@
 import type { TileType } from "../tiles";
-import { wallsOf } from "../tiles";
+import { wallsOf, STAIR_LANDING_HEIGHT_CELLS } from "../tiles";
 
 /**
  * The lower (ground-floor) terminus of a staircase (issue #86) — a 3m x 9m
@@ -30,12 +30,25 @@ import { wallsOf } from "../tiles";
  * overlapping the step geometry for the whole run — confirmed, by an actual
  * Playwright walk-up, to jam the character controller solid right at the
  * shaft entrance.
+ *
+ * This type's own `h` (`STAIR_LANDING_HEIGHT_CELLS`) only reaches partway
+ * up the shaft's total `FLOOR_RISE` — its north/south walls stop well short
+ * of where `stair_upper`'s own walls pick up one floor above, real space a
+ * player could otherwise step sideways off the ramp into and fall out of
+ * the level entirely (a real bug, found after this staircase first
+ * shipped: nothing else exists in the empty world space beside the shaft to
+ * catch a fall there). `stairBuilder.ts`'s `buildShaftGuardWalls` closes
+ * that gap with its own purpose-built geometry rather than by just making
+ * this type's `h` taller — see its doc comment for why a uniform taller `h`
+ * would break the climb instead of fixing anything (it would also seal the
+ * shaft's own west-end opening at the exact height the climb needs to pass
+ * through it).
  */
 const stairLower: TileType = {
   id: "stair_lower",
   w: 3,
   d: 1,
-  h: 1,
+  h: STAIR_LANDING_HEIGHT_CELLS,
   faces: {
     north: wallsOf(3),
     south: wallsOf(3),

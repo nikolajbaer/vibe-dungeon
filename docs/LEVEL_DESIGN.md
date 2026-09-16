@@ -443,6 +443,35 @@ what it enables** — `AUTOSTEP_MAX_HEIGHT`'s comment calling out stairs as
 its use case was written before anyone had actually tried building stairs
 with it.
 
+**A second bug this staircase shipped with, found the same way: you could
+fall out of the level by stepping sideways off the ramp.** `stair_lower`/
+`stair_upper` each get their own north/south walls from the generic
+tile-builder pass, but only `STAIR_LANDING_HEIGHT_CELLS` (one grid cell, 3m)
+tall above their own floor baseline. `FLOOR_RISE` is two cells (6m), so the
+*middle* cell of the climb had no wall on either long side at all — real
+space directly beside the ramp, with nothing else in the level's
+surrounding empty world to catch a fall there. This wasn't caught by the
+verification that shipped with the staircase (which walked the ramp's
+centerline, never its edges) — it took someone actually trying to step off
+the side to find it, the same lesson as the autostep story above one more
+time: the geometry validating and rendering correctly says nothing about
+whether the space around it is actually contained.
+
+The fix (`stairBuilder.ts`'s `buildShaftGuardWalls`) is **not** to give the
+landings a taller `h`: `stair_lower`'s west wall is deliberately only
+`STAIR_LANDING_HEIGHT_CELLS` tall so the climb can pass over its top on the
+way to `stair_upper`'s opening one floor up (see `stair_lower.ts`'s own doc
+comment) — a uniform taller wall would also raise *that* wall and seal the
+shaft's only exit shut at exactly the height the climb needs to pass
+through it. Instead, `buildShaftGuardWalls` adds its own purpose-built
+static walls that only ever flank the run's two long sides, spanning the
+*entire* `FLOOR_RISE` (deliberately overlapping the shorter walls the
+landings already build, rather than trying to start exactly where those
+leave off, so this stays correct even if a landing's own height changes).
+`STAIR_LANDING_HEIGHT_CELLS` (`tiles.ts`) exists specifically so this number
+has one home, shared by `stair_lower.ts`/`stair_upper.ts`'s own `h` and this
+gap calculation, rather than three places that could silently drift apart.
+
 **Sector id for the pair.** `stair-lower`/`stair-upper` share one sector id
 (`"stairwell"`) rather than getting their own — deliberate, since
 `floorForY`'s Y-to-floor rounding means a position genuinely mid-climb could

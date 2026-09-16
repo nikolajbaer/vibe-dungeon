@@ -22,7 +22,11 @@ import { addKinematicBox, addStaticBox, type Physics } from "../physics/world";
 // still get one, since `Door` is real per-entity state the interact/
 // animation systems drive.
 
-const WALL_THICKNESS = 0.15; // half-thickness of a wall/door slab, meters
+// Exported so `stairBuilder.ts`'s shaft guard walls (see its
+// `buildShaftGuardWalls`) can align flush with a stair landing's own
+// tile-generated walls above/below them, rather than hardcoding a second
+// copy of this that could silently drift out of sync.
+export const WALL_THICKNESS = 0.15; // half-thickness of a wall/door slab, meters
 const DOOR_HEIGHT = 2.2;
 
 /**

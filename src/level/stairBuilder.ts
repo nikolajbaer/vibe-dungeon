@@ -1,7 +1,8 @@
 import * as THREE from "three";
 import { UNIT, floorBaseline } from "./tiles";
 import { wallMaterial } from "./materials";
-import { addStaticRampBox, MAX_SLOPE_CLIMB_DEGREES, type Physics } from "../physics/world";
+import { WALL_THICKNESS } from "./tileBuilder";
+import { addStaticBox, addStaticRampBox, MAX_SLOPE_CLIMB_DEGREES, type Physics } from "../physics/world";
 import type { StairConnector } from "./placementTypes";
 
 // Builds the actual climbable geometry for a vertical connection between two
@@ -178,12 +179,82 @@ function buildStairVisual(scene: THREE.Scene, geo: RampGeometry): void {
   }
 }
 
-/** Builds one staircase's real ramp collider plus its cosmetic stepped
- * visual, between the two floors a `StairConnector` names. */
+/**
+ * Walls the shaft's two long sides for the *entire* floor-to-floor rise —
+ * not just each landing's own `h`-sized wall.
+ *
+ * `stair_lower`/`stair_upper` each get their own north/south walls from the
+ * generic tile-builder pass (`buildGeometryFromOccupancy`), but only
+ * `STAIR_LANDING_HEIGHT_CELLS` tall above their own floor baseline. For a
+ * `FLOOR_RISE` of two cells and a landing height of one, that leaves the
+ * *middle* cell of the rise with no wall on either long side at all — real
+ * space directly beside the ramp a player can step into, with nothing else
+ * in the level's empty surrounding world to catch a fall there (confirmed
+ * by actually doing it: a real bug found after this staircase first
+ * shipped, not a hypothetical).
+ *
+ * Deliberately not fixed by giving the landings a taller `h` instead: a
+ * uniform taller wall would apply to *every* side of that tile, including
+ * the shaft's own end walls — `stair_lower`'s west wall, in particular, is
+ * intentionally only `STAIR_LANDING_HEIGHT_CELLS` tall so the climb can
+ * pass over its top on the way to `stair_upper`'s opening one floor up; a
+ * taller west wall would seal that exit shut at exactly the height the
+ * climb needs to pass through it. These guard walls only ever flank the
+ * run's two long sides, never its ends, so they can safely span the whole
+ * rise without touching that opening.
+ *
+ * Deliberately spans the *whole* `floorBelow`-to-`floorAbove` range,
+ * overlapping the shorter walls each landing already builds, rather than
+ * starting exactly where those leave off — computing the precise gap here
+ * would mean hardcoding an assumption about where those per-landing walls
+ * actually end, in a file that has no direct reference to either tile type.
+ * The small overlap costs nothing (two coincident static colliders behave
+ * exactly like one) and keeps this correct even if a landing's own height
+ * ever changes.
+ */
+function buildShaftGuardWalls(physics: Physics, scene: THREE.Scene, geo: RampGeometry): void {
+  // `geo.entry.y`/`geo.exit.y` are already `floorBaseline(floorBelow)`/
+  // `floorBaseline(floorAbove)` (see `rampGeometryOf`) — reading them back
+  // out here instead of recomputing from the connector keeps this correct
+  // for any pair of floors, not just 0-and-1.
+  const loY = geo.entry.y;
+  const hiY = geo.exit.y;
+  const cy = (loY + hiY) / 2;
+  const halfHeight = (hiY - loY) / 2;
+
+  const alongEntry = geo.climbAxis === "x" ? geo.entry.x : geo.entry.z;
+  const alongExit = geo.climbAxis === "x" ? geo.exit.x : geo.exit.z;
+  const centerAlong = (alongEntry + alongExit) / 2;
+  const halfAlong = Math.abs(alongExit - alongEntry) / 2;
+
+  for (const sign of [1, -1] as const) {
+    // Centered exactly on the shaft's cell boundary (`UNIT / 2` out from its
+    // center), matching how every generic tile wall is placed — flush with
+    // the landings' own walls above and below, no seam or visible offset.
+    const perp = geo.perpCoord + sign * (UNIT / 2);
+    const cx = geo.climbAxis === "x" ? centerAlong : perp;
+    const cz = geo.climbAxis === "x" ? perp : centerAlong;
+    const hx = geo.climbAxis === "x" ? halfAlong : WALL_THICKNESS;
+    const hz = geo.climbAxis === "x" ? WALL_THICKNESS : halfAlong;
+
+    addStaticBox(physics, cx, cy, cz, hx, halfHeight, hz);
+    const mesh = new THREE.Mesh(new THREE.BoxGeometry(hx * 2, halfHeight * 2, hz * 2), wallMaterial());
+    mesh.position.set(cx, cy, cz);
+    mesh.castShadow = true;
+    mesh.receiveShadow = true;
+    scene.add(mesh);
+  }
+}
+
+/** Builds one staircase's real ramp collider, its cosmetic stepped visual,
+ * and the guard walls that keep a climbing player from stepping off its
+ * sides into empty space, between the two floors a `StairConnector`
+ * names. */
 export function buildStaircase(physics: Physics, scene: THREE.Scene, connector: StairConnector): void {
   const geo = rampGeometryOf(connector);
   buildRampCollider(physics, geo);
   buildStairVisual(scene, geo);
+  buildShaftGuardWalls(physics, scene, geo);
 }
 
 /** Builds every staircase in the level (issue #86) — called once from
