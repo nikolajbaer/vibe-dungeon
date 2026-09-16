@@ -1,11 +1,11 @@
 import * as THREE from "three";
 import { addComponent, addEntity, type World } from "bitecs";
-import { Position, Velocity, CharacterBody, PhysicsBody, PhysicsCollider, Object3DRef, Item, NPC, NpcState, Health } from "../ecs/components";
+import { Position, Velocity, CharacterBody, DynamicBody, PhysicsBody, PhysicsCollider, PhysicsRotation, Object3DRef, Item, NPC, NpcState, Health } from "../ecs/components";
 import { ITEM_REGISTRY } from "../assets/itemRegistry";
 import { FURNITURE_REGISTRY } from "../assets/furnitureRegistry";
 import { NPC_REGISTRY } from "../assets/npcRegistry";
 import type { PropPlacement, ItemSpawn, NpcSpawn } from "./placementTypes";
-import { addCharacter, addStaticBox, type Physics } from "../physics/world";
+import { addCharacter, addDynamicBox, addStaticBox, type BoxShape, type Physics } from "../physics/world";
 
 // Generic spawners for the asset-authoring system: turn plain `PropPlacement`/
 // `ItemSpawn` data (src/level/rooms/*.ts) into real ECS entities + three.js
@@ -15,7 +15,47 @@ import { addCharacter, addStaticBox, type Physics } from "../physics/world";
 // `addTable`/`addBanner`-style function *and* a call to it inside
 // `addDecorations()`) — now it's data in, entities out, once, generically.
 
-const ITEM_HEIGHT = 1; // meters off the floor — roughly a low table/pedestal height
+/** Height (meters) a world item spawns at when its placement doesn't say
+ * otherwise. Items are dynamic bodies now, so this is a *drop* height rather
+ * than a resting one — an item authored over open floor falls the last meter
+ * and settles, and one authored over the tabletop (room-a's sword) lands on
+ * it. */
+const ITEM_HEIGHT = 1;
+
+/** Mass (kg) for a world item whose asset doesn't declare one. Light enough
+ * that walking into it sends it skittering, which is the whole point. */
+const DEFAULT_ITEM_MASS = 1;
+
+/**
+ * Measures the box a finished mesh occupies *in its own local space* — half
+ * extents plus how far its center sits from the mesh origin.
+ *
+ * Measured rather than authored because this repo's meshes are built from
+ * merged primitives around whatever origin made the asset easiest to write
+ * (a prop's sits on the floor; the sword's sits at its grip, with most of
+ * its length out along +Z), so hand-authoring a matching collider per asset
+ * would be busywork that silently rots the first time a mesh changes shape.
+ * `THREE.Box3.setFromObject` already walks the whole hierarchy and does it
+ * exactly.
+ *
+ * The mesh must not have been positioned or rotated yet — this is local
+ * space, and the body carries the world transform (see `addDynamicBox`).
+ */
+function boxShapeOf(object: THREE.Object3D): BoxShape {
+  const bounds = new THREE.Box3().setFromObject(object);
+  const size = bounds.getSize(new THREE.Vector3());
+  const center = bounds.getCenter(new THREE.Vector3());
+  return {
+    // Rapier rejects a zero half-extent, and a paper-thin prop (a banner)
+    // would otherwise produce one.
+    hx: Math.max(size.x / 2, 0.01),
+    hy: Math.max(size.y / 2, 0.01),
+    hz: Math.max(size.z / 2, 0.01),
+    cx: center.x,
+    cy: center.y,
+    cz: center.z,
+  };
+}
 
 // Generous invisible raycast target radius for item pickup — an item's
 // actual visual mesh can be quite thin (the sword's blade, say), which made
@@ -54,11 +94,12 @@ function withPickupHitbox(mesh: THREE.Object3D, eid: number): THREE.Group {
  * default: an asset with a `footprint.hy` gets exactly that instead. */
 const DEFAULT_PROP_HALF_HEIGHT = 0.6;
 
-/** Adds one prop's static Rapier box — no ECS entity, exactly like a wall
- * segment (see tileBuilder.ts's `addWall`): a prop never moves and nothing
- * queries it as an entity, so the collider is all it actually needs. Props
- * sit with their mesh origin on the floor, so the box is centered half its
- * height up. */
+/** Adds one *static* prop's Rapier box — no ECS entity, exactly like a wall
+ * segment (see tileBuilder.ts's `addWall`): it never moves and nothing
+ * queries it as an entity, so the collider is all it actually needs. Static
+ * props sit with their mesh origin on the floor, so the box is centered half
+ * its height up. (A dynamic prop takes a different path entirely — see
+ * `spawnProps`.) */
 function addPropCollider(physics: Physics, x: number, z: number, hx: number, hy: number, hz: number): void {
   addStaticBox(physics, x, hy, z, hx, hy, hz);
 }
@@ -67,12 +108,19 @@ function addPropCollider(physics: Physics, x: number, z: number, hx: number, hy:
  * Places every item spawn as a real `Item` + `Position` + `Object3DRef`
  * entity (no `Carried` component — see `pickUpItem` in
  * `ecs/systems/items.ts` for what picking one up adds), built from its
- * `ItemAssetDef.createWorldMesh()`. Throws if a spawn references an unknown
- * item id — the same "fail loudly at load time" philosophy as
- * `occupancy.ts`'s `validateOccupancy`, rather than silently rendering
- * nothing.
+ * `ItemAssetDef.createWorldMesh()`.
+ *
+ * Every world item is a *dynamic* rigid body: it drops from wherever it was
+ * authored, settles on whatever is beneath it (room-a's sword is authored
+ * over the tabletop and lands on it), and skitters when a character walks
+ * into it. Nothing about pickup changed — the interact raycast still hits
+ * the same generous hitbox; it just might not be where it was left.
+ *
+ * Throws if a spawn references an unknown item id — the same "fail loudly at
+ * load time" philosophy as `occupancy.ts`'s `validateOccupancy`, rather than
+ * silently rendering nothing.
  */
-export function spawnItems(world: World, scene: THREE.Scene, spawns: ItemSpawn[]): void {
+export function spawnItems(world: World, physics: Physics, scene: THREE.Scene, spawns: ItemSpawn[]): void {
   for (const spawn of spawns) {
     const def = ITEM_REGISTRY[spawn.id];
     if (!def) throw new Error(`spawnItems: unknown item id "${spawn.id}"`);
@@ -81,15 +129,31 @@ export function spawnItems(world: World, scene: THREE.Scene, spawns: ItemSpawn[]
     addComponent(world, eid, Position);
     addComponent(world, eid, Object3DRef);
     addComponent(world, eid, Item);
-    Position.x[eid] = spawn.x;
-    Position.y[eid] = spawn.y ?? ITEM_HEIGHT;
-    Position.z[eid] = spawn.z;
+    addComponent(world, eid, DynamicBody);
+    addComponent(world, eid, PhysicsBody);
+    addComponent(world, eid, PhysicsRotation);
     Item.itemTypeId[eid] = def.id;
 
     const mesh = def.createWorldMesh();
+    // Measured before the group gets a transform, and off the item's real
+    // mesh rather than the group, so the invisible pickup hitbox sphere
+    // (which is deliberately far more generous than the item) doesn't
+    // become the collider.
+    const shape = boxShapeOf(mesh);
     const group = withPickupHitbox(mesh, eid);
+
+    const x = spawn.x;
+    const y = spawn.y ?? ITEM_HEIGHT;
+    const z = spawn.z;
+    Position.x[eid] = x;
+    Position.y[eid] = y;
+    Position.z[eid] = z;
+    group.position.set(x, y, z);
+    PhysicsRotation.w[eid] = 1; // identity until the first physics step
     scene.add(group);
     Object3DRef[eid] = group;
+
+    PhysicsBody[eid] = addDynamicBox(physics, x, y, z, 0, shape, def.mass ?? DEFAULT_ITEM_MASS);
   }
 }
 
@@ -159,29 +223,70 @@ export function spawnNpcs(world: World, physics: Physics, scene: THREE.Scene, sp
 }
 
 /**
- * Places every prop placement as a mesh in the scene, plus a matching static
- * collider for any asset that declares a `footprint` — unless the placement
- * is elevated (`y` > 0), e.g. the second crate of a stack, which would
- * otherwise get a redundant collider sitting inside the one beneath it.
- * (Stacked props are visual-only for now: giving each its own collider at
- * its real height is a small follow-up, not something this physics migration
- * needed to change.) Throws if a placement references an unknown furniture id.
+ * Places every prop placement as a mesh in the scene, plus physics to match,
+ * in one of two ways depending on what the asset declares (see
+ * `FurnitureAssetDef.dynamic`):
+ *
+ * - **Dynamic** (table, chairs, barrel, crates) — a simulated rigid body,
+ *   and therefore the one kind of prop that needs a real ECS entity, since
+ *   something has to carry the transform Rapier produces back to the mesh
+ *   each frame (`dynamicSyncSystem`). Its collider is measured off the mesh
+ *   rather than taken from `footprint`, because a body that can tip over
+ *   needs its true height and center, not a floor plan.
+ * - **Static** (banners, the candelabra) — a fixed collider from `footprint`
+ *   and no entity at all, exactly like a wall segment.
+ *
+ * Elevated placements (`y` > 0, e.g. the second crate of a stack) used to be
+ * skipped entirely to avoid burying a redundant collider inside the one
+ * beneath them. A dynamic prop needs no such guard: the upper crate is a real
+ * body resting on the lower one, which is what a stack always should have
+ * been — knock the bottom one out and the top one falls.
+ *
+ * Throws if a placement references an unknown furniture id.
  */
-export function spawnProps(physics: Physics, scene: THREE.Scene, placements: PropPlacement[]): void {
+export function spawnProps(world: World, physics: Physics, scene: THREE.Scene, placements: PropPlacement[]): void {
   for (const placement of placements) {
     const def = FURNITURE_REGISTRY[placement.id];
     if (!def) throw new Error(`spawnProps: unknown furniture id "${placement.id}"`);
 
     const mesh = def.createMesh(placement.params);
+    const x = placement.x;
     const y = placement.y ?? 0;
-    mesh.position.set(placement.x, y, placement.z);
-    mesh.rotation.y = placement.rotation ?? 0;
+    const z = placement.z;
+    const yaw = placement.rotation ?? 0;
+
+    if (def.dynamic) {
+      // Measured before the mesh is transformed — `boxShapeOf` is local
+      // space, and the body carries the world placement.
+      const shape = boxShapeOf(mesh);
+      mesh.position.set(x, y, z);
+      mesh.rotation.y = yaw;
+      scene.add(mesh);
+
+      const eid = addEntity(world);
+      addComponent(world, eid, Position);
+      addComponent(world, eid, Object3DRef);
+      addComponent(world, eid, DynamicBody);
+      addComponent(world, eid, PhysicsBody);
+      addComponent(world, eid, PhysicsRotation);
+      Position.x[eid] = x;
+      Position.y[eid] = y;
+      Position.z[eid] = z;
+      PhysicsRotation.y[eid] = Math.sin(yaw / 2);
+      PhysicsRotation.w[eid] = Math.cos(yaw / 2);
+      Object3DRef[eid] = mesh;
+      PhysicsBody[eid] = addDynamicBox(physics, x, y, z, yaw, shape, def.dynamic.mass);
+      continue;
+    }
+
+    mesh.position.set(x, y, z);
+    mesh.rotation.y = yaw;
     scene.add(mesh);
 
     if (y === 0 && def.footprint) {
       const footprint = typeof def.footprint === "function" ? def.footprint(placement.params) : def.footprint;
       if (footprint) {
-        addPropCollider(physics, placement.x, placement.z, footprint.hx, footprint.hy ?? DEFAULT_PROP_HALF_HEIGHT, footprint.hz);
+        addPropCollider(physics, x, z, footprint.hx, footprint.hy ?? DEFAULT_PROP_HALF_HEIGHT, footprint.hz);
       }
     }
   }

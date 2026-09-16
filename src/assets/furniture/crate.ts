@@ -52,6 +52,10 @@ const crate: FurnitureAssetDef = {
   id: "crate",
   createMesh: () => createCrateMesh(),
   footprint: { hx: CRATE_SIZE / 2, hz: CRATE_SIZE / 2 },
+  // Light enough to shove around, and the reason the side-chamber's stacked
+  // pair now really is a stack: knock the bottom crate out and the top one
+  // drops.
+  dynamic: { mass: 14 },
 };
 
 export default crate;

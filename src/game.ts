@@ -1,9 +1,10 @@
 import * as THREE from "three";
 import { addComponent, addEntity, createWorld, hasComponent } from "bitecs";
 import { query } from "bitecs";
-import { Position, Velocity, Rotation, CharacterBody, PhysicsBody, PhysicsCollider, RenderOffsetY, PlayerControlled, Object3DRef, Door, Dead, DeathSector, Health, NPC, Item, Carried } from "./ecs/components";
+import { Position, Velocity, Rotation, CharacterBody, DynamicBody, PhysicsBody, PhysicsCollider, PhysicsRotation, RenderOffsetY, PlayerControlled, Object3DRef, Door, Dead, DeathSector, Health, NPC, Item, Carried } from "./ecs/components";
 import { inputSystem } from "./ecs/systems/input";
 import { characterSystem, physicsSyncSystem, teleportCharacter } from "./ecs/systems/character";
+import { dynamicSyncSystem } from "./ecs/systems/dynamics";
 import { addCharacter, createPhysics, PHYSICS_DT } from "./physics/world";
 import { doorAnimationSystem, tryInteract } from "./ecs/systems/doors";
 import { tryMeleeAttack } from "./ecs/systems/combat";
@@ -224,6 +225,25 @@ export function startGame(container: HTMLElement): void {
     }),
     getDoorStates: () =>
       Array.from(query(world, [Door])).map((eid) => ({ state: Door.state[eid], progress: Door.progress[eid] })),
+    // Every simulated prop/item body, for confirming things actually settle
+    // on the floor, stack, and move when shoved rather than hovering at
+    // their authored spawn transform.
+    getDynamicBodies: () =>
+      Array.from(query(world, [DynamicBody, Position, PhysicsRotation])).map((eid) => {
+        const body = PhysicsBody[eid];
+        const linvel = body?.linvel();
+        return {
+          eid,
+          itemTypeId: hasComponent(world, eid, Item) ? Item.itemTypeId[eid] : undefined,
+          x: Position.x[eid],
+          y: Position.y[eid],
+          z: Position.z[eid],
+          quat: [PhysicsRotation.x[eid], PhysicsRotation.y[eid], PhysicsRotation.z[eid], PhysicsRotation.w[eid]],
+          speed: linvel ? Math.hypot(linvel.x, linvel.y, linvel.z) : 0,
+          sleeping: body?.isSleeping() ?? false,
+          enabled: body?.isEnabled() ?? false,
+        };
+      }),
     setYaw: (yaw: number) => { Rotation.yaw[player] = yaw; },
     setPitch: (pitch: number) => { Rotation.pitch[player] = pitch; },
     getRotation: () => ({ yaw: Rotation.yaw[player], pitch: Rotation.pitch[player] }),
@@ -390,6 +410,7 @@ export function startGame(container: HTMLElement): void {
         doorAnimationSystem(world, PHYSICS_DT);
         physics.world.step();
         physicsSyncSystem(world);
+        dynamicSyncSystem(world);
       }
       if (steps === MAX_PHYSICS_STEPS_PER_FRAME) accumulator = 0;
     }

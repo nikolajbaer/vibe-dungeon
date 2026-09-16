@@ -41,6 +41,9 @@ const chair: FurnitureAssetDef = {
   id: "chair",
   createMesh: () => createChairMesh(),
   footprint: { hx: CHAIR_SEAT_SIZE / 2, hz: CHAIR_SEAT_SIZE / 2 },
+  // Light and top-heavy: walking into one scoots it aside, and shoving it
+  // hard enough tips it over.
+  dynamic: { mass: 7 },
 };
 
 export default chair;

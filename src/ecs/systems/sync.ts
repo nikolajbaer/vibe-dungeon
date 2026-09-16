@@ -1,5 +1,5 @@
 import { query, type World } from "bitecs";
-import { Position, Rotation, Object3DRef, PlayerControlled, RenderOffsetY } from "../components";
+import { Position, Rotation, Object3DRef, PhysicsRotation, PlayerControlled, RenderOffsetY } from "../components";
 
 /** Copies ECS transform data into the corresponding three.js Object3D
  * (an NPC's mesh, a world item, or the player's camera). Runs last, right
@@ -25,5 +25,14 @@ export function syncSystem(world: World): void {
     const obj = Object3DRef[eid];
     if (!obj) continue;
     obj.rotation.set(Rotation.pitch[eid], Rotation.yaw[eid], 0, "YXZ");
+  }
+
+  // Dynamic bodies (pushable props, loose world items) tumble on all three
+  // axes, so they carry a full quaternion rather than the yaw/pitch pair
+  // above — a chair knocked onto its side isn't expressible as a yaw.
+  for (const eid of query(world, [PhysicsRotation, Object3DRef])) {
+    const obj = Object3DRef[eid];
+    if (!obj) continue;
+    obj.quaternion.set(PhysicsRotation.x[eid], PhysicsRotation.y[eid], PhysicsRotation.z[eid], PhysicsRotation.w[eid]);
   }
 }

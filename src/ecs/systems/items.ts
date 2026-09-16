@@ -1,6 +1,6 @@
 import * as THREE from "three";
 import { addComponent, hasComponent, query, type World } from "bitecs";
-import { Carried, Item, Object3DRef, Viewmodel, type CarriedSlot } from "../components";
+import { Carried, Item, Object3DRef, PhysicsBody, Viewmodel, type CarriedSlot } from "../components";
 import { ITEM_REGISTRY } from "../../assets/itemRegistry";
 
 export type HandSlot = "hand-left" | "hand-right";
@@ -27,6 +27,13 @@ export function pickUpItem(world: World, itemEid: number, ownerEid: number): voi
 
   const obj = Object3DRef[itemEid];
   if (obj) obj.visible = false;
+
+  // Disabled rather than removed from the physics world, for the same reason
+  // the mesh is hidden rather than deleted: a future "drop" is then just
+  // re-enabling it at the player's feet. A disabled body keeps its handle but
+  // stops colliding and stops being simulated, so a carried sword can't be
+  // kicked around the room by someone standing where it used to be.
+  PhysicsBody[itemEid]?.setEnabled(false);
 }
 
 /** Camera-relative offsets for each hand's viewmodel — lower corners of the
