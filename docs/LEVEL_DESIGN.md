@@ -393,6 +393,29 @@ entry just shows that text and a Close button, like reading a sign.
 There's no lock/key interaction on either kind — every readable is freely
 readable any time, once found.
 
+## How to add a container (a barrel with loot in it)
+
+A furniture asset opts into being a lootable container via
+`FurnitureAssetDef.container` (`src/assets/furniture/barrel.ts` is the only
+one so far) — nothing to do per-placement for that part, every barrel is
+already interactable. To give a *specific* placed barrel starting loot,
+add `contents` (an array of `ItemAssetDef` ids) to its `PropPlacement` in a
+room file, alongside `x`/`z`/etc:
+
+```ts
+props: [{ id: "barrel", x: 5.3, z: 8.4, contents: ["gem"] }],
+```
+
+Each entry spawns as a normal item, already carried by that barrel — the
+player finds it already inside on first opening the barrel, exactly as if
+someone had stored it there. `spawnProps` throws at load time if `contents`
+is set on a placement whose furniture asset isn't a `container` (same "fail
+loudly" philosophy as an unknown `id`), and if any entry references an
+unknown item id. There's no capacity check at authoring time — enough
+`contents` entries to exceed the container's own `capacity` would just make
+it start full, which is a level-design mistake to notice by playtesting,
+not something worth a load-time error over.
+
 ## Worked example: the first branch off the original line
 
 This is what shipped alongside this doc (see `src/level/rooms/corridor.ts`

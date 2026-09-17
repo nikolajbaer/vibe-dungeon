@@ -41,6 +41,16 @@ export interface PropPlacement {
   /** Asset-specific extra data (e.g. banner.ts's `BannerParams` colors) —
    * see the referenced asset's own module for its shape. */
   params?: unknown;
+  /** Item type ids (`ItemAssetDef.id`) this placement starts out already
+   * holding — a barrel with loot in it before the player ever opens it.
+   * Only meaningful when the referenced furniture asset is itself a
+   * `container` (see `FurnitureAssetDef.container`); `spawnProps`
+   * (level/spawning.ts) throws at load time otherwise, the same "fail
+   * loudly" philosophy as an unknown `id`. Each entry spawns as a normal
+   * `Item` already `Carried` by this container — no world mesh of its own,
+   * since (like any carried item) it's never meant to render outside
+   * whichever inventory/container list currently shows it. */
+  contents?: string[];
 }
 
 /** One item placed in the world as a pickup. Lives in a `RoomContent.items`

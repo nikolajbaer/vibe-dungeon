@@ -1,6 +1,6 @@
 import * as THREE from "three";
 import { addComponent, addEntity, type World } from "bitecs";
-import { Position, Velocity, CharacterBody, DynamicBody, PhysicsBody, PhysicsCollider, PhysicsRotation, Object3DRef, Item, NPC, NpcState, Health, Readable, Container } from "../ecs/components";
+import { Position, Velocity, CharacterBody, DynamicBody, PhysicsBody, PhysicsCollider, PhysicsRotation, Object3DRef, Item, NPC, NpcState, Health, Readable, Container, Carried } from "../ecs/components";
 import { ITEM_REGISTRY } from "../assets/itemRegistry";
 import { FURNITURE_REGISTRY } from "../assets/furnitureRegistry";
 import { NPC_REGISTRY } from "../assets/npcRegistry";
@@ -95,11 +95,11 @@ function withPickupHitbox(mesh: THREE.Object3D, eid: number): THREE.Group {
  * default: an asset with a `footprint.hy` gets exactly that instead. */
 const DEFAULT_PROP_HALF_HEIGHT = 0.6;
 
-// Generous invisible raycast target radius for a container-flagged dynamic
-// prop (a barrel) — same idea as `READABLE_HITBOX_RADIUS`/`ITEM_PICKUP_RADIUS`
-// below: covers the whole visible bulk (a barrel's own footprint radius is
-// ~0.34m) so a precise camera-forward raycast isn't needed to land it.
-const CONTAINER_HITBOX_RADIUS = 0.45;
+// Floor for a container-flagged dynamic prop's invisible raycast hitbox
+// radius (see below) — only matters for a degenerately small asset; every
+// real one so far (a barrel) is sized well past this by its own bounding
+// box.
+const CONTAINER_HITBOX_MIN_RADIUS = 0.3;
 
 /** Adds one *static* prop's Rapier box — no ECS entity, exactly like a wall
  * segment (see tileBuilder.ts's `addWall`): it never moves and nothing
@@ -154,6 +154,15 @@ export function spawnItems(world: World, physics: Physics, scene: THREE.Scene, s
       addComponent(world, eid, Readable);
       Readable.title[eid] = spawn.title;
       Readable.pages[eid] = spawn.pages;
+    }
+
+    // An item type that declares `container` (a backpack) is *also*
+    // `Container` — unlike `Readable`'s per-placement title/pages, this is
+    // per-*type* data (every backpack has the same capacity), so it comes
+    // from the registered `ItemAssetDef` rather than the placement.
+    if (def.container) {
+      addComponent(world, eid, Container);
+      Container.capacity[eid] = def.container.capacity;
     }
 
     const mesh = def.createWorldMesh();
@@ -271,6 +280,9 @@ export function spawnProps(world: World, physics: Physics, scene: THREE.Scene, p
   for (const placement of placements) {
     const def = FURNITURE_REGISTRY[placement.id];
     if (!def) throw new Error(`spawnProps: unknown furniture id "${placement.id}"`);
+    if (placement.contents && !def.container) {
+      throw new Error(`spawnProps: "${placement.id}" placement specifies contents but isn't a container`);
+    }
 
     const mesh = def.createMesh(placement.params);
     const x = placement.x;
@@ -300,7 +312,15 @@ export function spawnProps(world: World, physics: Physics, scene: THREE.Scene, p
       let containerHitbox: THREE.Mesh | undefined;
       if (def.container) {
         const bounds = new THREE.Box3().setFromObject(mesh);
-        containerHitbox = new THREE.Mesh(new THREE.SphereGeometry(CONTAINER_HITBOX_RADIUS, 8, 6));
+        // Half the bounding box's own diagonal is the smallest sphere
+        // guaranteed to fully enclose it regardless of aspect ratio — a
+        // fixed radius tuned by eye (the original approach here) covers the
+        // middle of a tall, narrow shape like a barrel but leaves its top
+        // and bottom rims sticking out past the sphere, which is exactly
+        // where a tap would then hit the barrel's own (un-eid'd) mesh
+        // instead of this hitbox and silently do nothing.
+        const radius = Math.max(CONTAINER_HITBOX_MIN_RADIUS, bounds.getSize(new THREE.Vector3()).length() / 2);
+        containerHitbox = new THREE.Mesh(new THREE.SphereGeometry(radius, 8, 6));
         containerHitbox.position.copy(bounds.getCenter(new THREE.Vector3()));
         containerHitbox.visible = false;
         mesh.add(containerHitbox);
@@ -328,6 +348,31 @@ export function spawnProps(world: World, physics: Physics, scene: THREE.Scene, p
         addComponent(world, eid, Container);
         Container.capacity[eid] = def.container.capacity;
         containerHitbox.userData.eid = eid;
+
+        // Loot the barrel starts with (placement.contents, validated
+        // against def.container above) — each entry is a normal `Item`,
+        // already `Carried` by this container, exactly like one the player
+        // stored themselves. No `Position`/`Object3DRef`/physics body: a
+        // carried item never needs its own world presence (see `pickUpItem`
+        // in ecs/systems/items.ts hiding a picked-up item's mesh instead of
+        // ever creating one fresh) here it simply never gets one at all.
+        for (const itemTypeId of placement.contents ?? []) {
+          const itemDef = ITEM_REGISTRY[itemTypeId];
+          if (!itemDef) throw new Error(`spawnProps: "${placement.id}" contents reference unknown item id "${itemTypeId}"`);
+          const itemEid = addEntity(world);
+          addComponent(world, itemEid, Item);
+          addComponent(world, itemEid, Carried);
+          Item.itemTypeId[itemEid] = itemTypeId;
+          Carried.ownerEid[itemEid] = eid;
+          Carried.slot[itemEid] = "inventory";
+          // Same as spawnItems above: a container-typed item (a backpack)
+          // pre-seeded as another container's loot is still itself a
+          // Container, capacity and all.
+          if (itemDef.container) {
+            addComponent(world, itemEid, Container);
+            Container.capacity[itemEid] = itemDef.container.capacity;
+          }
+        }
       }
       continue;
     }

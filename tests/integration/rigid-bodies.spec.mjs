@@ -15,14 +15,16 @@ try {
   assert(bodies.every((b) => b.speed < 0.02), "everything has come to rest");
   assert(bodies.every((b) => b.y > -0.2), "nothing fell through the floor");
 
+  // The gem used to be a floor-spawned dynamic body here too, but now
+  // starts inside room-a's barrel instead (see item-door-regression.spec.mjs
+  // for that coverage) -- it's never a `DynamicBody`/`Object3DRef` at all as
+  // a container-seeded item, so it has nothing to check for in this list.
   const sword = bodies.find((b) => b.itemTypeId === "sword");
-  const gem = bodies.find((b) => b.itemTypeId === "gem");
   const lantern = bodies.find((b) => b.itemTypeId === "lantern");
-  assert(sword && gem && lantern, "sword, gem and lantern are all dynamic bodies");
+  assert(sword && lantern, "sword and lantern are dynamic bodies");
   // The sword is authored at (4,7) over the tabletop (table at (4.3,7.2),
-  // 0.75 tall); the gem at (-1,7) over open floor. Both start at y=1.
+  // 0.75 tall) and starts at y=1.
   assert(sword.y > 0.6 && sword.y < 1.0, `sword fell onto the tabletop rather than the floor (y=${sword.y.toFixed(3)})`);
-  assert(gem.y < 0.35, `gem fell to the floor (y=${gem.y.toFixed(3)})`);
   assert(lantern.y < 0.35, `lantern fell to the floor (y=${lantern.y.toFixed(3)})`);
 
   const settledY = Object.fromEntries(bodies.map((b) => [b.eid, b.y]));

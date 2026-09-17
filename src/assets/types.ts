@@ -25,6 +25,15 @@ import * as THREE from "three";
  * one). */
 export type EquipSlotKind = "hand" | null;
 
+/** Shared shape for "this asset is itself a lootable `Container`" (see
+ * `ecs/components.ts`) — used identically by `FurnitureAssetDef` (a barrel)
+ * and `ItemAssetDef` (a backpack): either way, `capacity` is how many items
+ * it can hold, and the entity it lands on becomes a valid `Carried.ownerEid`
+ * other items can point at. */
+export interface ContainerSpec {
+  capacity: number;
+}
+
 /**
  * One item asset — a weapon, potion, or curio. `id`/`name`/`icon`/`slot`/
  * `meleeDamage` are exactly the old `ItemType` record's fields (same names,
@@ -75,6 +84,14 @@ export interface ItemAssetDef {
    * omitted; set it when an item should read as notably heavy (a sword) or
    * notably slight (a gem). */
   mass?: number;
+  /** Opts this item into being itself a lootable `Container` (a backpack) —
+   * `spawnItems` (level/spawning.ts) adds the ECS `Container` component
+   * whenever an entity of this type is created, so it works identically
+   * whether the item is lying in the world or already carried. Tapping a
+   * container item in the inventory list (`InventoryList.tsx`) opens the
+   * same container panel a barrel does (`container/store.ts`), instead of
+   * trying to equip it — see `CarriedItemView.isContainer`. */
+  container?: ContainerSpec;
 }
 
 /** Half-extents (meters) of the box a furniture asset blocks movement with.
@@ -132,7 +149,7 @@ export interface FurnitureAssetDef<P = unknown> {
    * supported alongside `dynamic` (see `spawnProps`), since every container
    * asset so far is also a shovable physical object; a purely static
    * container (a wall safe) would need that generalized when one shows up. */
-  container?: { capacity: number };
+  container?: ContainerSpec;
 }
 
 /**

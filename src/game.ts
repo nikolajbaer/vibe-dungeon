@@ -206,6 +206,11 @@ export function startGame(container: HTMLElement): void {
   const containerActions: ContainerActions = {
     moveToContainer(itemEid, containerEid) {
       if (!hasComponent(world, itemEid, Carried)) return;
+      // No nesting a container inside another container (a backpack inside
+      // a barrel, or inside itself) -- `ContainerPanel.tsx` already hides
+      // this button for a container item, but guard it here too since this
+      // is also reachable directly from the debug hooks.
+      if (hasComponent(world, itemEid, Container)) return;
       Carried.ownerEid[itemEid] = containerEid;
       Carried.slot[itemEid] = "inventory";
     },
