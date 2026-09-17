@@ -1,10 +1,10 @@
 import * as THREE from "three";
 import { addComponent, addEntity, type World } from "bitecs";
-import { Position, Velocity, CharacterBody, DynamicBody, PhysicsBody, PhysicsCollider, PhysicsRotation, Object3DRef, Item, NPC, NpcState, Health } from "../ecs/components";
+import { Position, Velocity, CharacterBody, DynamicBody, PhysicsBody, PhysicsCollider, PhysicsRotation, Object3DRef, Item, NPC, NpcState, Health, Readable } from "../ecs/components";
 import { ITEM_REGISTRY } from "../assets/itemRegistry";
 import { FURNITURE_REGISTRY } from "../assets/furnitureRegistry";
 import { NPC_REGISTRY } from "../assets/npcRegistry";
-import type { PropPlacement, ItemSpawn, NpcSpawn } from "./placementTypes";
+import type { PropPlacement, ItemSpawn, NpcSpawn, ReadablePlacement } from "./placementTypes";
 import { floorBaseline } from "./tiles";
 import { addCharacter, addDynamicBox, addStaticBox, type BoxShape, type Physics } from "../physics/world";
 
@@ -295,5 +295,61 @@ export function spawnProps(world: World, physics: Physics, scene: THREE.Scene, p
         addPropCollider(physics, x, z, footprint.hx, footprint.hy ?? DEFAULT_PROP_HALF_HEIGHT, footprint.hz, floorBaseline(placement.floor ?? 0));
       }
     }
+  }
+}
+
+// Generous invisible raycast target radius for readables (narration
+// devices) — same idea and reason as `ITEM_PICKUP_RADIUS` above: a
+// poster's thin panel or a scroll's small body would otherwise be
+// frustrating to land a precise camera-forward raycast on.
+const READABLE_HITBOX_RADIUS = 0.4;
+
+/**
+ * Places every readable (poster/scroll) placement as a `Readable` +
+ * `Object3DRef` entity, built from its furniture asset's `createMesh()`
+ * wrapped in a generous invisible hitbox (see `READABLE_HITBOX_RADIUS`).
+ * No physics body of any kind — unlike a prop, a readable is never
+ * something a character could walk into or that could move, so there's
+ * nothing for Rapier to own here at all.
+ *
+ * Throws if a placement references an unknown furniture id or has no
+ * pages — the same "fail loudly at load time" philosophy as
+ * `occupancy.ts`'s `validateOccupancy`.
+ */
+export function spawnReadables(world: World, scene: THREE.Scene, placements: ReadablePlacement[]): void {
+  for (const placement of placements) {
+    const def = FURNITURE_REGISTRY[placement.id];
+    if (!def) throw new Error(`spawnReadables: unknown furniture id "${placement.id}"`);
+    if (placement.pages.length === 0) throw new Error(`spawnReadables: "${placement.title ?? placement.id}" has no pages`);
+
+    const eid = addEntity(world);
+    addComponent(world, eid, Object3DRef);
+    addComponent(world, eid, Readable);
+    Readable.title[eid] = placement.title;
+    Readable.pages[eid] = placement.pages;
+
+    const mesh = def.createMesh(placement.params);
+    mesh.userData.eid = eid;
+    // Centered on the mesh's own local bounding box, not the group's
+    // origin — a poster's mesh (like a banner's) is built well above the
+    // group origin (its bottom edge sits at head height on the wall, not
+    // the floor), so a hitbox at (0,0,0) would float uselessly down at the
+    // floor instead of actually covering the visible poster.
+    const bounds = new THREE.Box3().setFromObject(mesh);
+    const hitboxCenter = bounds.getCenter(new THREE.Vector3());
+    const hitbox = new THREE.Mesh(new THREE.SphereGeometry(READABLE_HITBOX_RADIUS, 8, 6));
+    hitbox.position.copy(hitboxCenter);
+    hitbox.visible = false;
+    hitbox.userData.eid = eid;
+    const group = new THREE.Group();
+    group.add(mesh, hitbox);
+
+    const x = placement.x;
+    const y = floorBaseline(placement.floor ?? 0) + (placement.y ?? 0);
+    const z = placement.z;
+    group.position.set(x, y, z);
+    group.rotation.y = placement.rotation ?? 0;
+    scene.add(group);
+    Object3DRef[eid] = group;
   }
 }

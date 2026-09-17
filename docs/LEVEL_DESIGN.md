@@ -337,6 +337,35 @@ without the item, shows a "Door is locked." message
 Once opened with the right item it unlocks permanently — there's no
 mechanic that re-locks it.
 
+## How to add a readable (a poster or scroll)
+
+A `ReadablePlacement` (`placementTypes.ts`) places a narration fixture — a
+wall-mounted `"poster"` or a surface-resting `"scroll"` (both furniture
+assets, `src/assets/furniture/`) — that opens a paged reader on interact,
+in a room file's `readables` array:
+
+```ts
+readables: [
+  {
+    id: "poster", // or "scroll"
+    x: 5.7,
+    z: 3.0,
+    rotation: -Math.PI / 2, // every furniture asset builds facing local +z
+    title: "Notice",        // omit for an anonymous scrap with no heading
+    pages: ["First page text.", "Second page, if there is one."],
+  },
+],
+```
+
+Unlike `ItemSpawn`/`PropPlacement`, which reference a *type* whose look and
+behavior are both shared, `title`/`pages` are the placement's own data —
+two posters never say the same thing, so the text lives on the placement,
+not in a registry (see `Readable`'s doc comment in `ecs/components.ts`).
+`pages` with more than one entry gets an automatic next/prev-paged reader
+(`notice/NoticePanel.tsx`); a single entry just shows that text and a Close
+button, like reading a sign. There's no lock/key interaction here — every
+readable is freely interactable, any time.
+
 ## Worked example: the first branch off the original line
 
 This is what shipped alongside this doc (see `src/level/rooms/corridor.ts`

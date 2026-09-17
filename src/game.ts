@@ -1,7 +1,7 @@
 import * as THREE from "three";
 import { addComponent, addEntity, createWorld, hasComponent } from "bitecs";
 import { query } from "bitecs";
-import { Position, Velocity, Rotation, CharacterBody, DynamicBody, PhysicsBody, PhysicsCollider, PhysicsRotation, RenderOffsetY, PlayerControlled, Object3DRef, Door, Dead, DeathSector, Health, NPC, Item, Carried } from "./ecs/components";
+import { Position, Velocity, Rotation, CharacterBody, DynamicBody, PhysicsBody, PhysicsCollider, PhysicsRotation, RenderOffsetY, PlayerControlled, Object3DRef, Door, Dead, DeathSector, Health, NPC, Item, Carried, Readable } from "./ecs/components";
 import { inputSystem } from "./ecs/systems/input";
 import { characterSystem, physicsSyncSystem, teleportCharacter } from "./ecs/systems/character";
 import { dynamicSyncSystem } from "./ecs/systems/dynamics";
@@ -27,6 +27,8 @@ import { inventorySync } from "./inventory/sync";
 import { inventoryStore, type InventoryActions } from "./inventory/store";
 import { mountDialogue } from "./dialogue/mount";
 import { dialogueStore, type DialogueActions } from "./dialogue/store";
+import { mountNotice } from "./notice/mount";
+import { noticeStore } from "./notice/store";
 
 const EYE_HEIGHT = 1.6; // camera height above the player's feet
 const PLAYER_RADIUS = 0.35;
@@ -360,6 +362,33 @@ export function startGame(container: HTMLElement): void {
     // e.g. while walking past the villager pressing E to open doors, which
     // is exactly what a real player mashing interact would do too.
     closeDialogue: () => dialogueStore.close(),
+    // Every placed readable (poster/scroll)'s position plus its content, so
+    // an automated test can find and walk to one without hand-deriving
+    // world coordinates from a room file.
+    getReadableStates: () =>
+      Array.from(query(world, [Readable, Object3DRef])).map((eid) => {
+        const obj = Object3DRef[eid];
+        return {
+          eid,
+          title: Readable.title[eid],
+          pageCount: Readable.pages[eid].length,
+          x: obj?.position.x,
+          z: obj?.position.z,
+        };
+      }),
+    // Notice-reader debug hooks, mirroring the dialogue ones above, for
+    // automated (Playwright) testing of posters/scrolls without a real
+    // raycast + click.
+    getNoticeState: () => ({
+      isOpen: noticeStore.isOpen,
+      title: noticeStore.title,
+      page: noticeStore.currentPage,
+      pageIndex: noticeStore.pageIndex,
+      pageCount: noticeStore.pages.length,
+    }),
+    noticeNext: () => noticeStore.next(),
+    noticePrev: () => noticeStore.prev(),
+    closeNotice: () => noticeStore.close(),
     // Player death/respawn debug hooks (aggressive NPC archetypes can now
     // actually kill the player).
     isPlayerDefeated: () => hudStore.playerDefeated,
@@ -377,6 +406,7 @@ export function startGame(container: HTMLElement): void {
   mountHud(container);
   mountInventory(container);
   mountDialogue(container);
+  mountNotice(container);
 
   // Desktop melee attack trigger (issue #48): left-click, but only once
   // pointer lock is already engaged — `PointerLook`'s own click handler
@@ -411,18 +441,18 @@ export function startGame(container: HTMLElement): void {
     requestAnimationFrame(frame);
     const dt = Math.min(clock.getDelta(), 0.1);
 
-    // A dialogue panel or the death overlay is a modal — a real pause, not
-    // just a movement freeze: nothing in the world should be able to hurt
-    // (or be hurt by) the player while either is up, so the whole
-    // simulation stands still except look/camera rotation (harmless) and
-    // whatever's needed to render the modal itself. Re-checked fresh at
-    // each gate below, rather than snapshotted once, since `tryInteract`
-    // can open a dialogue mid-frame — an attack later in that same frame
-    // must see the just-opened dialogue, not a stale "not open yet" value
-    // (this was the actual villager-killing bug: a tap that opened dialogue
-    // and a same-frame attack both used one value computed before the
-    // dialogue existed).
-    const isModalActive = () => dialogueStore.isOpen || hudStore.playerDefeated;
+    // A dialogue panel, the notice reader, or the death overlay is a modal
+    // — a real pause, not just a movement freeze: nothing in the world
+    // should be able to hurt (or be hurt by) the player while any is up, so
+    // the whole simulation stands still except look/camera rotation
+    // (harmless) and whatever's needed to render the modal itself.
+    // Re-checked fresh at each gate below, rather than snapshotted once,
+    // since `tryInteract` can open a dialogue mid-frame — an attack later
+    // in that same frame must see the just-opened dialogue, not a stale
+    // "not open yet" value (this was the actual villager-killing bug: a tap
+    // that opened dialogue and a same-frame attack both used one value
+    // computed before the dialogue existed).
+    const isModalActive = () => dialogueStore.isOpen || noticeStore.isOpen || hudStore.playerDefeated;
 
     const modalActive = isModalActive();
     if (modalActive) {

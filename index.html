@@ -296,6 +296,77 @@
       .dialogue-choice:active {
         background: rgba(255, 255, 255, 0.2);
       }
+      /* Notice reader (posters/scrolls): its own fixed overlay
+         (#notice-overlay, see src/notice/mount.tsx), same "own container,
+         own pointer-events" split as the dialogue panel above -- deliberately
+         a taller, wider panel than the dialogue one, since a notice's body
+         text runs longer than a line of spoken dialogue. */
+      #notice-overlay {
+        position: fixed;
+        inset: 0;
+        pointer-events: none;
+      }
+      .notice-root {
+        position: fixed;
+        left: 50%;
+        top: 50%;
+        transform: translate(-50%, -50%);
+        width: min(calc(100vw - 32px), 480px);
+        max-height: min(calc(100vh - 64px), 520px);
+        display: flex;
+        flex-direction: column;
+        gap: 12px;
+        padding: 20px 22px;
+        background: rgba(18, 14, 8, 0.92);
+        border: 1px solid rgba(255, 220, 160, 0.35);
+        border-radius: 10px;
+        color: #f0e6d2;
+        font: 14px/1.5 system-ui, sans-serif;
+        pointer-events: auto;
+      }
+      .notice-title {
+        font-weight: 700;
+        font-size: 18px;
+        letter-spacing: 0.02em;
+        color: #ffcc44;
+        border-bottom: 1px solid rgba(255, 220, 160, 0.25);
+        padding-bottom: 8px;
+      }
+      .notice-page {
+        overflow-y: auto;
+        white-space: pre-wrap;
+      }
+      .notice-controls {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+      }
+      .notice-nav-btn,
+      .notice-close-btn {
+        font: inherit;
+        font-weight: 600;
+        color: inherit;
+        padding: 8px 14px;
+        background: rgba(255, 255, 255, 0.08);
+        border: 1px solid rgba(255, 220, 160, 0.3);
+        border-radius: 6px;
+        cursor: pointer;
+      }
+      .notice-nav-btn:disabled {
+        opacity: 0.35;
+        cursor: default;
+      }
+      .notice-nav-btn:not(:disabled):active,
+      .notice-close-btn:active {
+        background: rgba(255, 255, 255, 0.2);
+      }
+      .notice-page-label {
+        font-size: 12px;
+        color: rgba(240, 230, 210, 0.6);
+      }
+      .notice-close-btn {
+        margin-left: auto;
+      }
       .death-overlay {
         position: fixed;
         inset: 0;

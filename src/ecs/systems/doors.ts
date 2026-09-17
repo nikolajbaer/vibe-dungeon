@@ -1,11 +1,12 @@
 import * as THREE from "three";
 import { hasComponent, query, type World } from "bitecs";
-import { Dead, Door, DoorState, Object3DRef, PhysicsBody, Position, NPC, Item, Carried, PlayerControlled } from "../components";
+import { Dead, Door, DoorState, Object3DRef, PhysicsBody, Position, NPC, Item, Carried, PlayerControlled, Readable } from "../components";
 import { toggleNpcFollow } from "./npc";
 import { pickUpItem } from "./items";
 import { NPC_REGISTRY } from "../../assets/npcRegistry";
 import { dialogueStore } from "../../dialogue/store";
 import { hudStore } from "../../hud/store";
+import { noticeStore } from "../../notice/store";
 import { doorMaterial } from "../../level/materials";
 
 const OPEN_DURATION = 0.8; // seconds for a door to fully open
@@ -77,9 +78,11 @@ const ndc = new THREE.Vector2();
  * (nothing to talk to), a docile one with a `dialogueId` opens that tree
  * (`dialogueStore.open`, see `src/dialogue/`), and a docile one without
  * falls back to the original `toggleNpcFollow` demo toggle; an uncarried
- * `Item` (issue #39) is picked up (see `pickUpItem` in items.ts). Callers
- * decide *when* to fire this — desktop on `KeyE`, touch on a tap outside
- * both joystick pads (see game.ts).
+ * `Item` (issue #39) is picked up (see `pickUpItem` in items.ts); a
+ * `Readable` (a poster or scroll) opens the paged notice reader
+ * (`noticeStore.open`, see `src/notice/`). Callers decide *when* to fire
+ * this — desktop on `KeyE`, touch on a tap outside both joystick pads (see
+ * game.ts).
  *
  * The raycast's *origin and direction* depend on `screenPoint`:
  *
@@ -146,6 +149,10 @@ export function tryInteract(world: World, camera: THREE.Camera, screenPoint?: { 
     const obj = Object3DRef[eid];
     if (obj) interactables.push(obj);
   }
+  for (const eid of query(world, [Readable, Object3DRef])) {
+    const obj = Object3DRef[eid];
+    if (obj) interactables.push(obj);
+  }
 
   if (interactables.length > 0) {
     if (screenPoint) {
@@ -181,6 +188,10 @@ function dispatchInteract(world: World, hitEid: number): boolean {
     return true;
   }
   if (hasComponent(world, hitEid, Item)) return pickUpItemEid(world, hitEid);
+  if (hasComponent(world, hitEid, Readable)) {
+    noticeStore.open(hitEid);
+    return true;
+  }
   return false;
 }
 
