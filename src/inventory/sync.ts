@@ -1,16 +1,20 @@
 import { hasComponent, query, type World } from "bitecs";
 import { Carried, Item, PlayerControlled, Readable, Container } from "../ecs/components";
 import { ITEM_REGISTRY } from "../assets/itemRegistry";
+import { carriedWeight, MAX_CARRY_WEIGHT } from "../ecs/systems/items";
 import { inventoryStore, type CarriedItemView } from "./store";
 
 /**
  * Bridges ECS state to the inventory MobX store (mirrors
  * `ecs/systems/hudSync.ts`): every frame, reads every `Item` the player
  * `Carried`s into a plain view-model array and writes it into
- * `inventoryStore`. Run from game.ts's pipeline alongside `hudSync`. bitecs
- * has no built-in reactivity and the carried set is tiny, so replacing the
- * whole array unconditionally each frame (rather than diffing it) is simple
- * and cheap — mobx only re-renders observers when a value actually changes.
+ * `inventoryStore`, along with the running total weight (`carriedWeight`,
+ * ecs/systems/items.ts) against its cap for the panel's readout — the
+ * enforcement itself lives in items.ts/game.ts, not here. Run from
+ * game.ts's pipeline alongside `hudSync`. bitecs has no built-in reactivity
+ * and the carried set is tiny, so replacing the whole array unconditionally
+ * each frame (rather than diffing it) is simple and cheap — mobx only
+ * re-renders observers when a value actually changes.
  */
 export function inventorySync(world: World): void {
   const [playerEid] = query(world, [PlayerControlled]);
@@ -33,4 +37,5 @@ export function inventorySync(world: World): void {
     });
   }
   inventoryStore.setCarried(carried);
+  inventoryStore.setWeight(carriedWeight(world, playerEid), MAX_CARRY_WEIGHT);
 }

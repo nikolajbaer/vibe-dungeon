@@ -11,7 +11,7 @@ import { tryMeleeAttack } from "./ecs/systems/combat";
 import { npcSystem, toggleNpcFollow } from "./ecs/systems/npc";
 import { getNpcAnimationDebugState, npcAnimationSystem } from "./ecs/systems/npcAnimation";
 import { corpseCleanupSystem, MIN_LINGER_SECONDS } from "./ecs/systems/corpseCleanup";
-import { equipItem, equipToOpenHandSlot, unequipItem, viewmodelSwingSystem } from "./ecs/systems/items";
+import { equipItem, equipToOpenHandSlot, unequipItem, viewmodelSwingSystem, wouldExceedCarryWeight } from "./ecs/systems/items";
 import { syncSystem } from "./ecs/systems/sync";
 import { hudSync } from "./ecs/systems/hudSync";
 import { buildLevel } from "./level/level";
@@ -216,6 +216,14 @@ export function startGame(container: HTMLElement): void {
     },
     moveToPlayer(itemEid) {
       if (!hasComponent(world, itemEid, Carried)) return;
+      // Same `MAX_CARRY_WEIGHT` cap a fresh world pickup enforces (see
+      // `wouldExceedCarryWeight` in items.ts) — otherwise the cap could be
+      // dodged by stashing items in a container first and unloading them
+      // all back out at once.
+      if (wouldExceedCarryWeight(world, player, itemEid)) {
+        hudStore.showMessage("Too heavy to carry.");
+        return;
+      }
       Carried.ownerEid[itemEid] = player;
       Carried.slot[itemEid] = "inventory";
     },
@@ -361,6 +369,10 @@ export function startGame(container: HTMLElement): void {
         slot: hasComponent(world, eid, Carried) ? Carried.slot[eid] : null,
         worldMeshVisible: Object3DRef[eid]?.visible ?? false,
       })),
+    // Carry-weight debug hook (phase 3 of the inventory expansion), for
+    // automated (Playwright) testing of the `MAX_CARRY_WEIGHT` cap without
+    // reading it off the rendered readout (`WeightReadout.tsx`).
+    getCarryWeight: () => ({ weight: inventoryStore.weight, maxWeight: inventoryStore.maxWeight }),
     // Only equipped-item viewmodel meshes are ever parented to the camera
     // (see equipItem in ecs/systems/items.ts), so its child count doubles
     // as "how many viewmodels are currently shown".

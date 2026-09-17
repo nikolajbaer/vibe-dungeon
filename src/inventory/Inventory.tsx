@@ -1,4 +1,5 @@
 import { PaperDoll } from "./PaperDoll";
+import { WeightReadout } from "./WeightReadout";
 import { InventoryList } from "./InventoryList";
 
 /**
@@ -12,6 +13,7 @@ export function Inventory() {
   return (
     <div id="inventory-root">
       <PaperDoll />
+      <WeightReadout />
       <InventoryList />
     </div>
   );

@@ -246,6 +246,16 @@
         color: rgba(255, 255, 255, 0.45);
         padding: 6px 0;
       }
+      /* Carry-weight readout (WeightReadout.tsx), between the paper doll and
+         the inventory list -- same panel background as both so it reads as
+         part of the one inventory column rather than a floating label. */
+      .inv-weight {
+        text-align: center;
+        padding: 4px 8px;
+        background: rgba(0, 0, 0, 0.45);
+        border: 1px solid rgba(255, 255, 255, 0.25);
+        border-radius: 8px;
+      }
       /* Dialogue panel: its own fixed overlay (#dialogue-overlay, see
          src/dialogue/mount.tsx), same "own container, own pointer-events"
          split as #inventory-overlay above. */

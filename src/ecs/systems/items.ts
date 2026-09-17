@@ -11,6 +11,53 @@ export function isHandSlot(slot: CarriedSlot): slot is HandSlot {
   return slot === "hand-left" || slot === "hand-right";
 }
 
+/** Max total weight (kg) `Carried` items count toward per owner — reusing
+ * `ItemAssetDef.mass` (previously only a physics-feel knob for a world
+ * item's falling/skittering body, see `boxShapeOf`/`addDynamicBox` in
+ * level/spawning.ts) as each item's carry weight too, rather than adding a
+ * second, separate "weight" field every asset would need to declare. Tuned
+ * against the level's current item set (sword 3 + lantern 1.4 + everything
+ * else adds up past 5) so grabbing a couple of the heavier pieces is fine,
+ * but trying to carry literally everything at once isn't. */
+export const MAX_CARRY_WEIGHT = 5;
+
+/** Weight (kg) for an item type that doesn't declare `mass` — intentionally
+ * a separate constant from `DEFAULT_ITEM_MASS` in level/spawning.ts (that
+ * one's a physics-feel default for a world item's falling body; this one's
+ * carry-weight enforcement's own default), so retuning one for its own
+ * subsystem never silently retunes the other. */
+const DEFAULT_ITEM_WEIGHT = 1;
+
+function itemWeight(itemTypeId: string): number {
+  return ITEM_REGISTRY[itemTypeId]?.mass ?? DEFAULT_ITEM_WEIGHT;
+}
+
+/** Total weight (kg) of every `Item` currently `Carried` by `ownerEid`, in
+ * any slot — equipped or not, it's all still "on your person." Only ever
+ * called with the player as `ownerEid` today, but takes one generically
+ * like `Carried.ownerEid` itself does, since a container (a barrel, a
+ * backpack) also owns `Carried` items without being weight-limited itself.
+ * Exported for `inventory/store.ts`'s running weight readout as well as the
+ * enforcement below. */
+export function carriedWeight(world: World, ownerEid: number): number {
+  let total = 0;
+  for (const eid of query(world, [Item, Carried])) {
+    if (Carried.ownerEid[eid] !== ownerEid) continue;
+    total += itemWeight(Item.itemTypeId[eid]);
+  }
+  return total;
+}
+
+/** True if giving `itemEid` to `ownerEid` — on top of whatever `ownerEid`
+ * already carries — would push its total past `MAX_CARRY_WEIGHT`. Shared by
+ * `pickUpItem` below (a fresh world pickup) and game.ts's container
+ * `moveToPlayer` action (taking an item back out of a barrel/backpack), so
+ * the cap can't be dodged by stashing items in a container first and
+ * unloading them all back out at once. */
+export function wouldExceedCarryWeight(world: World, ownerEid: number, itemEid: number): boolean {
+  return carriedWeight(world, ownerEid) + itemWeight(Item.itemTypeId[itemEid]) > MAX_CARRY_WEIGHT;
+}
+
 /**
  * Picks up a world item: called from the `Item` branch of `tryInteract`
  * (doors.ts) when the interact raycast hits an `Item` entity that has no
@@ -19,8 +66,14 @@ export function isHandSlot(slot: CarriedSlot): slot is HandSlot {
  * removed from the scene/ECS so a future "drop" could just flip it back to
  * visible, and so it stops showing up in `tryInteract`'s own interactable
  * list (that list explicitly skips any `Item` that already has `Carried`).
+ *
+ * Returns false (and does nothing else) if `ownerEid` is already carrying
+ * too much (`wouldExceedCarryWeight`) — callers (`doors.ts`) are expected to
+ * show a message and still treat the interact as handled either way.
  */
-export function pickUpItem(world: World, itemEid: number, ownerEid: number): void {
+export function pickUpItem(world: World, itemEid: number, ownerEid: number): boolean {
+  if (wouldExceedCarryWeight(world, ownerEid, itemEid)) return false;
+
   addComponent(world, itemEid, Carried);
   Carried.ownerEid[itemEid] = ownerEid;
   Carried.slot[itemEid] = "inventory";
@@ -34,6 +87,7 @@ export function pickUpItem(world: World, itemEid: number, ownerEid: number): voi
   // stops colliding and stops being simulated, so a carried sword can't be
   // kicked around the room by someone standing where it used to be.
   PhysicsBody[itemEid]?.setEnabled(false);
+  return true;
 }
 
 /** Camera-relative offsets for each hand's viewmodel — lower corners of the
