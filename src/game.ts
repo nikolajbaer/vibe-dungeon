@@ -11,7 +11,7 @@ import { tryMeleeAttack } from "./ecs/systems/combat";
 import { npcSystem, toggleNpcFollow } from "./ecs/systems/npc";
 import { getNpcAnimationDebugState, npcAnimationSystem } from "./ecs/systems/npcAnimation";
 import { corpseCleanupSystem, MIN_LINGER_SECONDS } from "./ecs/systems/corpseCleanup";
-import { equipItem, equipToOpenHandSlot, giveItem, isHandSlot, unequipItem, viewmodelSwingSystem, wouldExceedCarryWeight, wouldExceedContainerWeight } from "./ecs/systems/items";
+import { equipItem, equipToOpenHandSlot, giveItem, isHandSlot, unequipItem, viewmodelSwingSystem, wouldExceedCarryWeight } from "./ecs/systems/items";
 import { syncSystem } from "./ecs/systems/sync";
 import { hudSync } from "./ecs/systems/hudSync";
 import { buildLevel } from "./level/level";
@@ -236,24 +236,22 @@ export function startGame(container: HTMLElement): void {
       // `ContainerPanel.tsx` already disables this button when
       // `containerStore.isLootOnly`, same belt-and-suspenders reasoning.
       if (hasComponent(world, containerEid, Dead)) return;
-      // A weight-capped container (a backpack) has its own separate budget
-      // for its contents -- always false for a plain barrel (no cap), so
-      // this never blocks storing into one.
-      if (wouldExceedContainerWeight(world, containerEid, itemEid, quantity)) {
-        hudStore.showMessage("Too heavy for the backpack.");
-        return;
-      }
+      // No weight check here -- storing into any container the player
+      // controls never increases their own total: a barrel isn't carried by
+      // them at all (the item's weight simply leaves their pool), and a
+      // backpack they're already carrying already counts its contents
+      // recursively (`carriedWeight` in items.ts), so moving something into
+      // it is weight-neutral regardless of quantity.
       giveItem(world, itemEid, containerEid, quantity);
     },
     moveToPlayer(itemEid, quantity) {
       if (!hasComponent(world, itemEid, Carried)) return;
-      // The player's own main-carry cap -- same one a fresh world pickup
-      // enforces (`wouldExceedCarryWeight` in items.ts). A container's
-      // contents are their own separate budget (`carriedWeight` isn't
-      // recursive), so taking something out of a backpack the player is
-      // already carrying is a real addition to their main total, not a
-      // weight-neutral shuffle -- the extra room a backpack grants only
-      // ever applies to what stays zipped inside it.
+      // Same cap a fresh world pickup enforces (see `wouldExceedCarryWeight`
+      // in items.ts) — otherwise it could be dodged by stashing items in a
+      // *world* container first and unloading them all back out at once.
+      // A no-op for an item already counted toward the player's total (one
+      // sitting in a backpack they're already carrying) -- moving it to the
+      // main inventory list doesn't change how much they're carrying.
       if (wouldExceedCarryWeight(world, player, itemEid, quantity)) {
         hudStore.showMessage("Too heavy to carry.");
         return;
@@ -422,8 +420,8 @@ export function startGame(container: HTMLElement): void {
         count: hasComponent(world, eid, Stackable) ? Stackable.count[eid] : undefined,
       })),
     // Carry-weight debug hook (phase 3 of the inventory expansion), for
-    // automated (Playwright) testing of the flat `BASE_CARRY_WEIGHT` cap
-    // (ecs/systems/items.ts) without reading it off the rendered readout
+    // automated (Playwright) testing of the carry-weight cap (`maxCarryWeight`
+    // in ecs/systems/items.ts) without reading it off the rendered readout
     // (`WeightReadout.tsx`).
     getCarryWeight: () => ({ weight: inventoryStore.weight, maxWeight: inventoryStore.maxWeight }),
     // Only equipped-item viewmodel meshes are ever parented to the camera
