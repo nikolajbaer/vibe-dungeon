@@ -69,6 +69,22 @@ const roomA: RoomContent = {
     { id: "gem", x: -1, z: 7 },
   ],
   npcs: [{ id: "villager", x: 1.5, z: 3.5 }],
+  // A single-page notice on the east wall (narration devices) — clear of
+  // the NE furniture grouping (z 6.0-8.6) by mounting it further south, and
+  // a deliberate hint at room-b's locked door before the player ever
+  // reaches it.
+  readables: [
+    {
+      id: "poster",
+      x: 5.7,
+      z: 3.0,
+      rotation: -Math.PI / 2,
+      title: "Notice",
+      pages: [
+        "Travelers report a sealed passage beyond the old corridor door.\n\nThose without a key are advised not to linger there. Something guards it.",
+      ],
+    },
+  ],
 };
 
 export default roomA;

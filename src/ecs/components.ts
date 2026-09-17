@@ -265,3 +265,19 @@ export const Carried = {
  * camera-local) and the world mesh should still be there, un-reused, if the
  * item is ever droppable later. */
 export const Viewmodel: (THREE.Object3D | undefined)[] = [];
+
+/** A static narration fixture — a poster or scroll — that opens a read-only
+ * paged notice on interact (`ecs/systems/doors.ts`'s `tryInteract`,
+ * `notice/store.ts`). Unlike `Item`/`NPC`, whose *shared* look and behavior
+ * live in a registry indexed by a type id, a readable's actual text is
+ * unique per placement (two posters never say the same thing), so it's
+ * carried directly here rather than through a registry lookup — see
+ * `ReadablePlacement` (`level/placementTypes.ts`) for where an author
+ * writes it, and `spawnReadables` (`level/spawning.ts`) for how it lands on
+ * these two parallel arrays. `pages.length === 1` is the common case (a
+ * single-page notice); the reader UI only shows next/prev controls when
+ * there's more than one. */
+export const Readable = {
+  title: [] as (string | undefined)[],
+  pages: [] as string[][],
+};

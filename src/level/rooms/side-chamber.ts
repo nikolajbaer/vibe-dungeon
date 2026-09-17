@@ -54,6 +54,23 @@ const sideChamber: RoomContent = {
     { id: "lantern", x: 16, z: -1.3 },
     { id: "key", x: 13.3, z: -1.3 },
   ],
+  // A multi-page scroll resting near the crates (narration devices) — a
+  // found journal fragment, tying the key/locked-door pair together with a
+  // little story. Placed just past the crate stack, still clear of it and
+  // of the east/south walls.
+  readables: [
+    {
+      id: "scroll",
+      x: 17.5,
+      z: -4.6,
+      title: "Journal of the Watch",
+      pages: [
+        "Day 12\n\nSupplies dwindle. We sealed the eastern hall days ago.",
+        "Day 14\n\nSomething moves beyond the seal at night. The others don't believe me.",
+        "Day 17\n\nIf you find this: the key is not worth the door. Turn back.",
+      ],
+    },
+  ],
 };
 
 export default sideChamber;

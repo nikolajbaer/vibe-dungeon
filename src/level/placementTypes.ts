@@ -149,6 +149,46 @@ export interface LockedDoorSpec {
   requiredItemTypeId: string;
 }
 
+/**
+ * One narration fixture (a poster or scroll) placed in the level. Lives in
+ * a `RoomContent.readables` array — same shape/placement-vs-registry split
+ * as `PropPlacement`, except the actual content (`title`/`pages`) is
+ * per-instance data here rather than something a shared asset type could
+ * own (see `Readable`'s doc comment in `ecs/components.ts`).
+ */
+export interface ReadablePlacement {
+  /** References a `FurnitureAssetDef.id` (src/assets/furniture/*.ts) for
+   * what this fixture *looks like* — typically `"poster"` (wall-mounted) or
+   * `"scroll"` (resting on a surface or the floor). Any furniture asset
+   * works here in principle, but one with a `footprint`/`dynamic` collider
+   * would be an unusual choice for something meant to just stand and be
+   * read. */
+  id: string;
+  x: number;
+  z: number;
+  /** Height off the floor, meters — default 0. Same convention as
+   * `PropPlacement.y`: relative to `floor`'s own baseline, not an absolute
+   * world Y. */
+  y?: number;
+  /** Radians around Y — same convention as `PropPlacement.rotation`: every
+   * furniture asset builds facing local +z, so this is what actually points
+   * a wall-mounted poster at the wall it's on. */
+  rotation?: number;
+  /** Which floor this fixture sits on — default 0. See
+   * `PropPlacement.floor`. */
+  floor?: number;
+  /** Asset-specific extra data, threaded through to the furniture asset's
+   * `createMesh` exactly like `PropPlacement.params`. */
+  params?: unknown;
+  /** Shown as the reader panel's heading — omit for an anonymous notice
+   * (e.g. a scrap of paper with no letterhead). */
+  title?: string;
+  /** The notice's text, one entry per page. A single entry is the common
+   * case; more than one gets a next/prev-paged reader UI automatically —
+   * see `notice/NoticePanel.tsx`. Must be non-empty. */
+  pages: string[];
+}
+
 /** Everything one room/area places in the level — the default export of
  * each file under `src/level/rooms/`. `src/level/rooms.ts` auto-discovers
  * every such file (via `import.meta.glob`) and flattens all of their
@@ -174,4 +214,7 @@ export interface RoomContent {
   /** Doors (already authored as `"door"` faces in this file's `tiles`) that
    * should be locked — see `LockedDoorSpec`'s doc comment. */
   lockedDoors?: LockedDoorSpec[];
+  /** Posters/scrolls this room/area places — see `ReadablePlacement`'s doc
+   * comment. */
+  readables?: ReadablePlacement[];
 }
