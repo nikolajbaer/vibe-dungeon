@@ -74,6 +74,16 @@ class InventoryStore {
    * replacing the array outright is simpler than diffing it. */
   carried: CarriedItemView[] = [];
 
+  /** Total weight (kg) of everything in `carried` right now, and the cap it's
+   * checked against (`MAX_CARRY_WEIGHT`, ecs/systems/items.ts) — both pushed
+   * in by `inventorySync` each frame (same "ECS computes, store just holds"
+   * split as `carried` itself) rather than recomputed here, so this store
+   * never needs to know `ItemAssetDef.mass` exists. Used only for the
+   * running readout (`WeightReadout.tsx`); the actual pickup/take blocking
+   * happens in `ecs/systems/items.ts`/`game.ts`, not here. */
+  weight = 0;
+  maxWeight = 0;
+
   /** The inventory-list item currently awaiting a paper-doll hand-slot tap
    * (issue #47) — set only when the player taps an equippable item while
    * *both* hand slots are open, so there's no single obvious slot to
@@ -96,6 +106,15 @@ class InventoryStore {
 
   setCarried(items: CarriedItemView[]): void {
     this.carried = items;
+  }
+
+  setWeight(weight: number, maxWeight: number): void {
+    this.weight = weight;
+    this.maxWeight = maxWeight;
+  }
+
+  get isOverweight(): boolean {
+    return this.weight >= this.maxWeight;
   }
 
   get inventoryItems(): CarriedItemView[] {

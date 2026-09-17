@@ -229,8 +229,10 @@ function dispatchInteract(world: World, hitEid: number): boolean {
 function pickUpItemEid(world: World, itemEid: number): boolean {
   const [playerEid] = query(world, [PlayerControlled]);
   if (playerEid === undefined) return false;
-  pickUpItem(world, itemEid, playerEid);
-  return true;
+  if (!pickUpItem(world, itemEid, playerEid)) {
+    hudStore.showMessage("Too heavy to carry.");
+  }
+  return true; // handled either way — don't fall through to something else
 }
 
 /**
@@ -258,8 +260,10 @@ function tryPickupNearbyItem(world: World): boolean {
     }
   }
   if (nearestEid === undefined) return false;
-  pickUpItem(world, nearestEid, playerEid);
-  return true;
+  if (!pickUpItem(world, nearestEid, playerEid)) {
+    hudStore.showMessage("Too heavy to carry.");
+  }
+  return true; // handled either way — don't fall through to something else
 }
 
 /** How close the player has to be to an open door leaf's *hinge* (not the
