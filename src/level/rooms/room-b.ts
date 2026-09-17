@@ -57,7 +57,10 @@ const roomB: RoomContent = {
     { id: "barrel", x: -2.3, z: -12.0 },
     { id: "barrel", x: -2.3, z: -13.2 },
   ],
-  npcs: [{ id: "bandit", x: 1.5, z: -13 }],
+  // Carries a gem (issue: lootable corpses) -- killing the bandit guarding
+  // this room drops it, giving the encounter a reward beyond just clearing
+  // the way through.
+  npcs: [{ id: "bandit", x: 1.5, z: -13, contents: ["gem"] }],
 };
 
 export default roomB;

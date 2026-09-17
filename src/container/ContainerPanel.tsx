@@ -4,20 +4,24 @@ import { inventoryStore } from "../inventory/store";
 
 /**
  * Container panel — shown whenever `containerStore` has an open container
- * (a barrel interacted with, see `ecs/systems/doors.ts`'s `tryInteract`).
- * Two lists side by side: the container's own contents (left) and the
- * player's inventory (right, reusing `inventoryStore.inventoryItems` — the
- * same list `InventoryList.tsx` shows). Tapping an item on either side
- * moves it to the other; tapping the storage side no-ops once full. Same
- * "own fixed overlay, own Preact tree" pattern as `NoticePanel`/`HUD`
- * (see mount.tsx).
+ * (a barrel or backpack interacted with, or a dead NPC's corpse — see
+ * `ecs/systems/doors.ts`'s `tryInteract`). Two lists side by side: the
+ * container's own contents (left) and the player's inventory (right,
+ * reusing `inventoryStore.inventoryItems` — the same list
+ * `InventoryList.tsx` shows). Tapping an item on either side moves it to
+ * the other; tapping the storage side no-ops once full. Looting a corpse
+ * (`containerStore.isLootOnly`) disables the "give" side entirely — take
+ * only, no leaving your own things on a body. Same "own fixed overlay, own
+ * Preact tree" pattern as `NoticePanel`/`HUD` (see mount.tsx).
  */
 export function ContainerPanel() {
-  const { isOpen, contents, capacity, isFull, playerItems } = useObserved(() => ({
+  const { isOpen, title, contents, capacity, isFull, isLootOnly, playerItems } = useObserved(() => ({
     isOpen: containerStore.isOpen,
+    title: containerStore.title,
     contents: containerStore.contents,
     capacity: containerStore.capacity,
     isFull: containerStore.isFull,
+    isLootOnly: containerStore.isLootOnly,
     // Excludes container items (a backpack) -- no nesting a container
     // inside another container, which sidesteps both storing a backpack
     // inside itself and any deeper cycle a chain of backpacks could form.
@@ -31,11 +35,12 @@ export function ContainerPanel() {
   return (
     <div class="container-root" data-testid="container-panel">
       <div class="container-title">
-        Storage ({contents.length} / {capacity})
+        {title}
+        {Number.isFinite(capacity) ? ` (${contents.length} / ${capacity})` : ` (${contents.length})`}
       </div>
       <div class="container-columns">
         <div class="container-column">
-          <div class="container-column-label">In barrel</div>
+          <div class="container-column-label">{isLootOnly ? "Loot" : "In storage"}</div>
           <div class="inv-list" data-testid="container-contents">
             {contents.length === 0 && <div class="inv-list-empty">Empty</div>}
             {contents.map((item) => (
@@ -64,8 +69,8 @@ export function ContainerPanel() {
                 class="inv-list-item"
                 data-testid={`container-inv-item-${item.eid}`}
                 data-item-type={item.itemTypeId}
-                disabled={isFull}
-                title={isFull ? "Barrel is full" : `Store ${item.name}`}
+                disabled={isFull || isLootOnly}
+                title={isLootOnly ? "Can't leave items on a corpse" : isFull ? "Storage is full" : `Store ${item.name}`}
                 onClick={() => containerStore.store(item.eid)}
               >
                 <span class="inv-list-item-icon">{item.icon}</span>

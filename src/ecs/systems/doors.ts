@@ -1,6 +1,6 @@
 import * as THREE from "three";
 import { hasComponent, query, type World } from "bitecs";
-import { Dead, Door, DoorState, Object3DRef, PhysicsBody, Position, NPC, Item, Carried, PlayerControlled, Readable, Container } from "../components";
+import { Dead, DeathSector, Door, DoorState, Object3DRef, PhysicsBody, Position, NPC, Item, Carried, PlayerControlled, Readable, Container } from "../components";
 import { toggleNpcFollow } from "./npc";
 import { pickUpItem } from "./items";
 import { NPC_REGISTRY } from "../../assets/npcRegistry";
@@ -74,11 +74,13 @@ const ndc = new THREE.Vector2();
  * interaction work builds on the same convention): a raycast hits the
  * nearest interactable within INTERACT_RANGE meters and dispatches on which
  * ECS component the hit entity carries — `Door` toggles it open/closed (see
- * `toggleDoor` below); `NPC` dispatches on its archetype (`NPC_REGISTRY`,
- * `NPC.archetypeId`): an aggressive one ignores the interact entirely
- * (nothing to talk to), a docile one with a `dialogueId` opens that tree
- * (`dialogueStore.open`, see `src/dialogue/`), and a docile one without
- * falls back to the original `toggleNpcFollow` demo toggle; an uncarried
+ * `toggleDoor` below); a dead `NPC` (any archetype) opens the loot panel a
+ * barrel does (`containerStore.open`, see `NpcSpawn.contents`); a living one
+ * dispatches on its archetype (`NPC_REGISTRY`, `NPC.archetypeId`): an
+ * aggressive one ignores the interact entirely (nothing to talk to), a
+ * docile one with a `dialogueId` opens that tree (`dialogueStore.open`, see
+ * `src/dialogue/`), and a docile one without falls back to the original
+ * `toggleNpcFollow` demo toggle; an uncarried
  * `Item` (issue #39) is picked up (see `pickUpItem` in items.ts) — this
  * takes priority over `Readable` below, so a readable item (a scroll) is
  * always picked up rather than read in place; a fixture-only `Readable`
@@ -145,7 +147,14 @@ export function tryInteract(world: World, camera: THREE.Camera, screenPoint?: { 
     if (obj) interactables.push(obj);
   }
   for (const eid of query(world, [NPC, Object3DRef])) {
-    if (hasComponent(world, eid, Dead)) continue; // corpses aren't interactable (issue #48)
+    // A corpse is interactable too, for looting (`dispatchInteract`'s `Dead`
+    // check dispatches it to the loot panel instead of dialogue) -- but only
+    // until `corpseCleanupSystem` removes its mesh from the scene, at which
+    // point there's nothing left to raycast against or loot. A corpse
+    // always has `DeathSector` within the same frame it dies (see game.ts),
+    // so `sectorId === undefined` reliably means "already cleaned up," not
+    // "hasn't died yet."
+    if (hasComponent(world, eid, Dead) && DeathSector.sectorId[eid] === undefined) continue;
     const obj = Object3DRef[eid];
     if (obj) interactables.push(obj);
   }
@@ -205,6 +214,14 @@ export function tryInteract(world: World, camera: THREE.Camera, screenPoint?: { 
 function dispatchInteract(world: World, hitEid: number): boolean {
   if (hasComponent(world, hitEid, Door)) return toggleDoor(world, hitEid);
   if (hasComponent(world, hitEid, NPC)) {
+    // A dead NPC (any archetype, docile or aggressive) opens the same loot
+    // panel a barrel does (`container/store.ts`) instead of dialogue/follow
+    // — see `NpcSpawn.contents` for how an NPC ends up carrying anything to
+    // find there.
+    if (hasComponent(world, hitEid, Dead)) {
+      containerStore.open(hitEid);
+      return true;
+    }
     const archetype = NPC_REGISTRY[NPC.archetypeId[hitEid]];
     if (archetype?.behavior === "aggressive") return false; // nothing to talk to
     if (archetype?.dialogueId) {

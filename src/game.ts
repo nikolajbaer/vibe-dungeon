@@ -232,6 +232,10 @@ export function startGame(container: HTMLElement): void {
       // this button for a container item, but guard it here too since this
       // is also reachable directly from the debug hooks.
       if (hasComponent(world, itemEid, Container)) return;
+      // Looting is take-only -- can't leave something on a corpse.
+      // `ContainerPanel.tsx` already disables this button when
+      // `containerStore.isLootOnly`, same belt-and-suspenders reasoning.
+      if (hasComponent(world, containerEid, Dead)) return;
       Carried.ownerEid[itemEid] = containerEid;
       Carried.slot[itemEid] = "inventory";
     },
@@ -351,6 +355,11 @@ export function startGame(container: HTMLElement): void {
     // death overlay open at a precise moment) rather than through many
     // separate `[`-key nudges, each a real round-trip.
     setHealth: (current: number) => { Health.current[player] = Math.max(0, Math.min(Health.max[player], current)); },
+    // Same idea as setHealth above, but for any NPC eid (getNpcState) --
+    // lets automated (Playwright) testing kill an NPC instantly (for
+    // lootable-corpse testing) rather than simulating a full combat
+    // encounter just to get a body on the ground.
+    setNpcHealth: (eid: number, current: number) => { Health.current[eid] = Math.max(0, Math.min(Health.max[eid], current)); },
     // Issue #36, extended for archetypes (multiple NPCs, not one hardcoded
     // test NPC) — one entry per NPC entity rather than a single object.
     getNpcState: () =>
