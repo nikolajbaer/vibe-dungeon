@@ -337,17 +337,22 @@ without the item, shows a "Door is locked." message
 Once opened with the right item it unlocks permanently — there's no
 mechanic that re-locks it.
 
-## How to add a readable (a poster or scroll)
+## How to add a readable (a poster fixture or a pickupable scroll)
 
-A `ReadablePlacement` (`placementTypes.ts`) places a narration fixture — a
-wall-mounted `"poster"` or a surface-resting `"scroll"` (both furniture
-assets, `src/assets/furniture/`) — that opens a paged reader on interact,
-in a room file's `readables` array:
+Both open the same paged reader (`notice/NoticePanel.tsx`) on the same
+`Readable` component (`ecs/components.ts`), but differ in whether they can
+be carried off — pick whichever fits the moment: a poster is read in place
+where it's found, a scroll goes in the inventory to be re-read any time.
+
+**Fixture (read in place, never carried)** — a `ReadablePlacement`
+(`placementTypes.ts`) places a wall-mounted `"poster"` (a furniture asset,
+`src/assets/furniture/`) that opens the reader on world interact, in a room
+file's `readables` array:
 
 ```ts
 readables: [
   {
-    id: "poster", // or "scroll"
+    id: "poster",
     x: 5.7,
     z: 3.0,
     rotation: -Math.PI / 2, // every furniture asset builds facing local +z
@@ -357,14 +362,36 @@ readables: [
 ],
 ```
 
-Unlike `ItemSpawn`/`PropPlacement`, which reference a *type* whose look and
-behavior are both shared, `title`/`pages` are the placement's own data —
-two posters never say the same thing, so the text lives on the placement,
-not in a registry (see `Readable`'s doc comment in `ecs/components.ts`).
-`pages` with more than one entry gets an automatic next/prev-paged reader
-(`notice/NoticePanel.tsx`); a single entry just shows that text and a Close
-button, like reading a sign. There's no lock/key interaction here — every
-readable is freely interactable, any time.
+**Pickupable item (carried, read from inventory)** — a `"scroll"` is a
+normal `ItemAssetDef` (`src/assets/items/scroll.ts`), so it's placed in a
+room file's `items` array like any other pickup, just with `title`/`pages`
+added to the `ItemSpawn`:
+
+```ts
+items: [
+  {
+    id: "scroll",
+    x: 17.5,
+    z: -4.6,
+    title: "Journal of the Watch",
+    pages: ["First page text.", "Second page, if there is one."],
+  },
+],
+```
+
+Interacting with a scroll in the world always picks it up (never opens the
+reader directly — see `tryInteract`/`dispatchInteract` in `doors.ts`);
+tapping it afterward in the inventory list (`InventoryList.tsx`) is what
+opens the reader.
+
+Either way, unlike `ItemSpawn`/`PropPlacement`'s shared *type* data,
+`title`/`pages` are the placement's own data — two posters (or two scrolls)
+never say the same thing, so the text lives on the placement, not in a
+registry (see `Readable`'s doc comment in `ecs/components.ts`). `pages`
+with more than one entry gets an automatic next/prev-paged reader; a single
+entry just shows that text and a Close button, like reading a sign.
+There's no lock/key interaction on either kind — every readable is freely
+readable any time, once found.
 
 ## Worked example: the first branch off the original line
 

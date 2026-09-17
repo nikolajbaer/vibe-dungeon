@@ -20,6 +20,13 @@ export interface CarriedItemView {
   name: string;
   icon: string;
   equippable: boolean;
+  /** True for a scroll (an `ItemSpawn` with `pages` — see
+   * `ecs/components.ts`'s `Readable`). Tapping a readable item in the
+   * inventory list opens the paged reader (`notice/store.ts`) instead of
+   * equipping — see `InventoryList.tsx`, which handles this itself rather
+   * than through `inventoryStore`, since reading never mutates ECS state
+   * the way equip/unequip do. */
+  readable: boolean;
   slot: CarriedSlot;
 }
 

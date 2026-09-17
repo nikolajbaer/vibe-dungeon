@@ -78,9 +78,12 @@ const ndc = new THREE.Vector2();
  * (nothing to talk to), a docile one with a `dialogueId` opens that tree
  * (`dialogueStore.open`, see `src/dialogue/`), and a docile one without
  * falls back to the original `toggleNpcFollow` demo toggle; an uncarried
- * `Item` (issue #39) is picked up (see `pickUpItem` in items.ts); a
- * `Readable` (a poster or scroll) opens the paged notice reader
- * (`noticeStore.open`, see `src/notice/`). Callers decide *when* to fire
+ * `Item` (issue #39) is picked up (see `pickUpItem` in items.ts) — this
+ * takes priority over `Readable` below, so a readable item (a scroll) is
+ * always picked up rather than read in place; a fixture-only `Readable`
+ * (a poster) opens the paged notice reader (`noticeStore.open`, see
+ * `src/notice/`) — a readable item is instead read by tapping it in the
+ * inventory list (`InventoryList.tsx`). Callers decide *when* to fire
  * this — desktop on `KeyE`, touch on a tap outside both joystick pads (see
  * game.ts).
  *
@@ -150,6 +153,14 @@ export function tryInteract(world: World, camera: THREE.Camera, screenPoint?: { 
     if (obj) interactables.push(obj);
   }
   for (const eid of query(world, [Readable, Object3DRef])) {
+    // A readable *item* (a scroll — see `ItemSpawn.pages`) is also `Item`,
+    // whose own loop above already adds it while uncarried and correctly
+    // drops it once picked up; entering it here too would just add the
+    // same mesh to `interactables` twice for no benefit, since interacting
+    // with it in the world always means "pick it up," never "read it" (see
+    // `dispatchInteract`'s `Item` branch, checked first) — reading only
+    // ever happens from the inventory list.
+    if (hasComponent(world, eid, Item)) continue;
     const obj = Object3DRef[eid];
     if (obj) interactables.push(obj);
   }
