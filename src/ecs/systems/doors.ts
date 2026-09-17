@@ -1,12 +1,13 @@
 import * as THREE from "three";
 import { hasComponent, query, type World } from "bitecs";
-import { Dead, Door, DoorState, Object3DRef, PhysicsBody, Position, NPC, Item, Carried, PlayerControlled, Readable } from "../components";
+import { Dead, Door, DoorState, Object3DRef, PhysicsBody, Position, NPC, Item, Carried, PlayerControlled, Readable, Container } from "../components";
 import { toggleNpcFollow } from "./npc";
 import { pickUpItem } from "./items";
 import { NPC_REGISTRY } from "../../assets/npcRegistry";
 import { dialogueStore } from "../../dialogue/store";
 import { hudStore } from "../../hud/store";
 import { noticeStore } from "../../notice/store";
+import { containerStore } from "../../container/store";
 import { doorMaterial } from "../../level/materials";
 
 const OPEN_DURATION = 0.8; // seconds for a door to fully open
@@ -83,9 +84,10 @@ const ndc = new THREE.Vector2();
  * always picked up rather than read in place; a fixture-only `Readable`
  * (a poster) opens the paged notice reader (`noticeStore.open`, see
  * `src/notice/`) — a readable item is instead read by tapping it in the
- * inventory list (`InventoryList.tsx`). Callers decide *when* to fire
- * this — desktop on `KeyE`, touch on a tap outside both joystick pads (see
- * game.ts).
+ * inventory list (`InventoryList.tsx`); a `Container` (a barrel) opens the
+ * container UI (`containerStore.open`, see `src/container/`). Callers
+ * decide *when* to fire this — desktop on `KeyE`, touch on a tap outside
+ * both joystick pads (see game.ts).
  *
  * The raycast's *origin and direction* depend on `screenPoint`:
  *
@@ -164,6 +166,10 @@ export function tryInteract(world: World, camera: THREE.Camera, screenPoint?: { 
     const obj = Object3DRef[eid];
     if (obj) interactables.push(obj);
   }
+  for (const eid of query(world, [Container, Object3DRef])) {
+    const obj = Object3DRef[eid];
+    if (obj) interactables.push(obj);
+  }
 
   if (interactables.length > 0) {
     if (screenPoint) {
@@ -201,6 +207,10 @@ function dispatchInteract(world: World, hitEid: number): boolean {
   if (hasComponent(world, hitEid, Item)) return pickUpItemEid(world, hitEid);
   if (hasComponent(world, hitEid, Readable)) {
     noticeStore.open(hitEid);
+    return true;
+  }
+  if (hasComponent(world, hitEid, Container)) {
+    containerStore.open(hitEid);
     return true;
   }
   return false;

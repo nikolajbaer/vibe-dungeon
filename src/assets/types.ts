@@ -124,6 +124,15 @@ export interface FurnitureAssetDef<P = unknown> {
    * `mass` is in kg and is what actually sets the feel — it's the difference
    * between a chair that scoots and a table that barely budges. */
   dynamic?: { mass: number };
+  /** Opts this asset into being a lootable storage container (a barrel) —
+   * `spawnProps` (level/spawning.ts) adds the ECS `Container` component and
+   * makes the placed instance raycast-interactable, opening the container
+   * UI (`container/store.ts`) the same way a door or readable does.
+   * `capacity` is how many items it can hold at once. Currently only
+   * supported alongside `dynamic` (see `spawnProps`), since every container
+   * asset so far is also a shovable physical object; a purely static
+   * container (a wall safe) would need that generalized when one shows up. */
+  container?: { capacity: number };
 }
 
 /**

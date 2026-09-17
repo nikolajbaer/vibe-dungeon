@@ -266,18 +266,30 @@ export const Carried = {
  * item is ever droppable later. */
 export const Viewmodel: (THREE.Object3D | undefined)[] = [];
 
-/** A static narration fixture — a poster or scroll — that opens a read-only
- * paged notice on interact (`ecs/systems/doors.ts`'s `tryInteract`,
- * `notice/store.ts`). Unlike `Item`/`NPC`, whose *shared* look and behavior
- * live in a registry indexed by a type id, a readable's actual text is
- * unique per placement (two posters never say the same thing), so it's
- * carried directly here rather than through a registry lookup — see
- * `ReadablePlacement` (`level/placementTypes.ts`) for where an author
- * writes it, and `spawnReadables` (`level/spawning.ts`) for how it lands on
- * these two parallel arrays. `pages.length === 1` is the common case (a
- * single-page notice); the reader UI only shows next/prev controls when
- * there's more than one. */
+/** A narration device — a fixture poster (read in place) or a scroll item
+ * (read by tapping it in the inventory once carried) — that opens a
+ * read-only paged notice (`notice/store.ts`). Unlike `Item`/`NPC`, whose
+ * *shared* look and behavior live in a registry indexed by a type id, a
+ * readable's actual text is unique per placement (two posters never say the
+ * same thing), so it's carried directly here rather than through a registry
+ * lookup — see `ReadablePlacement` (`level/placementTypes.ts`) and
+ * `ItemSpawn.pages` for where an author writes it, and `spawnReadables`/
+ * `spawnItems` (`level/spawning.ts`) for how it lands on these two parallel
+ * arrays. `pages.length === 1` is the common case (a single-page notice);
+ * the reader UI only shows next/prev controls when there's more than one. */
 export const Readable = {
   title: [] as (string | undefined)[],
   pages: [] as string[][],
+};
+
+/** Marks an entity as something other entities' `Carried` items can be owned
+ * by — today just a storage fixture (a barrel), later a wearable backpack
+ * `Item` too (see `Carried.ownerEid`'s doc comment above, which already
+ * anticipated this). `capacity` caps how many items it can hold at once;
+ * `ecs/systems/doors.ts`'s `tryInteract` opens the container UI
+ * (`container/store.ts`) on interact, the same dispatch pattern as `Door`/
+ * `Readable`. The player itself is never `Container` — its own capacity
+ * (today unlimited) is a property of `inventoryStore`, not the ECS. */
+export const Container = {
+  capacity: [] as number[],
 };

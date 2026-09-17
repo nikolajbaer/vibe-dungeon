@@ -42,12 +42,16 @@ function createBarrelMesh(): THREE.Group {
   return group;
 }
 
+const BARREL_CAPACITY = 6;
+
 const barrel: FurnitureAssetDef = {
   id: "barrel",
   createMesh: () => createBarrelMesh(),
   footprint: { hx: BARREL_RADIUS_BULGE, hz: BARREL_RADIUS_BULGE },
   // A full barrel — shovable, but it takes a deliberate push.
   dynamic: { mass: 28 },
+  // Doubles as storage: interact to open it and move items in/out.
+  container: { capacity: BARREL_CAPACITY },
 };
 
 export default barrel;
