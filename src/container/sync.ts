@@ -2,6 +2,7 @@ import { hasComponent, query, type World } from "bitecs";
 import { Carried, Dead, Item, NPC } from "../ecs/components";
 import { ITEM_REGISTRY } from "../assets/itemRegistry";
 import { NPC_REGISTRY } from "../assets/npcRegistry";
+import { carriedWeight, containerWeightCapacityOf } from "../ecs/systems/items";
 import { containerStore, type ContainerItemView } from "./store";
 
 /**
@@ -31,4 +32,12 @@ export function containerSync(world: World): void {
   const npcName = hasComponent(world, containerEid, NPC) ? NPC_REGISTRY[NPC.archetypeId[containerEid]]?.name : undefined;
   const title = isLootOnly ? `${npcName ?? "Corpse"}'s remains` : "Storage";
   containerStore.setMeta(title, isLootOnly);
+
+  // A weight-capped container (a backpack) gets its own weight readout,
+  // entirely separate from the player's own `inventoryStore.weight` --
+  // `Item.itemTypeId[containerEid]` is `undefined` for anything that isn't
+  // itself an `Item` (a barrel, an NPC's corpse), which `containerWeightCapacityOf`
+  // already treats as "no cap" (`Infinity`).
+  const weightCapacity = containerWeightCapacityOf(Item.itemTypeId[containerEid]);
+  containerStore.setWeight(Number.isFinite(weightCapacity) ? carriedWeight(world, containerEid) : 0, weightCapacity);
 }

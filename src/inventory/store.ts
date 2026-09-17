@@ -81,14 +81,15 @@ class InventoryStore {
    * replacing the array outright is simpler than diffing it. */
   carried: CarriedItemView[] = [];
 
-  /** Total weight (kg) of everything in `carried` right now, and the cap it's
-   * checked against (`maxCarryWeight`, ecs/systems/items.ts — not a flat
-   * number, since a carried backpack raises it) — both pushed in by
+  /** Total weight (kg) of everything in `carried` right now (not counting
+   * anything zipped inside a carried backpack — that's a separate budget,
+   * see `carriedWeight`'s doc comment in ecs/systems/items.ts), and the flat
+   * `BASE_CARRY_WEIGHT` cap it's checked against — both pushed in by
    * `inventorySync` each frame (same "ECS computes, store just holds" split
    * as `carried` itself) rather than recomputed here, so this store never
-   * needs to know `ItemAssetDef.mass`/`carryCapacityBonus` exist. Used only
-   * for the running readout (`WeightReadout.tsx`); the actual pickup/take
-   * blocking happens in `ecs/systems/items.ts`/`game.ts`, not here. */
+   * needs to know `ItemAssetDef.mass` exists. Used only for the running
+   * readout (`WeightReadout.tsx`); the actual pickup/take blocking happens
+   * in `ecs/systems/items.ts`/`game.ts`, not here. */
   weight = 0;
   maxWeight = 0;
 
