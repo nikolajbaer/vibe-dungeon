@@ -1,5 +1,5 @@
 import { hasComponent, query, type World } from "bitecs";
-import { Carried, Item, PlayerControlled, Readable, Container } from "../ecs/components";
+import { Carried, Item, PlayerControlled, Readable, Container, Stackable } from "../ecs/components";
 import { ITEM_REGISTRY } from "../assets/itemRegistry";
 import { BASE_CARRY_WEIGHT, carriedWeight } from "../ecs/systems/items";
 import { inventoryStore, type CarriedItemView } from "./store";
@@ -25,6 +25,7 @@ export function inventorySync(world: World): void {
   const carried: CarriedItemView[] = [];
   for (const eid of query(world, [Item, Carried])) {
     if (Carried.ownerEid[eid] !== playerEid) continue;
+    if (hasComponent(world, eid, Stackable) && Stackable.count[eid] <= 0) continue;
     const itemType = ITEM_REGISTRY[Item.itemTypeId[eid]];
     if (!itemType) continue;
     carried.push({
@@ -36,6 +37,7 @@ export function inventorySync(world: World): void {
       readable: hasComponent(world, eid, Readable),
       isContainer: hasComponent(world, eid, Container),
       slot: Carried.slot[eid],
+      count: hasComponent(world, eid, Stackable) ? Stackable.count[eid] : undefined,
     });
   }
   inventoryStore.setCarried(carried);

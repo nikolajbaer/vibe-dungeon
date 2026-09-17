@@ -34,6 +34,12 @@ export interface CarriedItemView {
    * `InventoryList.tsx`. */
   isContainer: boolean;
   slot: CarriedSlot;
+  /** How many units this entity represents — `undefined` for an ordinary
+   * (non-`Stackable`) item. Always positive here: a 0-count (fully
+   * merged-away) `Stackable` entity never makes it into `carried` in the
+   * first place (see `inventory/sync.ts`). Mirrors
+   * `container/store.ts`'s `ContainerItemView.count`. */
+  count?: number;
 }
 
 /**

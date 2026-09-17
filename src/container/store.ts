@@ -9,29 +9,56 @@ export interface ContainerItemView {
   itemTypeId: string;
   name: string;
   icon: string;
+  /** How many units this entity represents — `undefined` for an ordinary
+   * (non-`Stackable`) item, so `!== undefined` doubles as "this is a
+   * commodity, show a count and allow a partial-quantity transfer." Always
+   * a positive number here: a 0-count (fully merged-away) `Stackable`
+   * entity never makes it into a `contents`/`inventoryItems` list in the
+   * first place (see `container/sync.ts`/`inventory/sync.ts`). */
+  count?: number;
 }
 
 /**
  * The reverse-direction wiring `containerSync` (ECS -> store) never needed:
  * moving an item between the player's inventory and an open container
- * mutates `Carried.ownerEid`/`slot`, which this store has no reference to
- * do itself (same "hand game.ts a small actions object" pattern as
- * `inventory/store.ts`'s `InventoryActions`).
+ * mutates `Carried.ownerEid`/`slot` (or splits/merges a `Stackable` count),
+ * which this store has no reference to do itself (same "hand game.ts a
+ * small actions object" pattern as `inventory/store.ts`'s
+ * `InventoryActions`).
  */
 export interface ContainerActions {
-  /** Moves `itemEid` (currently in the player's inventory) into the given
-   * container. Callers (`store` below) are expected to have already
-   * checked the container isn't full. */
-  moveToContainer(itemEid: number, containerEid: number): void;
-  /** Moves `itemEid` (currently inside a container) back to the player's
-   * inventory. */
-  moveToPlayer(itemEid: number): void;
+  /** Moves `quantity` units of `itemEid` (currently in the player's
+   * inventory) into the given container — the item's entire current count
+   * if omitted. Callers (`store` below) are expected to have already
+   * checked the container isn't full (unless merging into a stack it
+   * already holds, which doesn't need a new slot). */
+  moveToContainer(itemEid: number, containerEid: number, quantity?: number): void;
+  /** Moves `quantity` units of `itemEid` (currently inside a container)
+   * back to the player's inventory — the item's entire current count if
+   * omitted. */
+  moveToPlayer(itemEid: number, quantity?: number): void;
 }
 
 const noopActions: ContainerActions = {
   moveToContainer: () => {},
   moveToPlayer: () => {},
 };
+
+/** A stackable item tapped in either column, awaiting a quantity
+ * confirmation (`ContainerPanel.tsx`) before it actually moves — set only
+ * when the tapped item's `count` is more than 1 (a single coin just moves
+ * immediately, same as any other item, no picker needed). */
+export interface PendingTransfer {
+  itemEid: number;
+  itemTypeId: string;
+  /** Which direction confirming this transfer will move it: `"give"` is
+   * player inventory -> container, `"take"` is container -> player. */
+  direction: "give" | "take";
+  name: string;
+  icon: string;
+  max: number;
+  quantity: number;
+}
 
 /**
  * MobX-backed state for the container panel (a barrel, opened via
@@ -71,6 +98,12 @@ class ContainerStore {
    * by `containerSync` each frame. */
   weight = 0;
   weightCapacity = Infinity;
+
+  /** Set by `beginTransfer` when a stackable item (count > 1) is tapped —
+   * `ContainerPanel.tsx` shows a quantity picker instead of moving anything
+   * yet. `null` the rest of the time, including right after `confirmTransfer`/
+   * `cancelTransfer`. */
+  pendingTransfer: PendingTransfer | null = null;
 
   private actions: ContainerActions = noopActions;
 
@@ -114,11 +147,13 @@ class ContainerStore {
     this.isLootOnly = false;
     this.weight = 0;
     this.weightCapacity = Infinity;
+    this.pendingTransfer = null;
   }
 
   close(): void {
     this.activeEid = null;
     this.contents = [];
+    this.pendingTransfer = null;
   }
 
   setMeta(title: string, isLootOnly: boolean): void {
@@ -140,17 +175,59 @@ class ContainerStore {
   }
 
   /** Called when an inventory-list item is tapped while a container panel
-   * is open (`ContainerPanel.tsx`). No-ops once full, same as a real
-   * barrel refusing another crate once it's packed. */
-  store(itemEid: number): void {
-    if (this.activeEid === null || this.isFull) return;
-    this.actions.moveToContainer(itemEid, this.activeEid);
+   * is open (`ContainerPanel.tsx`), or confirmed via `confirmTransfer`
+   * below. No-ops once full — *unless* `itemTypeId` matches a stack the
+   * container already holds, since merging into an existing stack doesn't
+   * need a new slot (a real barrel doesn't get any fuller for a few more
+   * coins landing in the pile that's already there). `itemTypeId` is
+   * omitted by the debug hooks, which just fall back to the strict
+   * always-blocks-when-full check. */
+  store(itemEid: number, itemTypeId?: string, quantity?: number): void {
+    if (this.activeEid === null) return;
+    const mergesIntoExistingStack = itemTypeId !== undefined && this.contents.some((c) => c.itemTypeId === itemTypeId);
+    if (this.isFull && !mergesIntoExistingStack) return;
+    this.actions.moveToContainer(itemEid, this.activeEid, quantity);
   }
 
-  /** Called when a container-list item is tapped (`ContainerPanel.tsx`). */
-  take(itemEid: number): void {
+  /** Called when a container-list item is tapped (`ContainerPanel.tsx`), or
+   * confirmed via `confirmTransfer` below. */
+  take(itemEid: number, quantity?: number): void {
     if (this.activeEid === null) return;
-    this.actions.moveToPlayer(itemEid);
+    this.actions.moveToPlayer(itemEid, quantity);
+  }
+
+  /** Called when a stackable item (`count` > 1) is tapped in either column
+   * (`ContainerPanel.tsx`) — opens a quantity picker defaulting to the
+   * item's full current count, rather than moving anything yet. A count of
+   * exactly 1 skips this and moves immediately instead (see
+   * `ContainerPanel.tsx`'s tap handler), so this never fires for a
+   * non-stackable item or a stack already down to 1. */
+  beginTransfer(itemEid: number, itemTypeId: string, direction: "give" | "take", name: string, icon: string, max: number): void {
+    this.pendingTransfer = { itemEid, itemTypeId, direction, name, icon, max, quantity: max };
+  }
+
+  /** Clamped to `[1, max]` and rounded, so the stepper
+   * (`ContainerPanel.tsx`) can pass a raw +/- delta without worrying about
+   * overshooting either end. */
+  setTransferQuantity(quantity: number): void {
+    if (!this.pendingTransfer) return;
+    this.pendingTransfer.quantity = Math.max(1, Math.min(this.pendingTransfer.max, Math.round(quantity)));
+  }
+
+  cancelTransfer(): void {
+    this.pendingTransfer = null;
+  }
+
+  /** Commits whatever quantity is currently picked via `store`/`take`
+   * above, then clears `pendingTransfer` either way — even if the move
+   * itself gets refused (over weight, say), there's nothing left to
+   * confirm. */
+  confirmTransfer(): void {
+    const pending = this.pendingTransfer;
+    if (!pending) return;
+    this.pendingTransfer = null;
+    if (pending.direction === "give") this.store(pending.itemEid, pending.itemTypeId, pending.quantity);
+    else this.take(pending.itemEid, pending.quantity);
   }
 }
 

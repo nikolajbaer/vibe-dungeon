@@ -293,3 +293,23 @@ export const Readable = {
 export const Container = {
   capacity: [] as number[],
 };
+
+/** Marks an `Item` entity as a commodity that piles into one stack per
+ * owner instead of a separate inventory slot per pickup (coins; arrows and
+ * sling rocks would follow the same pattern) — added only to item types
+ * whose `ItemAssetDef.stackable` is true. `count` is how many units this
+ * particular entity currently represents; weight (`ecs/systems/items.ts`)
+ * multiplies `ItemAssetDef.mass` by it, so a pile really does weigh more
+ * than a single coin, not the same regardless of size.
+ *
+ * A count of exactly 0 means this entity merged its entire stack into
+ * another one (`giveItem` in ecs/systems/items.ts) and is now permanently
+ * inert — never destroyed, same "hide, don't destroy" convention
+ * `pickUpItem` already uses for a picked-up mesh, just applied to the whole
+ * entity instead: every stack-aware read site (inventory/container
+ * listings, weight sums) skips a 0-count entity, and it already carries
+ * `Carried` (so `tryInteract`'s world-interactables loop already excludes
+ * it the same way it excludes any other carried item). */
+export const Stackable = {
+  count: [] as number[],
+};

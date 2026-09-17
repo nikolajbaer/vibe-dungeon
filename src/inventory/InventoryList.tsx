@@ -64,6 +64,7 @@ export function InventoryList() {
             }}
           >
             <span class="inv-list-item-icon">{item.icon}</span>
+            {item.count !== undefined && <span class="inv-list-item-count">{item.count}</span>}
           </button>
         );
       })}

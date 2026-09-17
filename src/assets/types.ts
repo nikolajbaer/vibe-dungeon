@@ -104,6 +104,15 @@ export interface ItemAssetDef {
    * weight-limited either way). Omit for a container with no weight cap of
    * its own (just `ContainerSpec.capacity`'s item-count limit). */
   containerWeightCapacity?: number;
+  /** Opts this item into being a commodity (coins; arrows and sling rocks
+   * would follow the same pattern) — every entity of this type piles into
+   * one stack per owner instead of a separate inventory slot per pickup
+   * (the ECS `Stackable` component, added by `spawnItems`/`giveItem` in
+   * ecs/systems/items.ts). `mass` above is still a *per-unit* weight: a
+   * pile of 50 genuinely weighs 50x what one does, it isn't a flat
+   * per-slot cost. Mutually exclusive with `container` in practice — a
+   * stack of backpacks makes no sense — though nothing enforces that today. */
+  stackable?: boolean;
 }
 
 /** Half-extents (meters) of the box a furniture asset blocks movement with.

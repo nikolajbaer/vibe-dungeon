@@ -1,11 +1,11 @@
 import * as THREE from "three";
 import { addComponent, addEntity, removeComponent, type World } from "bitecs";
-import { Position, Velocity, CharacterBody, DynamicBody, PhysicsBody, PhysicsCollider, PhysicsRotation, Object3DRef, Item, NPC, NpcState, Health, Readable, Container, Carried } from "../ecs/components";
+import { Position, Velocity, CharacterBody, DynamicBody, PhysicsBody, PhysicsCollider, PhysicsRotation, Object3DRef, Item, NPC, NpcState, Health, Readable, Container, Carried, Stackable } from "../ecs/components";
 import { ITEM_REGISTRY } from "../assets/itemRegistry";
 import type { ItemAssetDef } from "../assets/types";
 import { FURNITURE_REGISTRY } from "../assets/furnitureRegistry";
 import { NPC_REGISTRY } from "../assets/npcRegistry";
-import type { PropPlacement, ItemSpawn, NpcSpawn, ReadablePlacement } from "./placementTypes";
+import type { PropPlacement, ItemSpawn, NpcSpawn, ReadablePlacement, ContentsEntry } from "./placementTypes";
 import { floorBaseline } from "./tiles";
 import { addCharacter, addDynamicBox, addStaticBox, type BoxShape, type Physics } from "../physics/world";
 
@@ -170,6 +170,52 @@ function buildItemWorldBody(world: World, physics: Physics, scene: THREE.Scene, 
   PhysicsBody[eid] = addDynamicBox(physics, x, y, z, 0, shape, def.mass ?? DEFAULT_ITEM_MASS);
 }
 
+/** A plain string entry means count 1; `{ id, count }` is only valid for a
+ * stackable item type (checked by the caller, which has the `ItemAssetDef`
+ * in hand to check against). */
+function parseContentsEntry(entry: ContentsEntry): { id: string; count: number } {
+  return typeof entry === "string" ? { id: entry, count: 1 } : entry;
+}
+
+/**
+ * Creates one pre-seeded `contents` item, already `Carried` by `ownerEid`
+ * (a container or an NPC) with no world presence of its own — shared by
+ * `spawnProps`'s barrel loot and `spawnNpcs`'s NPC loot below, since both
+ * are "an Item that starts out already owned by something, never rendered
+ * in the world" (see `pickUpItem` in ecs/systems/items.ts, which hides a
+ * picked-up item's mesh instead of ever creating one fresh — here one
+ * simply never gets created at all).
+ *
+ * `allowContainers` is false only for `spawnNpcs` (NPCs can't carry
+ * containers); `spawnProps` allows a barrel to start with a backpack in it,
+ * itself a `Container`, capacity and all. Throws (`callerLabel` names which
+ * caller, for the message) for an unknown item id, a container item where
+ * they're disallowed, or a `count` given for a non-stackable item type.
+ */
+function spawnContentsItem(world: World, callerLabel: string, ownerEid: number, entry: ContentsEntry, allowContainers: boolean): void {
+  const { id: itemTypeId, count } = parseContentsEntry(entry);
+  const itemDef = ITEM_REGISTRY[itemTypeId];
+  if (!itemDef) throw new Error(`${callerLabel}: contents reference unknown item id "${itemTypeId}"`);
+  if (!allowContainers && itemDef.container) throw new Error(`${callerLabel}: contents include "${itemTypeId}", a container -- NPCs can't carry containers`);
+  if (count !== 1 && !itemDef.stackable) throw new Error(`${callerLabel}: contents give a count for "${itemTypeId}", which isn't stackable`);
+
+  const itemEid = addEntity(world);
+  addComponent(world, itemEid, Item);
+  addComponent(world, itemEid, Carried);
+  Item.itemTypeId[itemEid] = itemTypeId;
+  Carried.ownerEid[itemEid] = ownerEid;
+  Carried.slot[itemEid] = "inventory";
+
+  if (itemDef.container) {
+    addComponent(world, itemEid, Container);
+    Container.capacity[itemEid] = itemDef.container.capacity;
+  }
+  if (itemDef.stackable) {
+    addComponent(world, itemEid, Stackable);
+    Stackable.count[itemEid] = count;
+  }
+}
+
 export function spawnItems(world: World, physics: Physics, scene: THREE.Scene, spawns: ItemSpawn[]): void {
   for (const spawn of spawns) {
     const def = ITEM_REGISTRY[spawn.id];
@@ -195,6 +241,16 @@ export function spawnItems(world: World, physics: Physics, scene: THREE.Scene, s
     if (def.container) {
       addComponent(world, eid, Container);
       Container.capacity[eid] = def.container.capacity;
+    }
+
+    // A `stackable` item type (coins) also gets `Stackable`, sized to
+    // however many units this particular pile represents — per-*placement*
+    // data (a room author might want a pile of 3 here, 50 there), unlike
+    // `container`'s capacity above which is the same for every instance of
+    // the type.
+    if (def.stackable) {
+      addComponent(world, eid, Stackable);
+      Stackable.count[eid] = spawn.count ?? 1;
     }
 
     const x = spawn.x;
@@ -316,16 +372,8 @@ export function spawnNpcs(world: World, physics: Physics, scene: THREE.Scene, sp
     // pre-seeded contents (spawnProps above), just owned by the NPC instead
     // of a container prop. No Position/Object3DRef/physics body: like any
     // carried item, it's never meant to render until it's actually taken.
-    for (const itemTypeId of spawn.contents ?? []) {
-      const itemDef = ITEM_REGISTRY[itemTypeId];
-      if (!itemDef) throw new Error(`spawnNpcs: "${spawn.id}" contents reference unknown item id "${itemTypeId}"`);
-      if (itemDef.container) throw new Error(`spawnNpcs: "${spawn.id}" contents include "${itemTypeId}", a container -- NPCs can't carry containers`);
-      const itemEid = addEntity(world);
-      addComponent(world, itemEid, Item);
-      addComponent(world, itemEid, Carried);
-      Item.itemTypeId[itemEid] = itemTypeId;
-      Carried.ownerEid[itemEid] = eid;
-      Carried.slot[itemEid] = "inventory";
+    for (const entry of spawn.contents ?? []) {
+      spawnContentsItem(world, `spawnNpcs: "${spawn.id}"`, eid, entry, false);
     }
   }
 }
@@ -425,29 +473,10 @@ export function spawnProps(world: World, physics: Physics, scene: THREE.Scene, p
         Container.capacity[eid] = def.container.capacity;
         containerHitbox.userData.eid = eid;
 
-        // Loot the barrel starts with (placement.contents, validated
-        // against def.container above) — each entry is a normal `Item`,
-        // already `Carried` by this container, exactly like one the player
-        // stored themselves. No `Position`/`Object3DRef`/physics body: a
-        // carried item never needs its own world presence (see `pickUpItem`
-        // in ecs/systems/items.ts hiding a picked-up item's mesh instead of
-        // ever creating one fresh) here it simply never gets one at all.
-        for (const itemTypeId of placement.contents ?? []) {
-          const itemDef = ITEM_REGISTRY[itemTypeId];
-          if (!itemDef) throw new Error(`spawnProps: "${placement.id}" contents reference unknown item id "${itemTypeId}"`);
-          const itemEid = addEntity(world);
-          addComponent(world, itemEid, Item);
-          addComponent(world, itemEid, Carried);
-          Item.itemTypeId[itemEid] = itemTypeId;
-          Carried.ownerEid[itemEid] = eid;
-          Carried.slot[itemEid] = "inventory";
-          // Same as spawnItems above: a container-typed item (a backpack)
-          // pre-seeded as another container's loot is still itself a
-          // Container, capacity and all.
-          if (itemDef.container) {
-            addComponent(world, itemEid, Container);
-            Container.capacity[itemEid] = itemDef.container.capacity;
-          }
+        // Loot the barrel starts with (placement.contents) -- see
+        // `spawnContentsItem`'s own doc comment.
+        for (const entry of placement.contents ?? []) {
+          spawnContentsItem(world, `spawnProps: "${placement.id}"`, eid, entry, true);
         }
       }
       continue;
