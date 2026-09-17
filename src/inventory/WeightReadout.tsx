@@ -10,7 +10,8 @@ const OVERWEIGHT_STYLE = {
 /**
  * Small running weight readout above the inventory list (`InventoryList.tsx`)
  * — "3.2 / 5.0 kg", turning red at/over the cap (`inventoryStore.maxWeight`,
- * `MAX_CARRY_WEIGHT` in ecs/systems/items.ts). Purely informational: the
+ * `maxCarryWeight` in ecs/systems/items.ts — higher than the base 5kg while
+ * carrying a backpack). Purely informational: the
  * actual pickup/take blocking happens in ecs/systems/items.ts and game.ts's
  * container actions, which show their own "Too heavy to carry." HUD message
  * when it fires — this just keeps the budget visible before it does.
