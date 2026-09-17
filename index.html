@@ -256,6 +256,30 @@
         border: 1px solid rgba(255, 255, 255, 0.25);
         border-radius: 8px;
       }
+      /* Drop zone (DropZone.tsx) -- an ordinary button until armed, then
+         switches to a warning red/dashed look so it reads as "live" the same
+         way TARGETABLE_STYLE's dashed border does in PaperDoll.tsx, just a
+         distinct color so the two "waiting for a tap" modes don't look
+         identical. */
+      .inv-drop-zone {
+        font: inherit;
+        font-weight: 600;
+        color: inherit;
+        padding: 8px;
+        background: rgba(255, 255, 255, 0.08);
+        border: 1px solid rgba(255, 255, 255, 0.3);
+        border-radius: 8px;
+        cursor: pointer;
+        pointer-events: auto;
+      }
+      .inv-drop-zone:active {
+        background: rgba(255, 255, 255, 0.2);
+      }
+      .inv-drop-zone[data-armed="true"] {
+        background: rgba(217, 67, 63, 0.35);
+        border-style: dashed;
+        border-color: #ff6b6b;
+      }
       /* Dialogue panel: its own fixed overlay (#dialogue-overlay, see
          src/dialogue/mount.tsx), same "own container, own pointer-events"
          split as #inventory-overlay above. */

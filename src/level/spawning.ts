@@ -1,7 +1,8 @@
 import * as THREE from "three";
-import { addComponent, addEntity, type World } from "bitecs";
+import { addComponent, addEntity, removeComponent, type World } from "bitecs";
 import { Position, Velocity, CharacterBody, DynamicBody, PhysicsBody, PhysicsCollider, PhysicsRotation, Object3DRef, Item, NPC, NpcState, Health, Readable, Container, Carried } from "../ecs/components";
 import { ITEM_REGISTRY } from "../assets/itemRegistry";
+import type { ItemAssetDef } from "../assets/types";
 import { FURNITURE_REGISTRY } from "../assets/furnitureRegistry";
 import { NPC_REGISTRY } from "../assets/npcRegistry";
 import type { PropPlacement, ItemSpawn, NpcSpawn, ReadablePlacement } from "./placementTypes";
@@ -133,18 +134,49 @@ function addPropCollider(physics: Physics, x: number, z: number, hx: number, hy:
  * item is never read via the world interact raycast the way a poster is
  * (that raycast picks it up instead — see `tryInteract`, `doors.ts`).
  */
+/**
+ * Gives an `Item` entity its actual world presence — mesh, pickup hitbox,
+ * and dynamic physics body — at `(x, y, z)`. Factored out of `spawnItems`
+ * below so `dropCarriedItem` can build the exact same thing for an item
+ * that's never had one before (a container-seeded one, dropped for the
+ * first time): same mesh, same hitbox, same physics, just triggered at drop
+ * time instead of level-load time. Assumes `eid` already has `Item` (with
+ * `itemTypeId` set) — everything else (`Position`/`Object3DRef`/
+ * `DynamicBody`/`PhysicsBody`/`PhysicsRotation`) is added here.
+ */
+function buildItemWorldBody(world: World, physics: Physics, scene: THREE.Scene, eid: number, def: ItemAssetDef, x: number, y: number, z: number): void {
+  addComponent(world, eid, Position);
+  addComponent(world, eid, Object3DRef);
+  addComponent(world, eid, DynamicBody);
+  addComponent(world, eid, PhysicsBody);
+  addComponent(world, eid, PhysicsRotation);
+
+  const mesh = def.createWorldMesh();
+  // Measured before the group gets a transform, and off the item's real
+  // mesh rather than the group, so the invisible pickup hitbox sphere
+  // (which is deliberately far more generous than the item) doesn't become
+  // the collider.
+  const shape = boxShapeOf(mesh);
+  const group = withPickupHitbox(mesh, eid);
+
+  Position.x[eid] = x;
+  Position.y[eid] = y;
+  Position.z[eid] = z;
+  group.position.set(x, y, z);
+  PhysicsRotation.w[eid] = 1; // identity until the first physics step
+  scene.add(group);
+  Object3DRef[eid] = group;
+
+  PhysicsBody[eid] = addDynamicBox(physics, x, y, z, 0, shape, def.mass ?? DEFAULT_ITEM_MASS);
+}
+
 export function spawnItems(world: World, physics: Physics, scene: THREE.Scene, spawns: ItemSpawn[]): void {
   for (const spawn of spawns) {
     const def = ITEM_REGISTRY[spawn.id];
     if (!def) throw new Error(`spawnItems: unknown item id "${spawn.id}"`);
 
     const eid = addEntity(world);
-    addComponent(world, eid, Position);
-    addComponent(world, eid, Object3DRef);
     addComponent(world, eid, Item);
-    addComponent(world, eid, DynamicBody);
-    addComponent(world, eid, PhysicsBody);
-    addComponent(world, eid, PhysicsRotation);
     Item.itemTypeId[eid] = def.id;
 
     // A `pages`-bearing spawn (a scroll) is *also* Readable — see
@@ -165,27 +197,52 @@ export function spawnItems(world: World, physics: Physics, scene: THREE.Scene, s
       Container.capacity[eid] = def.container.capacity;
     }
 
-    const mesh = def.createWorldMesh();
-    // Measured before the group gets a transform, and off the item's real
-    // mesh rather than the group, so the invisible pickup hitbox sphere
-    // (which is deliberately far more generous than the item) doesn't
-    // become the collider.
-    const shape = boxShapeOf(mesh);
-    const group = withPickupHitbox(mesh, eid);
-
     const x = spawn.x;
     const y = floorBaseline(spawn.floor ?? 0) + (spawn.y ?? ITEM_HEIGHT);
     const z = spawn.z;
-    Position.x[eid] = x;
-    Position.y[eid] = y;
-    Position.z[eid] = z;
-    group.position.set(x, y, z);
-    PhysicsRotation.w[eid] = 1; // identity until the first physics step
-    scene.add(group);
-    Object3DRef[eid] = group;
-
-    PhysicsBody[eid] = addDynamicBox(physics, x, y, z, 0, shape, def.mass ?? DEFAULT_ITEM_MASS);
+    buildItemWorldBody(world, physics, scene, eid, def, x, y, z);
   }
+}
+
+/**
+ * Drops a `Carried` item back into the world at `(x, y, z)` — the reverse of
+ * `pickUpItem` (ecs/systems/items.ts). Removes `Carried` so it's raycastable
+ * again, then either:
+ *
+ * - **Already has a world body** (picked up from the floor at some point,
+ *   even if via a container in between): reuses its existing mesh/physics
+ *   body rather than building a new one — same "hide, don't destroy"
+ *   principle `pickUpItem`'s own doc comment describes for the reverse
+ *   direction. Re-enables the body, makes the mesh visible again, and resets
+ *   its transform/velocity so it doesn't still think it's mid-flight from
+ *   however it was last shoved before being picked up.
+ * - **Never had one** (a container-seeded item — `PropPlacement.contents` —
+ *   dropped for the first time, having gone straight from a barrel/backpack
+ *   into the player's hands without ever passing through the world): builds
+ *   one fresh via `buildItemWorldBody`, identically to how a room file's own
+ *   `ItemSpawn` would have.
+ *
+ * Called from game.ts's `InventoryActions.drop`, itself triggered by the
+ * inventory panel's drop zone (`inventory/DropZone.tsx`).
+ */
+export function dropCarriedItem(world: World, physics: Physics, scene: THREE.Scene, itemEid: number, x: number, y: number, z: number): void {
+  removeComponent(world, itemEid, Carried);
+
+  const existingBody = PhysicsBody[itemEid];
+  const existingMesh = Object3DRef[itemEid];
+  if (existingBody && existingMesh) {
+    existingBody.setTranslation({ x, y, z }, true);
+    existingBody.setLinvel({ x: 0, y: 0, z: 0 }, true);
+    existingBody.setAngvel({ x: 0, y: 0, z: 0 }, true);
+    existingBody.setRotation({ x: 0, y: 0, z: 0, w: 1 }, true);
+    existingBody.setEnabled(true);
+    existingMesh.visible = true;
+    return;
+  }
+
+  const def = ITEM_REGISTRY[Item.itemTypeId[itemEid]];
+  if (!def) throw new Error(`dropCarriedItem: unknown item id "${Item.itemTypeId[itemEid]}"`);
+  buildItemWorldBody(world, physics, scene, itemEid, def, x, y, z);
 }
 
 const NPC_INITIAL_WANDER_PAUSE = 2; // seconds before its first idle wander leg

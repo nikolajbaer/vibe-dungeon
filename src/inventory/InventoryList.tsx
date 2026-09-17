@@ -26,12 +26,16 @@ const SELECTED_STYLE = {
  * a container item (a backpack — `CarriedItemView.isContainer`) opens the
  * same container panel a barrel does (`containerStore.open`), same reasoning
  * as the readable case. Tapping an item that's none of the above (e.g. the
- * gem) does nothing but shows a visibly disabled affordance.
+ * gem) does nothing but shows a visibly disabled affordance — unless the
+ * drop zone is armed (`inventoryStore.dropArmed`, `DropZone.tsx`), in which
+ * case *every* item becomes tappable and any tap drops it instead of doing
+ * whatever it would normally do.
  */
 export function InventoryList() {
-  const { items, selectedItemEid } = useObserved(() => ({
+  const { items, selectedItemEid, dropArmed } = useObserved(() => ({
     items: inventoryStore.inventoryItems,
     selectedItemEid: inventoryStore.selectedItemEid,
+    dropArmed: inventoryStore.dropArmed,
   }));
 
   return (
@@ -39,8 +43,8 @@ export function InventoryList() {
       {items.length === 0 && <div class="inv-list-empty">Empty</div>}
       {items.map((item) => {
         const selected = item.eid === selectedItemEid;
-        const interactive = item.equippable || item.readable || item.isContainer;
-        const label = item.isContainer ? `Open ${item.name}` : item.readable ? `Read ${item.name}` : item.equippable ? `Equip ${item.name}` : item.name;
+        const interactive = dropArmed || item.equippable || item.readable || item.isContainer;
+        const label = dropArmed ? `Drop ${item.name}` : item.isContainer ? `Open ${item.name}` : item.readable ? `Read ${item.name}` : item.equippable ? `Equip ${item.name}` : item.name;
         return (
           <button
             key={item.eid}
@@ -53,7 +57,8 @@ export function InventoryList() {
             title={label}
             style={selected ? SELECTED_STYLE : undefined}
             onClick={() => {
-              if (item.isContainer) containerStore.open(item.eid);
+              if (dropArmed) inventoryStore.dropTapped(item.eid);
+              else if (item.isContainer) containerStore.open(item.eid);
               else if (item.readable) noticeStore.open(item.eid);
               else if (item.equippable) inventoryStore.tapItem(item.eid);
             }}

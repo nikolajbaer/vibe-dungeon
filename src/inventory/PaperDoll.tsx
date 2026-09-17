@@ -31,12 +31,15 @@ const TARGETABLE_STYLE = {
  * pending selection. Tapping an *open* hand slot while an inventory item is
  * selected (`inventoryStore.selectedItemEid`, set by `InventoryList`'s
  * "both hands open" case) equips that item there specifically — tap-based,
- * not drag-and-drop, since this is a phone-first UI.
+ * not drag-and-drop, since this is a phone-first UI. Tapping an *occupied*
+ * slot while the drop zone is armed (`inventoryStore.dropArmed`,
+ * `DropZone.tsx`) drops that item instead of unequipping it.
  */
 export function PaperDoll() {
-  const { carried, selectedItemEid } = useObserved(() => ({
+  const { carried, selectedItemEid, dropArmed } = useObserved(() => ({
     carried: inventoryStore.carried,
     selectedItemEid: inventoryStore.selectedItemEid,
+    dropArmed: inventoryStore.dropArmed,
   }));
 
   return (
@@ -51,9 +54,12 @@ export function PaperDoll() {
             class="inv-slot"
             data-testid={`inv-slot-${slot}`}
             disabled={!item && !targetable}
-            title={item ? `Unequip ${item.name}` : label}
+            title={item ? (dropArmed ? `Drop ${item.name}` : `Unequip ${item.name}`) : label}
             style={targetable ? TARGETABLE_STYLE : undefined}
-            onClick={() => inventoryStore.tapSlot(slot)}
+            onClick={() => {
+              if (dropArmed && item) inventoryStore.dropTapped(item.eid);
+              else inventoryStore.tapSlot(slot);
+            }}
           >
             <span class="inv-slot-icon">{item?.icon ?? ""}</span>
             <span class="inv-slot-label">{label}</span>
