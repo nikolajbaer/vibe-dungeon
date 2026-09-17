@@ -60,6 +60,11 @@ const sideChamber: RoomContent = {
   items: [
     { id: "lantern", x: 16, z: -1.3 },
     { id: "key", x: 13.3, z: -1.3 },
+    // A backpack (inventory expansion, phase 2) -- itself a lootable
+    // Container (see assets/items/backpack.ts) -- sitting in open floor
+    // clear of the door's swing arc, the lantern/key, and the crate/barrel
+    // clutter to the east.
+    { id: "backpack", x: 14.5, z: -3.5 },
     {
       id: "scroll",
       x: 17.5,

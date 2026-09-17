@@ -20,10 +20,12 @@ import type { RoomContent } from "../placementTypes";
 // The table+chairs+barrel grouping sits in the north-east corner (x roughly
 // 3.7-5.7, z roughly 6.0-8.6), comfortably clear of that spine, clear of the
 // door's swing arc (which only reaches a couple meters from the doorway),
-// and clear of the north wall. The candelabra/banners fill in the room's
-// otherwise-bare west side, well clear of all of the above. The sword and
-// gem sit near the player's spawn point, on either side, off the NPC's
-// home/wander spot and its path down to the corridor door.
+// and clear of the north wall — the barrel there also starts with a gem
+// inside it (container storage), rather than leaving the gem sitting out on
+// the floor. The candelabra/banners fill in the room's otherwise-bare west
+// side, well clear of all of the above. The sword sits near the player's
+// spawn point, off the NPC's home/wander spot and its path down to the
+// corridor door.
 
 const tableX = 4.3;
 const tableZ = 7.2;
@@ -49,8 +51,10 @@ const roomA: RoomContent = {
     // Chair facing west into the table, seated on the table's east side.
     { id: "chair", x: tableX + 1.05, z: tableZ, rotation: -Math.PI / 2 },
     // Barrel tucked further into the corner, past the table (kept short of
-    // the north wall's interior face at z~8.85).
-    { id: "barrel", x: tableX + 1.0, z: tableZ + 1.2 },
+    // the north wall's interior face at z~8.85) — holds the gem (issue:
+    // container storage) rather than leaving it sitting out on the floor,
+    // so the very first room already shows off looting a container.
+    { id: "barrel", x: tableX + 1.0, z: tableZ + 1.2, contents: ["gem"] },
 
     // West-side touches: a candelabra roughly mid-room on the west wall,
     // plus a banner on each of the west and north walls — clear of the
@@ -64,10 +68,7 @@ const roomA: RoomContent = {
     // West wall banner, south of the candelabra.
     { id: "banner", x: -2.8, z: 2.2, rotation: Math.PI / 2 },
   ],
-  items: [
-    { id: "sword", x: 4, z: 7 },
-    { id: "gem", x: -1, z: 7 },
-  ],
+  items: [{ id: "sword", x: 4, z: 7 }],
   npcs: [{ id: "villager", x: 1.5, z: 3.5 }],
   // A single-page notice on the east wall (narration devices) — clear of
   // the NE furniture grouping (z 6.0-8.6) by mounting it further south, and

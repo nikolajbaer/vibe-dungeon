@@ -167,6 +167,16 @@ export function tryInteract(world: World, camera: THREE.Camera, screenPoint?: { 
     if (obj) interactables.push(obj);
   }
   for (const eid of query(world, [Container, Object3DRef])) {
+    // A container *item* (a backpack — see `ItemAssetDef.container`) is
+    // also `Item`, whose own loop above already adds it while uncarried
+    // and correctly drops it once picked up (a hidden, carried backpack
+    // still sitting at its old world position would otherwise stay
+    // raycastable forever); a world barrel isn't an `Item` at all and
+    // still needs adding here. Interacting with a container item in the
+    // world always means "pick it up," never "open it" (see
+    // `dispatchInteract`'s `Item` branch, checked first) — opening only
+    // ever happens from the inventory list (`InventoryList.tsx`).
+    if (hasComponent(world, eid, Item)) continue;
     const obj = Object3DRef[eid];
     if (obj) interactables.push(obj);
   }

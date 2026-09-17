@@ -1,6 +1,7 @@
 import { inventoryStore } from "./store";
 import { useObserved } from "./useObserved";
 import { noticeStore } from "../notice/store";
+import { containerStore } from "../container/store";
 
 /** Highlight for the item currently awaiting a paper-doll tap (issue #47)
  * — a warm border/background distinct from the default slot styling
@@ -22,8 +23,10 @@ const SELECTED_STYLE = {
  * (`noticeStore.open`) directly, called here rather than routed through
  * `inventoryStore` since reading never mutates ECS state the way equip/
  * unequip do — there's nothing for `game.ts` to bind an action for. Tapping
- * an item that's neither equippable nor readable (e.g. the gem) does
- * nothing but shows a visibly disabled affordance.
+ * a container item (a backpack — `CarriedItemView.isContainer`) opens the
+ * same container panel a barrel does (`containerStore.open`), same reasoning
+ * as the readable case. Tapping an item that's none of the above (e.g. the
+ * gem) does nothing but shows a visibly disabled affordance.
  */
 export function InventoryList() {
   const { items, selectedItemEid } = useObserved(() => ({
@@ -36,7 +39,8 @@ export function InventoryList() {
       {items.length === 0 && <div class="inv-list-empty">Empty</div>}
       {items.map((item) => {
         const selected = item.eid === selectedItemEid;
-        const interactive = item.equippable || item.readable;
+        const interactive = item.equippable || item.readable || item.isContainer;
+        const label = item.isContainer ? `Open ${item.name}` : item.readable ? `Read ${item.name}` : item.equippable ? `Equip ${item.name}` : item.name;
         return (
           <button
             key={item.eid}
@@ -46,10 +50,11 @@ export function InventoryList() {
             data-item-type={item.itemTypeId}
             data-selected={selected}
             disabled={!interactive}
-            title={item.readable ? `Read ${item.name}` : item.equippable ? `Equip ${item.name}` : item.name}
+            title={label}
             style={selected ? SELECTED_STYLE : undefined}
             onClick={() => {
-              if (item.readable) noticeStore.open(item.eid);
+              if (item.isContainer) containerStore.open(item.eid);
+              else if (item.readable) noticeStore.open(item.eid);
               else if (item.equippable) inventoryStore.tapItem(item.eid);
             }}
           >

@@ -1,5 +1,5 @@
 import { hasComponent, query, type World } from "bitecs";
-import { Carried, Item, PlayerControlled, Readable } from "../ecs/components";
+import { Carried, Item, PlayerControlled, Readable, Container } from "../ecs/components";
 import { ITEM_REGISTRY } from "../assets/itemRegistry";
 import { inventoryStore, type CarriedItemView } from "./store";
 
@@ -28,6 +28,7 @@ export function inventorySync(world: World): void {
       icon: itemType.icon,
       equippable: itemType.slot === "hand",
       readable: hasComponent(world, eid, Readable),
+      isContainer: hasComponent(world, eid, Container),
       slot: Carried.slot[eid],
     });
   }

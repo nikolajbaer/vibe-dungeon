@@ -27,6 +27,12 @@ export interface CarriedItemView {
    * than through `inventoryStore`, since reading never mutates ECS state
    * the way equip/unequip do. */
   readable: boolean;
+  /** True for a backpack (an `ItemAssetDef` with `container` — see
+   * `ecs/components.ts`'s `Container`). Tapping a container item in the
+   * inventory list opens the same container panel a barrel does
+   * (`container/store.ts`) instead of equipping or reading it — see
+   * `InventoryList.tsx`. */
+  isContainer: boolean;
   slot: CarriedSlot;
 }
 

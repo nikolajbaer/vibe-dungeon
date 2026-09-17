@@ -18,7 +18,12 @@ export function ContainerPanel() {
     contents: containerStore.contents,
     capacity: containerStore.capacity,
     isFull: containerStore.isFull,
-    playerItems: inventoryStore.inventoryItems,
+    // Excludes container items (a backpack) -- no nesting a container
+    // inside another container, which sidesteps both storing a backpack
+    // inside itself and any deeper cycle a chain of backpacks could form.
+    // `game.ts`'s `moveToContainer` action enforces this too; this filter
+    // just keeps the button from ever appearing in the first place.
+    playerItems: inventoryStore.inventoryItems.filter((item) => !item.isContainer),
   }));
 
   if (!isOpen) return null;
