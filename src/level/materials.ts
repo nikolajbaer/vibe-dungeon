@@ -21,6 +21,7 @@ let wall: THREE.Material | undefined;
 let floor: THREE.Material | undefined;
 let ceiling: THREE.Material | undefined;
 let door: THREE.Material | undefined;
+let lockedDoor: THREE.Material | undefined;
 
 export function wallMaterial(): THREE.Material {
   return (wall ??= stoneWallMaterial());
@@ -36,6 +37,18 @@ export function ceilingMaterial(): THREE.Material {
   return (ceiling ??= stoneCeilingMaterial());
 }
 
-export function doorMaterial(): THREE.Material {
+/** `locked` picks a visually distinct, darker/iron-bound-looking variant —
+ * a locked door reads as locked at a glance, not just via the "Door is
+ * locked." message once a player actually tries it. */
+export function doorMaterial(locked = false): THREE.Material {
+  if (locked) {
+    return (lockedDoor ??= (() => {
+      const mat = woodDoorMaterial() as THREE.MeshStandardMaterial;
+      mat.color = new THREE.Color(0x4a3a30);
+      mat.metalness = 0.3;
+      mat.roughness = 0.55;
+      return mat;
+    })());
+  }
   return (door ??= woodDoorMaterial());
 }

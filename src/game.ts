@@ -225,7 +225,18 @@ export function startGame(container: HTMLElement): void {
       cameraY: camera.position.y,
     }),
     getDoorStates: () =>
-      Array.from(query(world, [Door])).map((eid) => ({ state: Door.state[eid], progress: Door.progress[eid] })),
+      Array.from(query(world, [Door])).map((eid) => {
+        const obj = Object3DRef[eid];
+        return {
+          eid,
+          state: Door.state[eid],
+          progress: Door.progress[eid],
+          locked: Door.locked[eid] === 1,
+          requiredItemTypeId: Door.requiredItemTypeId[eid],
+          x: obj?.position.x,
+          z: obj?.position.z,
+        };
+      }),
     // Every simulated prop/item body, for confirming things actually settle
     // on the floor, stack, and move when shoved rather than hovering at
     // their authored spawn transform.
@@ -324,6 +335,17 @@ export function startGame(container: HTMLElement): void {
     // (see equipItem in ecs/systems/items.ts), so its child count doubles
     // as "how many viewmodels are currently shown".
     getViewmodelCount: () => camera.children.length,
+    // Every current viewmodel's camera-relative transform plus its
+    // renderOrder -- for automated (Playwright) testing of attack
+    // animations (e.g. confirming a weapon's rotation stays fixed through a
+    // stab rather than swinging) and of `makeRenderOnTop` (ecs/systems/
+    // items.ts) actually having applied.
+    getViewmodelTransforms: () =>
+      camera.children.map((child) => ({
+        position: { x: child.position.x, y: child.position.y, z: child.position.z },
+        rotation: { x: child.rotation.x, y: child.rotation.y, z: child.rotation.z },
+        renderOrder: child.renderOrder,
+      })),
     // Dialogue debug hooks, for automated (Playwright) testing of the
     // villager's dialogue tree without needing a real raycast + click.
     getDialogueState: () => ({

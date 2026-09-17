@@ -70,21 +70,33 @@ export const DoorState = {
   CLOSED: 0,
   OPENING: 1,
   OPEN: 2,
+  CLOSING: 3,
 } as const;
 
-/** A door leaf that swings open on a vertical hinge (see doors.ts). Both its
- * visual `Object3DRef` (a hinge `THREE.Group`, see tileBuilder.ts) and its
- * kinematic `PhysicsBody` sit *at the hinge* and rotate in lockstep as it
- * opens, so the collider genuinely swings out of the doorway. That's what
- * retired the old "treat a door as non-solid once it's 90% open" fudge,
- * which only existed because a fixed AABB at the leaf's closed position
- * could never move aside. A door has no `Position` of its own — nothing
- * needs one now that its collider lives on the hinge body. */
+/** A door leaf that swings open (or closed) on a vertical hinge (see
+ * doors.ts). Both its visual `Object3DRef` (a hinge `THREE.Group`, see
+ * tileBuilder.ts) and its kinematic `PhysicsBody` sit *at the hinge* and
+ * rotate in lockstep as it opens/closes, so the collider genuinely swings
+ * with it. That's what retired the old "treat a door as non-solid once it's
+ * 90% open" fudge, which only existed because a fixed AABB at the leaf's
+ * closed position could never move aside. A door has no `Position` of its
+ * own — nothing needs one now that its collider lives on the hinge body. */
 export const Door = {
   state: [] as number[], // one of DoorState
   progress: [] as number[], // 0 (closed) .. 1 (fully open)
   hingeSign: [] as number[], // +1 or -1: which way this leaf swings around its hinge
   pairId: [] as number[], // eid shared by both leaves of one doorway, so opening either opens both
+  /** 1 if this door requires `requiredItemTypeId` in the player's inventory
+   * to open (see doors.ts's `toggleDoor`); 0 for an ordinary door. Once
+   * unlocked with the right item it's set back to 0 permanently — there's no
+   * re-locking. Authored via `LockedDoorSpec` (placementTypes.ts), not
+   * per-leaf: both leaves of a pair always carry the same value. */
+  locked: [] as number[],
+  /** References an `ItemAssetDef.id` (a key) that unlocks this door —
+   * `undefined` for an ordinary (never-locked) door. Stays set even after
+   * `locked` flips to 0, purely as a record of what it *was* locked with;
+   * nothing reads it once unlocked. */
+  requiredItemTypeId: [] as (string | undefined)[],
 };
 
 /** Backing three.js Object3D for entities with a visual representation

@@ -122,6 +122,33 @@ export interface StairConnector {
   direction: 1 | -1;
 }
 
+/**
+ * Marks one already-authored "door" face (a `TileType.faces` segment set to
+ * `"door"` — see `tiles.ts`'s `FaceKind`) as locked, requiring an item in the
+ * player's inventory to open (see `doors.ts`'s `toggleDoor`). This doesn't
+ * place a door itself — the face map already does that — it just attaches
+ * lock data to the specific door boundary tileBuilder.ts would otherwise
+ * build as an ordinary unlocked one.
+ *
+ * `x`/`z` is the *world grid cell* whose face map declares this boundary
+ * (not necessarily the tile instance's origin — a multi-cell instance's door
+ * segment can sit on any one of its cells), and `side` is which of that
+ * cell's four world-space faces it's on. This is the same cell+side that
+ * `tileBuilder.ts`'s wall/door emission already iterates in (`WALL_DIRS`),
+ * so identifying a locked door this way needs no new addressing scheme —
+ * check the emitted door's own log output, or the level viewer, to find the
+ * right cell/side rather than hand-deriving it from a tile type's *local*
+ * face map through its instance's rotation, which is what the wall-emission
+ * code exists to do for you.
+ */
+export interface LockedDoorSpec {
+  x: number;
+  z: number;
+  side: "negX" | "posX" | "negZ" | "posZ";
+  /** References an `ItemAssetDef.id` (a key) that unlocks it. */
+  requiredItemTypeId: string;
+}
+
 /** Everything one room/area places in the level — the default export of
  * each file under `src/level/rooms/`. `src/level/rooms.ts` auto-discovers
  * every such file (via `import.meta.glob`) and flattens all of their
@@ -144,4 +171,7 @@ export interface RoomContent {
    * `stair_lower`/`stair_upper` tile instance pair in this same file's
    * `tiles` array. */
   stairs?: StairConnector[];
+  /** Doors (already authored as `"door"` faces in this file's `tiles`) that
+   * should be locked — see `LockedDoorSpec`'s doc comment. */
+  lockedDoors?: LockedDoorSpec[];
 }

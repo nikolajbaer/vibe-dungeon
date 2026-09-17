@@ -41,6 +41,15 @@ const roomB: RoomContent = {
       sectorId: "room-b",
     },
   ],
+  // Room-b's one door (world z=-9, x in [0,3] — see the header comment) sits
+  // on cell (0,-4)'s posZ face: the door is authored on this instance's
+  // local "south" face, which the 180-degree rotation maps to the world
+  // +z side, and cellZ=-4 is this footprint's max-z (north-most) row, the
+  // one bordering the corridor. Locked, so the bandit encounter isn't the
+  // very first thing behind room-a's door — its key sits in the
+  // side-chamber (see rooms/side-chamber.ts), rewarding the detour off the
+  // main path with something more than the lantern alone.
+  lockedDoors: [{ x: 0, z: -4, side: "posZ", requiredItemTypeId: "key" }],
   props: [
     { id: "banner", x: 0.4, z: shrineZ, params: shrineBanner },
     { id: "banner", x: 2.6, z: shrineZ, params: shrineBanner },

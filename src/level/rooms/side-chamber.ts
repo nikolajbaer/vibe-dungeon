@@ -46,7 +46,14 @@ const sideChamber: RoomContent = {
     { id: "crate", x: baseX - 0.05, y: CRATE_HEIGHT, z: baseZ + 0.05, rotation: -0.35 },
     { id: "barrel", x: baseX - 0.9, z: baseZ - 0.3 },
   ],
-  items: [{ id: "lantern", x: 16, z: -1.3 }],
+  // The lantern (issue #71's original reward) plus a key (issue: locked
+  // doors) that unlocks room-b's door — see rooms/room-b.ts's
+  // `lockedDoors`. Placed well clear of the lantern, the crates/barrel
+  // clutter, and all four interior wall faces.
+  items: [
+    { id: "lantern", x: 16, z: -1.3 },
+    { id: "key", x: 13.3, z: -1.3 },
+  ],
 };
 
 export default sideChamber;

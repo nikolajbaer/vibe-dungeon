@@ -37,6 +37,14 @@ class HudStore {
    * runs; the ECS write it triggers only takes effect starting next frame's
    * `setHealth` call). */
   playerDefeated = false;
+  /** A short-lived on-screen banner (e.g. "Door is locked."), or `undefined`
+   * when none is showing — drives `Message.tsx`. Plain text, not a queue: a
+   * second `showMessage` while one is already up just replaces it and resets
+   * its own timer, rather than stacking (there's nowhere on screen for more
+   * than one at once, and nothing today fires them fast enough for that to
+   * matter). */
+  message: string | undefined = undefined;
+  private messageToken = 0;
 
   private actions: HudActions = noopActions;
 
@@ -61,6 +69,18 @@ class HudStore {
   respawn(): void {
     this.actions.respawn();
     this.playerDefeated = false;
+  }
+
+  /** Shows `text` for `durationMs` (default 2.5s), then clears it — unless a
+   * newer `showMessage` call has already replaced it first, tracked via
+   * `messageToken` so an old call's delayed clear can't stomp a message that
+   * replaced it in the meantime. */
+  showMessage(text: string, durationMs = 2500): void {
+    this.message = text;
+    const token = ++this.messageToken;
+    setTimeout(() => {
+      if (this.messageToken === token) this.message = undefined;
+    }, durationMs);
   }
 }
 

@@ -1,5 +1,5 @@
 import type { TileInstance } from "./occupancy";
-import type { PropPlacement, ItemSpawn, NpcSpawn, RoomContent, LevelSpawn, StairConnector } from "./placementTypes";
+import type { PropPlacement, ItemSpawn, NpcSpawn, RoomContent, LevelSpawn, StairConnector, LockedDoorSpec } from "./placementTypes";
 
 // Auto-discovers every room-content module under ./rooms/ at build time
 // (same `import.meta.glob` pattern as src/assets/itemRegistry.ts) and
@@ -15,6 +15,7 @@ export const ALL_PROPS: PropPlacement[] = rooms.flatMap((r) => r.props ?? []);
 export const ALL_ITEM_SPAWNS: ItemSpawn[] = rooms.flatMap((r) => r.items ?? []);
 export const ALL_NPC_SPAWNS: NpcSpawn[] = rooms.flatMap((r) => r.npcs ?? []);
 export const ALL_STAIR_CONNECTORS: StairConnector[] = rooms.flatMap((r) => r.stairs ?? []);
+export const ALL_LOCKED_DOORS: LockedDoorSpec[] = rooms.flatMap((r) => r.lockedDoors ?? []);
 
 // Exactly one room should declare where the player starts — fail loudly at
 // build time (same philosophy as occupancy.ts's validateOccupancy) rather
