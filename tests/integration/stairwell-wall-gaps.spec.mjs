@@ -25,15 +25,18 @@ try {
   // fall out of the level anymore ---
   await page.evaluate((y) => window.__vibeDungeonDebug.setYaw(y), 0); // face a perpendicular direction
   let fellOut = false;
-  for (let i = 0; i < 40; i++) {
-    await page.keyboard.down("KeyW");
-    await page.waitForTimeout(100);
-    await page.keyboard.up("KeyW");
-    const p = await debug("getPlayerPosition");
-    if (p.y < -1) {
-      fellOut = true;
-      break;
+  await page.keyboard.down("KeyW"); // held continuously rather than tapped -- see walkTo's doc comment in harness.mjs
+  try {
+    for (let i = 0; i < 40; i++) {
+      await page.waitForTimeout(100);
+      const p = await debug("getPlayerPosition");
+      if (p.y < -1) {
+        fellOut = true;
+        break;
+      }
     }
+  } finally {
+    await page.keyboard.up("KeyW");
   }
   assert(!fellOut, "stepping sideways off the ramp mid-climb no longer falls out of the level (#87)");
 
@@ -43,11 +46,11 @@ try {
   // the band and try to walk further into it ---
   await debug("teleportPlayer", -8, 3.5, -4.5);
   await page.evaluate((y) => window.__vibeDungeonDebug.setYaw(y), Math.PI / 2); // face -x, into the shaft
-  for (let i = 0; i < 40; i++) {
-    await page.keyboard.down("KeyW");
-    await page.waitForTimeout(100);
-    await page.keyboard.up("KeyW");
-  }
+  // Pinned against the (hoped-for) wall the whole time -- no need to check
+  // mid-way, just hold and see where it ends up.
+  await page.keyboard.down("KeyW");
+  await page.waitForTimeout(4000);
+  await page.keyboard.up("KeyW");
   let gapPos = await debug("getPlayerPosition");
   assert(gapPos.x > -9.3, `entry-header gap band (y=3-6, x=-9) is blocked (stopped at x=${gapPos.x.toFixed(2)})`);
 

@@ -62,21 +62,35 @@ export async function launchGame({ viewport = { width: 1000, height: 700 }, touc
   return { browser, context, page, debug };
 }
 
-/** Walks the player toward (targetX, targetZ) by repeated forward taps, same as every spec already did by hand. Returns false if it never got within `stopDist`. */
+/**
+ * Walks the player toward (targetX, targetZ), checking position/re-aiming
+ * every `stepMs` rather than tapping forward and releasing each cycle.
+ * Holding the key down for the whole walk (one keydown, one keyup) matters
+ * for real wall-clock time, not just tidiness: releasing and re-pressing
+ * every check adds a dead gap each cycle where the player sits still while
+ * the next position/yaw round trip happens, and in this environment's
+ * software-rendered browser each such round trip has been measured costing
+ * as much real time as the intended movement window itself -- for a walk
+ * of any real distance that dead time dominates the total. Returns false
+ * if it never got within `stopDist`.
+ */
 export async function walkTo(page, debug, targetX, targetZ, stopDist, opts = {}) {
   const { maxSteps = 300, stepMs = 100, onStep } = opts;
-  for (let i = 0; i < maxSteps; i++) {
-    const pos = await debug("getPlayerPosition");
-    const dx = targetX - pos.x;
-    const dz = targetZ - pos.z;
-    if (Math.hypot(dx, dz) < stopDist) return true;
-    await page.evaluate((y) => window.__vibeDungeonDebug.setYaw(y), Math.atan2(-dx, -dz));
-    await page.keyboard.down("KeyW");
-    await page.waitForTimeout(stepMs);
+  await page.keyboard.down("KeyW");
+  try {
+    for (let i = 0; i < maxSteps; i++) {
+      const pos = await debug("getPlayerPosition");
+      const dx = targetX - pos.x;
+      const dz = targetZ - pos.z;
+      if (Math.hypot(dx, dz) < stopDist) return true;
+      await page.evaluate((y) => window.__vibeDungeonDebug.setYaw(y), Math.atan2(-dx, -dz));
+      if (onStep) await onStep(i, pos);
+      await page.waitForTimeout(stepMs);
+    }
+    return false;
+  } finally {
     await page.keyboard.up("KeyW");
-    if (onStep) await onStep(i, pos);
   }
-  return false;
 }
 
 /**
