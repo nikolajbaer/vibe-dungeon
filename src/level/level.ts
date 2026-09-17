@@ -5,7 +5,7 @@ import { buildOccupancyIndex, validateOccupancy, sectorAt, type OccupancyIndex }
 import { buildGeometryFromOccupancy } from "./tileBuilder";
 import { buildStaircases } from "./stairBuilder";
 import { spawnProps, spawnItems, spawnNpcs } from "./spawning";
-import { ALL_TILE_INSTANCES, ALL_PROPS, ALL_ITEM_SPAWNS, ALL_NPC_SPAWNS, ALL_STAIR_CONNECTORS, LEVEL_SPAWN } from "./rooms";
+import { ALL_TILE_INSTANCES, ALL_PROPS, ALL_ITEM_SPAWNS, ALL_NPC_SPAWNS, ALL_STAIR_CONNECTORS, ALL_LOCKED_DOORS, LEVEL_SPAWN } from "./rooms";
 import type { LevelSpawn } from "./placementTypes";
 import type { Physics } from "../physics/world";
 
@@ -32,7 +32,7 @@ export interface Level {
 export function buildLevel(world: World, physics: Physics, scene: THREE.Scene): Level {
   const occupancy: OccupancyIndex = buildOccupancyIndex(ALL_TILE_INSTANCES);
   validateOccupancy(occupancy);
-  buildGeometryFromOccupancy(world, physics, scene, occupancy);
+  buildGeometryFromOccupancy(world, physics, scene, occupancy, ALL_LOCKED_DOORS);
   buildStaircases(physics, scene, ALL_STAIR_CONNECTORS);
   spawnProps(world, physics, scene, ALL_PROPS);
   spawnItems(world, physics, scene, ALL_ITEM_SPAWNS);

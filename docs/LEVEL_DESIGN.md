@@ -302,6 +302,41 @@ piece of work.
    one new file, and even decorating an *existing* room is a data edit
    inside that room's own file, not a shared placement function.
 
+## How to lock a door
+
+A door is already authored as a `"door"` `FaceKind` on some tile type's face
+map (see above) — locking one doesn't add a door, it attaches lock data to
+one that's already there, via a `LockedDoorSpec` (`placementTypes.ts`) in
+the same room file that places the tiles, alongside `props`/`items`/etc.:
+
+```ts
+lockedDoors: [{ x: 0, z: -4, side: "posZ", requiredItemTypeId: "key" }],
+```
+
+`x`/`z`/`side` identify the door by the same (cell, direction) addressing
+`tileBuilder.ts`'s wall/door emission already walks internally — not the
+tile instance's `originCell`, and not the type's own *local* face label
+(which a rotated instance maps to a different world side; see "How rotation
+works" above). The straightforward way to find the right values for an
+existing door: it's whichever cell the `"door"` face is authored on, and
+whichever world-space side (`posX`/`negX`/`posZ`/`negZ`) faces the
+neighboring room/corridor it opens into — `rooms/room-b.ts`'s own
+`lockedDoors` entry works through this for a concrete, already-rotated
+example. Get it wrong and the spec silently matches nothing (the door
+builds as an ordinary unlocked one) rather than erroring, so confirm it
+worked by checking `getDoorStates()`'s `locked` field via the debug hook
+rather than assuming.
+
+`requiredItemTypeId` references an `ItemAssetDef.id` (`src/assets/items/`)
+— place a matching item somewhere reachable (an `ItemSpawn` in any room
+file's `items` array, same as any other pickup) for the door to actually be
+openable. A locked door renders in a visually distinct material
+(`doorMaterial(true)`, `level/materials.ts`) and, if a player tries it
+without the item, shows a "Door is locked." message
+(`hudStore.showMessage`, `doors.ts`'s `toggleDoor`) rather than opening.
+Once opened with the right item it unlocks permanently — there's no
+mechanic that re-locks it.
+
 ## Worked example: the first branch off the original line
 
 This is what shipped alongside this doc (see `src/level/rooms/corridor.ts`

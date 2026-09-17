@@ -74,6 +74,35 @@ export function findOpenHandSlot(world: World, ownerEid: number): HandSlot | und
 }
 
 /**
+ * Forces `mesh` (and everything under it) to render on top of the rest of
+ * the scene regardless of actual depth — `renderOrder` past every ordinary
+ * object's default of 0 draws it last, and `depthTest: false` means it wins
+ * even where world geometry the camera has clipped into would otherwise be
+ * nearer. A held viewmodel is meant to read as "closer than anything else
+ * possibly could be," so it should never clip into a wall the way a normal
+ * depth-sorted object would when the camera gets close enough to one.
+ *
+ * Clones each material rather than flipping the flags on the shared cached
+ * one (`sword.ts`'s `metalMaterial()`/`gripMaterial()`, reused by both the
+ * in-world pickup mesh and every viewmodel instance) — the in-world sword
+ * lying on a table still needs normal depth testing against the floor/walls
+ * around it.
+ */
+function makeRenderOnTop(mesh: THREE.Object3D): void {
+  mesh.traverse((obj) => {
+    if (!(obj instanceof THREE.Mesh)) return;
+    obj.renderOrder = 999;
+    const materials = Array.isArray(obj.material) ? obj.material : [obj.material];
+    obj.material = materials.map((m) => {
+      const clone = m.clone();
+      clone.depthTest = false;
+      clone.depthWrite = false;
+      return clone;
+    });
+  });
+}
+
+/**
  * Equips a carried, equippable item into a specific hand slot: moves
  * `Carried.slot` there and, if the item type has a viewmodel look, attaches
  * it directly to the camera (`camera.add`, not the scene) at a fixed
@@ -95,6 +124,7 @@ export function equipItem(world: World, camera: THREE.Camera, itemEid: number, s
     const { pos, rot } = VIEWMODEL_OFFSET[slot];
     mesh.position.set(...pos);
     mesh.rotation.set(...rot);
+    makeRenderOnTop(mesh);
     camera.add(mesh);
     Viewmodel[itemEid] = mesh;
   }
@@ -135,6 +165,8 @@ export function unequipItem(world: World, itemEid: number): void {
 }
 
 const SWING_DURATION = 0.22; // seconds, roundtrip
+const STAB_DISTANCE = 0.35; // meters, how far forward the blade thrusts at the peak
+const STAB_INWARD = 0.06; // meters, drifts toward screen-center at the peak
 
 interface SwingState {
   itemEid: number;
@@ -159,15 +191,19 @@ export function triggerViewmodelSwing(itemEid: number): void {
 }
 
 /**
- * Advances every active weapon swing (issue: sword swing animation),
- * animating each swinging item's `Viewmodel` mesh in an arc away from its
- * resting `VIEWMODEL_OFFSET` pose and back — a forward/downward chop that
- * eases in and out via `sin(t * PI)` (0 at both ends, 1 at the midpoint) so
- * it doesn't snap at either end. Reads `Carried.slot` each frame (rather
- * than caching the hand at swing-start) so re-equipping mid-swing doesn't
- * leave the mesh animating around a stale offset. Must run every frame
- * (called unconditionally from game.ts's loop, not just when attacking) so
- * a swing already in progress keeps advancing on frames with no new input.
+ * Advances every active weapon attack, animating each attacking item's
+ * `Viewmodel` mesh straight out toward the reticle and back — a forward
+ * stab/thrust, not a rotated chop: only `position` moves (further along
+ * -Z, camera-forward, plus a slight drift toward screen-center), `rotation`
+ * stays exactly at its resting `VIEWMODEL_OFFSET` pose throughout, which is
+ * what makes it read as the blade driving point-first rather than swinging
+ * through an arc. Eases in and out via `sin(t * PI)` (0 at both ends, 1 at
+ * the midpoint) so it doesn't snap at either end. Reads `Carried.slot` each
+ * frame (rather than caching the hand at swing-start) so re-equipping
+ * mid-swing doesn't leave the mesh animating around a stale offset. Must
+ * run every frame (called unconditionally from game.ts's loop, not just
+ * when attacking) so an attack already in progress keeps advancing on
+ * frames with no new input.
  */
 export function viewmodelSwingSystem(dt: number): void {
   for (let i = activeSwings.length - 1; i >= 0; i--) {
@@ -182,11 +218,13 @@ export function viewmodelSwingSystem(dt: number): void {
     swing.elapsed += dt;
     const t = Math.min(1, swing.elapsed / SWING_DURATION);
     const arc = Math.sin(t * Math.PI);
-    const side = slot === "hand-right" ? -1 : 1;
+    // hand-right sits at a positive resting X, hand-left at negative — this
+    // sign always points back toward screen-center regardless of which hand.
+    const inwardSign = slot === "hand-right" ? -1 : 1;
     const base = VIEWMODEL_OFFSET[slot];
 
-    mesh.position.set(base.pos[0], base.pos[1] - arc * 0.05, base.pos[2] - arc * 0.2);
-    mesh.rotation.set(base.rot[0] - arc * 0.9, base.rot[1], base.rot[2] + side * arc * 0.6);
+    mesh.position.set(base.pos[0] + inwardSign * STAB_INWARD * arc, base.pos[1], base.pos[2] - arc * STAB_DISTANCE);
+    mesh.rotation.set(...base.rot);
 
     if (t >= 1) activeSwings.splice(i, 1);
   }

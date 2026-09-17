@@ -6,6 +6,7 @@ import type { FaceKind } from "./tiles";
 import { TILE_TYPES } from "./tileTypeRegistry";
 import type { OccupancyIndex } from "./occupancy";
 import { parseWorldCellKey, worldCellKey } from "./occupancy";
+import type { LockedDoorSpec } from "./placementTypes";
 import { wallMaterial, floorMaterial, ceilingMaterial, doorMaterial } from "./materials";
 import { addKinematicBox, addStaticBox, type Physics } from "../physics/world";
 
@@ -200,6 +201,7 @@ function addDoorLeaf(
   hingeZ: number,
   hingeSign: number,
   floorBase: number,
+  requiredItemTypeId: string | undefined,
 ): number {
   const closedY = floorBase + DOOR_HEIGHT / 2;
   const offsetX = leafCx - hingeX;
@@ -209,7 +211,7 @@ function addDoorLeaf(
   group.position.set(hingeX, closedY, hingeZ);
   scene.add(group);
 
-  const mesh = new THREE.Mesh(new THREE.BoxGeometry(hx * 2, DOOR_HEIGHT, hz * 2), doorMaterial());
+  const mesh = new THREE.Mesh(new THREE.BoxGeometry(hx * 2, DOOR_HEIGHT, hz * 2), doorMaterial(!!requiredItemTypeId));
   mesh.position.set(offsetX, 0, offsetZ);
   group.add(mesh);
 
@@ -221,6 +223,8 @@ function addDoorLeaf(
   Door.progress[eid] = 0;
   Door.hingeSign[eid] = hingeSign;
   Door.pairId[eid] = eid; // fixed up by addDoorPair to the shared pair id
+  Door.locked[eid] = requiredItemTypeId ? 1 : 0;
+  Door.requiredItemTypeId[eid] = requiredItemTypeId;
   Object3DRef[eid] = group;
   PhysicsBody[eid] = addKinematicBox(physics, hingeX, closedY, hingeZ, offsetX, 0, offsetZ, hx, DOOR_HEIGHT / 2, hz);
   mesh.userData.eid = eid; // lets tryInteract's recursive raycast find the eid
@@ -246,7 +250,7 @@ function addDoorLeaf(
  * doorway (see `addWall`). It's a separate box from the door leaves and
  * never affects leaf swinging, which still only occupies `0..DOOR_HEIGHT`.
  */
-function addDoorPair(world: World, physics: Physics, scene: THREE.Scene, orientation: "x" | "z", planeCoord: number, rangeStart: number, rangeEnd: number, wallHeight: number, floorBase: number): void {
+function addDoorPair(world: World, physics: Physics, scene: THREE.Scene, orientation: "x" | "z", planeCoord: number, rangeStart: number, rangeEnd: number, wallHeight: number, floorBase: number, requiredItemTypeId: string | undefined): void {
   const leafHalf = (rangeEnd - rangeStart) / 4; // half-width of each ~1.5m leaf
 
   let eidA: number;
@@ -254,13 +258,13 @@ function addDoorPair(world: World, physics: Physics, scene: THREE.Scene, orienta
   if (orientation === "x") {
     // Wall plane at constant X (a +x/-x boundary); leaves split the Z span,
     // slab thickness runs along X.
-    eidA = addDoorLeaf(world, physics, scene, planeCoord, rangeStart + leafHalf, WALL_THICKNESS, leafHalf, planeCoord, rangeStart, 1, floorBase);
-    eidB = addDoorLeaf(world, physics, scene, planeCoord, rangeEnd - leafHalf, WALL_THICKNESS, leafHalf, planeCoord, rangeEnd, -1, floorBase);
+    eidA = addDoorLeaf(world, physics, scene, planeCoord, rangeStart + leafHalf, WALL_THICKNESS, leafHalf, planeCoord, rangeStart, 1, floorBase, requiredItemTypeId);
+    eidB = addDoorLeaf(world, physics, scene, planeCoord, rangeEnd - leafHalf, WALL_THICKNESS, leafHalf, planeCoord, rangeEnd, -1, floorBase, requiredItemTypeId);
   } else {
     // Wall plane at constant Z (a +z/-z boundary); leaves split the X span,
     // slab thickness runs along Z.
-    eidA = addDoorLeaf(world, physics, scene, rangeStart + leafHalf, planeCoord, leafHalf, WALL_THICKNESS, rangeStart, planeCoord, 1, floorBase);
-    eidB = addDoorLeaf(world, physics, scene, rangeEnd - leafHalf, planeCoord, leafHalf, WALL_THICKNESS, rangeEnd, planeCoord, -1, floorBase);
+    eidA = addDoorLeaf(world, physics, scene, rangeStart + leafHalf, planeCoord, leafHalf, WALL_THICKNESS, rangeStart, planeCoord, 1, floorBase, requiredItemTypeId);
+    eidB = addDoorLeaf(world, physics, scene, rangeEnd - leafHalf, planeCoord, leafHalf, WALL_THICKNESS, rangeEnd, planeCoord, -1, floorBase, requiredItemTypeId);
   }
   Door.pairId[eidA] = eidA;
   Door.pairId[eidB] = eidA;
@@ -442,12 +446,22 @@ function emitWalls(physics: Physics, scene: THREE.Scene, segments: Segment[]): v
   }
 }
 
+function lockedDoorKey(x: number, z: number, side: string): string {
+  return `${x},${z},${side}`;
+}
+
 /**
  * Builds wall/floor/ceiling/door geometry + ECS entities for every tile
  * placed in `index`. Call `validateOccupancy(index)` first — this function
- * assumes the occupancy index is already known-good.
+ * assumes the occupancy index is already known-good. `lockedDoors` (usually
+ * `ALL_LOCKED_DOORS`, see `rooms.ts`) marks which already-authored door
+ * faces should be built locked — see `LockedDoorSpec`'s doc comment.
  */
-export function buildGeometryFromOccupancy(world: World, physics: Physics, scene: THREE.Scene, index: OccupancyIndex): void {
+export function buildGeometryFromOccupancy(world: World, physics: Physics, scene: THREE.Scene, index: OccupancyIndex, lockedDoors: LockedDoorSpec[] = []): void {
+  const lockedDoorLookup = new Map<string, string>(); // cell+side key -> requiredItemTypeId
+  for (const spec of lockedDoors) {
+    lockedDoorLookup.set(lockedDoorKey(spec.x, spec.z, spec.side), spec.requiredItemTypeId);
+  }
   // --- Floors & ceilings: one slab per tile instance, spanning its full
   // footprint (matches how the old level.ts built one slab per room). ---
   const bounds = new Map<string, InstanceBounds>();
@@ -519,6 +533,8 @@ export function buildGeometryFromOccupancy(world: World, physics: Physics, scene
       // `wallHeight` would still leave the taller room's gap open above it.
       const doorHeaderHeight = neighbor ? Math.max(wallHeight, neighbor.heightCells * UNIT) : wallHeight;
 
+      const requiredItemTypeId = lockedDoorLookup.get(lockedDoorKey(x, z, dir.side));
+
       if (dir.dx !== 0) {
         // +x or -x boundary: a plane of constant X, spanning this cell's Z extent.
         const planeCell = dir.dx > 0 ? x + 1 : x;
@@ -534,7 +550,7 @@ export function buildGeometryFromOccupancy(world: World, physics: Physics, scene
             floor: cell.floor,
           });
         } else {
-          addDoorPair(world, physics, scene, "x", planeCell * UNIT, z * UNIT, (z + 1) * UNIT, doorHeaderHeight, floorBase);
+          addDoorPair(world, physics, scene, "x", planeCell * UNIT, z * UNIT, (z + 1) * UNIT, doorHeaderHeight, floorBase, requiredItemTypeId);
         }
       } else {
         // +z or -z boundary: a plane of constant Z, spanning this cell's X extent.
@@ -551,7 +567,7 @@ export function buildGeometryFromOccupancy(world: World, physics: Physics, scene
             floor: cell.floor,
           });
         } else {
-          addDoorPair(world, physics, scene, "z", planeCell * UNIT, x * UNIT, (x + 1) * UNIT, doorHeaderHeight, floorBase);
+          addDoorPair(world, physics, scene, "z", planeCell * UNIT, x * UNIT, (x + 1) * UNIT, doorHeaderHeight, floorBase, requiredItemTypeId);
         }
       }
     }
