@@ -237,10 +237,12 @@ export function startGame(container: HTMLElement): void {
     },
     moveToPlayer(itemEid) {
       if (!hasComponent(world, itemEid, Carried)) return;
-      // Same `MAX_CARRY_WEIGHT` cap a fresh world pickup enforces (see
-      // `wouldExceedCarryWeight` in items.ts) — otherwise the cap could be
-      // dodged by stashing items in a container first and unloading them
-      // all back out at once.
+      // Same cap a fresh world pickup enforces (see `wouldExceedCarryWeight`
+      // in items.ts) — otherwise it could be dodged by stashing items in a
+      // *world* container first and unloading them all back out at once.
+      // A no-op for an item already counted toward the player's total (one
+      // sitting in a backpack they're already carrying) -- moving it to the
+      // main inventory list doesn't change how much they're carrying.
       if (wouldExceedCarryWeight(world, player, itemEid)) {
         hudStore.showMessage("Too heavy to carry.");
         return;
@@ -391,8 +393,9 @@ export function startGame(container: HTMLElement): void {
         worldMeshVisible: Object3DRef[eid]?.visible ?? false,
       })),
     // Carry-weight debug hook (phase 3 of the inventory expansion), for
-    // automated (Playwright) testing of the `MAX_CARRY_WEIGHT` cap without
-    // reading it off the rendered readout (`WeightReadout.tsx`).
+    // automated (Playwright) testing of the carry-weight cap (`maxCarryWeight`
+    // in ecs/systems/items.ts) without reading it off the rendered readout
+    // (`WeightReadout.tsx`).
     getCarryWeight: () => ({ weight: inventoryStore.weight, maxWeight: inventoryStore.maxWeight }),
     // Only equipped-item viewmodel meshes are ever parented to the camera
     // (see equipItem in ecs/systems/items.ts), so its child count doubles

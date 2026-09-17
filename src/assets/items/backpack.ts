@@ -11,9 +11,10 @@ import type { ItemAssetDef } from "../types";
 // it (`InventoryList.tsx`, `CarriedItemView.isContainer`).
 //
 // `slot: null` for now rather than `"torso"` (the paper-doll already has an
-// unused Torso slot) — wearing it to raise a carry-weight cap is phase 3's
-// job, once a weight limit actually exists to raise; until then equipping
-// it would do nothing, so it stays a plain carried curio like any other.
+// unused Torso slot) — carrying it (in the inventory list, not equipped)
+// already raises the carry-weight cap via `carryCapacityBonus`
+// (ecs/systems/items.ts's `maxCarryWeight`), so there's nothing an equip
+// slot would add yet; "worn" could become its own separate bonus later.
 
 const BAG_WIDTH = 0.22;
 const BAG_HEIGHT = 0.28;
@@ -60,6 +61,9 @@ const backpack: ItemAssetDef = {
   slot: null,
   mass: 0.5,
   container: { capacity: 8 },
+  // Net +4.5kg of headroom after its own 0.5kg weight -- meaningfully worth
+  // carrying without trivializing the base 5kg cap.
+  carryCapacityBonus: 5,
   createWorldMesh: () => createBackpackMesh(),
 };
 

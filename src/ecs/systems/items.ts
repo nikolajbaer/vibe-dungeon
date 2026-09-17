@@ -1,6 +1,6 @@
 import * as THREE from "three";
 import { addComponent, hasComponent, query, type World } from "bitecs";
-import { Carried, Item, Object3DRef, PhysicsBody, Viewmodel, type CarriedSlot } from "../components";
+import { Carried, Container, Item, Object3DRef, PhysicsBody, Viewmodel, type CarriedSlot } from "../components";
 import { ITEM_REGISTRY } from "../../assets/itemRegistry";
 
 export type HandSlot = "hand-left" | "hand-right";
@@ -11,15 +11,16 @@ export function isHandSlot(slot: CarriedSlot): slot is HandSlot {
   return slot === "hand-left" || slot === "hand-right";
 }
 
-/** Max total weight (kg) `Carried` items count toward per owner — reusing
- * `ItemAssetDef.mass` (previously only a physics-feel knob for a world
- * item's falling/skittering body, see `boxShapeOf`/`addDynamicBox` in
- * level/spawning.ts) as each item's carry weight too, rather than adding a
- * second, separate "weight" field every asset would need to declare. Tuned
- * against the level's current item set (sword 3 + lantern 1.4 + everything
- * else adds up past 5) so grabbing a couple of the heavier pieces is fine,
- * but trying to carry literally everything at once isn't. */
-export const MAX_CARRY_WEIGHT = 5;
+/** Base max carry weight (kg), before any carried container's bonus (see
+ * `maxCarryWeight` below) — reusing `ItemAssetDef.mass` (previously only a
+ * physics-feel knob for a world item's falling/skittering body, see
+ * `boxShapeOf`/`addDynamicBox` in level/spawning.ts) as each item's carry
+ * weight too, rather than adding a second, separate "weight" field every
+ * asset would need to declare. Tuned against the level's current item set
+ * (sword 3 + lantern 1.4 + everything else adds up past 5) so grabbing a
+ * couple of the heavier pieces is fine, but trying to carry literally
+ * everything at once isn't — without a backpack, anyway. */
+export const BASE_CARRY_WEIGHT = 5;
 
 /** Weight (kg) for an item type that doesn't declare `mass` — intentionally
  * a separate constant from `DEFAULT_ITEM_MASS` in level/spawning.ts (that
@@ -33,29 +34,70 @@ function itemWeight(itemTypeId: string): number {
 }
 
 /** Total weight (kg) of every `Item` currently `Carried` by `ownerEid`, in
- * any slot — equipped or not, it's all still "on your person." Only ever
+ * any slot — equipped or not, it's all still "on your person." A carried
+ * item that's itself a `Container` (a backpack) has its own contents added
+ * in too, recursively: a container raises how much you can carry
+ * (`maxCarryWeight` below), it doesn't make what's inside it weightless —
+ * zipping a sword into a backpack doesn't make it lighter, it just makes
+ * room for it. Recursion never goes more than one level deep in practice
+ * since a container can't be nested inside another (`game.ts`'s
+ * `moveToContainer` guard), but this doesn't assume that itself. Only ever
  * called with the player as `ownerEid` today, but takes one generically
- * like `Carried.ownerEid` itself does, since a container (a barrel, a
- * backpack) also owns `Carried` items without being weight-limited itself.
- * Exported for `inventory/store.ts`'s running weight readout as well as the
- * enforcement below. */
+ * like `Carried.ownerEid` itself does. Exported for `inventory/store.ts`'s
+ * running weight readout as well as the enforcement below. */
 export function carriedWeight(world: World, ownerEid: number): number {
   let total = 0;
   for (const eid of query(world, [Item, Carried])) {
     if (Carried.ownerEid[eid] !== ownerEid) continue;
     total += itemWeight(Item.itemTypeId[eid]);
+    if (hasComponent(world, eid, Container)) total += carriedWeight(world, eid);
   }
   return total;
 }
 
+/** `BASE_CARRY_WEIGHT` plus every carried container's own
+ * `ItemAssetDef.carryCapacityBonus` (a backpack) — directly carried only
+ * (not recursive like `carriedWeight`): a backpack you're carrying raises
+ * your cap regardless of what's in it, but a bonus-granting item stashed
+ * *inside* a container doesn't compound (moot today anyway, since a
+ * container can't hold another container). */
+export function maxCarryWeight(world: World, ownerEid: number): number {
+  let total = BASE_CARRY_WEIGHT;
+  for (const eid of query(world, [Item, Carried, Container])) {
+    if (Carried.ownerEid[eid] !== ownerEid) continue;
+    total += ITEM_REGISTRY[Item.itemTypeId[eid]]?.carryCapacityBonus ?? 0;
+  }
+  return total;
+}
+
+/** True if `itemEid`'s weight is already counted toward `ownerEid`'s total
+ * (`carriedWeight`) — directly `Carried` by `ownerEid`, or nested inside a
+ * `Container` that's itself directly `Carried` by `ownerEid` (the only
+ * nesting depth possible). Lets `wouldExceedCarryWeight` tell "moving
+ * something already on your person from one pocket to another" (weight-
+ * neutral, e.g. taking an item out of a backpack you're carrying) apart
+ * from "actually picking up more weight" (taking the same item out of a
+ * barrel, or off the floor for the first time). */
+function isAlreadyCountedFor(world: World, ownerEid: number, itemEid: number): boolean {
+  if (!hasComponent(world, itemEid, Carried)) return false;
+  const directOwner = Carried.ownerEid[itemEid];
+  if (directOwner === ownerEid) return true;
+  return hasComponent(world, directOwner, Carried) && Carried.ownerEid[directOwner] === ownerEid;
+}
+
 /** True if giving `itemEid` to `ownerEid` — on top of whatever `ownerEid`
- * already carries — would push its total past `MAX_CARRY_WEIGHT`. Shared by
- * `pickUpItem` below (a fresh world pickup) and game.ts's container
- * `moveToPlayer` action (taking an item back out of a barrel/backpack), so
- * the cap can't be dodged by stashing items in a container first and
- * unloading them all back out at once. */
+ * already carries — would push its total past `maxCarryWeight`. No-ops to
+ * `false` if `itemEid`'s weight is already counted toward that total
+ * (`isAlreadyCountedFor`) — otherwise taking an item back out of a
+ * backpack you're already carrying would double-count it against its own
+ * total and could get refused even though nothing about your total weight
+ * actually changed. Shared by `pickUpItem` below (a fresh world pickup)
+ * and game.ts's container `moveToPlayer` action (taking an item back out
+ * of a barrel/backpack), so the cap can't be dodged by stashing items in a
+ * *world* container first and unloading them all back out at once. */
 export function wouldExceedCarryWeight(world: World, ownerEid: number, itemEid: number): boolean {
-  return carriedWeight(world, ownerEid) + itemWeight(Item.itemTypeId[itemEid]) > MAX_CARRY_WEIGHT;
+  if (isAlreadyCountedFor(world, ownerEid, itemEid)) return false;
+  return carriedWeight(world, ownerEid) + itemWeight(Item.itemTypeId[itemEid]) > maxCarryWeight(world, ownerEid);
 }
 
 /**
