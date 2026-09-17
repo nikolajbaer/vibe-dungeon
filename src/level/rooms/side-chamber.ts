@@ -48,17 +48,18 @@ const sideChamber: RoomContent = {
   ],
   // The lantern (issue #71's original reward) plus a key (issue: locked
   // doors) that unlocks room-b's door — see rooms/room-b.ts's
-  // `lockedDoors`. Placed well clear of the lantern, the crates/barrel
+  // `lockedDoors` — and a multi-page scroll resting near the crates
+  // (narration devices): a found journal fragment, tying the key/
+  // locked-door pair together with a little story. The scroll is a
+  // pickupable `Item` (see `assets/items/scroll.ts`), not a fixture, so its
+  // `title`/`pages` live here on the `ItemSpawn` rather than in `readables`
+  // (which is for in-place-only fixtures like `room-a.ts`'s poster). Placed
+  // just past the crate stack, still clear of it and of the east/south
+  // walls; lantern/key placed well clear of the lantern, the crates/barrel
   // clutter, and all four interior wall faces.
   items: [
     { id: "lantern", x: 16, z: -1.3 },
     { id: "key", x: 13.3, z: -1.3 },
-  ],
-  // A multi-page scroll resting near the crates (narration devices) — a
-  // found journal fragment, tying the key/locked-door pair together with a
-  // little story. Placed just past the crate stack, still clear of it and
-  // of the east/south walls.
-  readables: [
     {
       id: "scroll",
       x: 17.5,

@@ -120,6 +120,12 @@ function addPropCollider(physics: Physics, x: number, z: number, hx: number, hy:
  * Throws if a spawn references an unknown item id — the same "fail loudly at
  * load time" philosophy as `occupancy.ts`'s `validateOccupancy`, rather than
  * silently rendering nothing.
+ *
+ * A spawn with `pages` (a scroll) also gets a `Readable` component — see
+ * `ItemSpawn.pages`'s doc comment, and `InventoryList.tsx` for where
+ * tapping it in the inventory actually opens the reader, since a readable
+ * item is never read via the world interact raycast the way a poster is
+ * (that raycast picks it up instead — see `tryInteract`, `doors.ts`).
  */
 export function spawnItems(world: World, physics: Physics, scene: THREE.Scene, spawns: ItemSpawn[]): void {
   for (const spawn of spawns) {
@@ -134,6 +140,15 @@ export function spawnItems(world: World, physics: Physics, scene: THREE.Scene, s
     addComponent(world, eid, PhysicsBody);
     addComponent(world, eid, PhysicsRotation);
     Item.itemTypeId[eid] = def.id;
+
+    // A `pages`-bearing spawn (a scroll) is *also* Readable — see
+    // `ItemSpawn.pages`'s doc comment. Ordinary items simply never add
+    // this component at all.
+    if (spawn.pages) {
+      addComponent(world, eid, Readable);
+      Readable.title[eid] = spawn.title;
+      Readable.pages[eid] = spawn.pages;
+    }
 
     const mesh = def.createWorldMesh();
     // Measured before the group gets a transform, and off the item's real
@@ -298,19 +313,20 @@ export function spawnProps(world: World, physics: Physics, scene: THREE.Scene, p
   }
 }
 
-// Generous invisible raycast target radius for readables (narration
-// devices) — same idea and reason as `ITEM_PICKUP_RADIUS` above: a
-// poster's thin panel or a scroll's small body would otherwise be
-// frustrating to land a precise camera-forward raycast on.
+// Generous invisible raycast target radius for readable fixtures (narration
+// devices) — same idea and reason as `ITEM_PICKUP_RADIUS` above: a poster's
+// thin panel would otherwise be frustrating to land a precise
+// camera-forward raycast on.
 const READABLE_HITBOX_RADIUS = 0.4;
 
 /**
- * Places every readable (poster/scroll) placement as a `Readable` +
- * `Object3DRef` entity, built from its furniture asset's `createMesh()`
- * wrapped in a generous invisible hitbox (see `READABLE_HITBOX_RADIUS`).
- * No physics body of any kind — unlike a prop, a readable is never
- * something a character could walk into or that could move, so there's
- * nothing for Rapier to own here at all.
+ * Places every readable *fixture* placement (a poster — a readable item like
+ * a scroll instead goes through `spawnItems` below, see `ItemSpawn.pages`)
+ * as a `Readable` + `Object3DRef` entity, built from its furniture asset's
+ * `createMesh()` wrapped in a generous invisible hitbox (see
+ * `READABLE_HITBOX_RADIUS`). No physics body of any kind — unlike a prop, a
+ * readable fixture is never something a character could walk into or that
+ * could move, so there's nothing for Rapier to own here at all.
  *
  * Throws if a placement references an unknown furniture id or has no
  * pages — the same "fail loudly at load time" philosophy as

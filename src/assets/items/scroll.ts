@@ -1,12 +1,15 @@
 import * as THREE from "three";
-import type { FurnitureAssetDef } from "../types";
+import type { ItemAssetDef } from "../types";
 
-// A rolled scroll resting on a surface (a table, a pedestal, the floor) —
-// a paper cylinder with lighter end-caps and a tie ribbon, for a "read
-// this" prop distinct from poster.ts's wall-mounted look. See that
-// module's header comment for why the actual notice text isn't here.
-// Purely decorative, no footprint — small enough that nothing could
-// meaningfully collide with it.
+// A rolled scroll (narration devices, follow-up) — unlike a poster, a
+// scroll is naturally something you'd carry off and read later rather
+// than only in place, so this is a real pickupable `Item` (`slot: null`,
+// a curio like gem.ts — never equipped) rather than a fixture. Its actual
+// notice text lives on the `ItemSpawn` that places it (`title`/`pages` —
+// see `placementTypes.ts`), which is what makes `spawnItems` also attach
+// a `Readable` component; picking it up and tapping it in the inventory
+// list opens the paged reader (`InventoryList.tsx`, `notice/store.ts`),
+// same reading UI a poster's in-place interact opens.
 
 const SCROLL_LENGTH = 0.28;
 const SCROLL_RADIUS = 0.045;
@@ -33,7 +36,8 @@ function createScrollMesh(): THREE.Group {
   const group = new THREE.Group();
 
   // Lying on its side, spanning local X, resting on the floor/surface below
-  // (mesh origin sits on that surface — see Footprint's doc comment).
+  // (mesh origin sits on that surface, same convention as every other
+  // world item — it drops and settles like the sword/gem/lantern do).
   const body = new THREE.Mesh(new THREE.CylinderGeometry(SCROLL_RADIUS, SCROLL_RADIUS, SCROLL_LENGTH, 12), paperMaterial());
   body.rotation.z = Math.PI / 2;
   body.position.y = SCROLL_RADIUS;
@@ -54,10 +58,13 @@ function createScrollMesh(): THREE.Group {
   return group;
 }
 
-const scroll: FurnitureAssetDef = {
+const scroll: ItemAssetDef = {
   id: "scroll",
-  createMesh: () => createScrollMesh(),
-  // No footprint — see header comment.
+  name: "Scroll",
+  icon: "📜",
+  slot: null,
+  mass: 0.15,
+  createWorldMesh: () => createScrollMesh(),
 };
 
 export default scroll;

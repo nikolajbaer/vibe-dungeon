@@ -56,6 +56,19 @@ export interface ItemSpawn {
   y?: number;
   /** Which floor this item sits on — default 0. See `PropPlacement.floor`. */
   floor?: number;
+  /** Shown as the reader panel's heading once this item is read from the
+   * inventory (`InventoryList.tsx`) — omit for an item that isn't readable
+   * at all (every existing item spawn before the scroll). Only meaningful
+   * together with `pages`. */
+  title?: string;
+  /** Providing this is what makes an item spawn *also* `Readable`
+   * (`spawnItems`, `level/spawning.ts` adds the component alongside `Item`)
+   * — the same per-instance "this placement's own text, not a shared
+   * type's" data `ReadablePlacement.pages` carries, since two scrolls
+   * shouldn't have to say the same thing any more than two posters do (see
+   * `Readable`'s doc comment in `ecs/components.ts`). Omit entirely for a
+   * normal, non-readable item. */
+  pages?: string[];
 }
 
 /** One NPC placed in the world. Lives in a `RoomContent.npcs` array. */
@@ -150,19 +163,21 @@ export interface LockedDoorSpec {
 }
 
 /**
- * One narration fixture (a poster or scroll) placed in the level. Lives in
- * a `RoomContent.readables` array — same shape/placement-vs-registry split
- * as `PropPlacement`, except the actual content (`title`/`pages`) is
+ * One narration *fixture* (a wall-mounted poster) placed in the level —
+ * read in place, never carried, which is exactly why this is a separate
+ * placement shape from a readable *item*'s (a scroll's `title`/`pages` on
+ * `ItemSpawn` instead, since it can leave the spot it was found in). Lives
+ * in a `RoomContent.readables` array — same shape/placement-vs-registry
+ * split as `PropPlacement`, except the actual content (`title`/`pages`) is
  * per-instance data here rather than something a shared asset type could
  * own (see `Readable`'s doc comment in `ecs/components.ts`).
  */
 export interface ReadablePlacement {
   /** References a `FurnitureAssetDef.id` (src/assets/furniture/*.ts) for
-   * what this fixture *looks like* — typically `"poster"` (wall-mounted) or
-   * `"scroll"` (resting on a surface or the floor). Any furniture asset
-   * works here in principle, but one with a `footprint`/`dynamic` collider
-   * would be an unusual choice for something meant to just stand and be
-   * read. */
+   * what this fixture *looks like* — typically `"poster"`. Any furniture
+   * asset works here in principle, but one with a `footprint`/`dynamic`
+   * collider would be an unusual choice for something meant to just stand
+   * and be read. */
   id: string;
   x: number;
   z: number;
@@ -214,7 +229,8 @@ export interface RoomContent {
   /** Doors (already authored as `"door"` faces in this file's `tiles`) that
    * should be locked — see `LockedDoorSpec`'s doc comment. */
   lockedDoors?: LockedDoorSpec[];
-  /** Posters/scrolls this room/area places — see `ReadablePlacement`'s doc
-   * comment. */
+  /** Readable fixtures (posters) this room/area places — see
+   * `ReadablePlacement`'s doc comment. A readable *item* (a scroll) is
+   * placed in `items` instead, via `ItemSpawn.title`/`pages`. */
   readables?: ReadablePlacement[];
 }
