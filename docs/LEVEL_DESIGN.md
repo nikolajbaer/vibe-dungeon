@@ -416,6 +416,24 @@ unknown item id. There's no capacity check at authoring time — enough
 it start full, which is a level-design mistake to notice by playtesting,
 not something worth a load-time error over.
 
+## How to give an NPC loot (lootable corpses)
+
+Same `contents` field, same shape, on an `NpcSpawn` instead:
+
+```ts
+npcs: [{ id: "bandit", x: 1.5, z: -13, contents: ["gem"] }],
+```
+
+Once that NPC is killed, interacting with its corpse opens the same loot
+panel a container does (`ecs/systems/doors.ts`'s `tryInteract` — a dead NPC
+is interactable specifically for this, where a living one isn't), pre-seeded
+with whatever `contents` named. Unlike a container, looting is take-only —
+there's no "give" side, so items can't be left on a body. `spawnNpcs` throws
+at load time for an unknown item id, and — unlike a barrel — for any item
+that's itself a `container` (a backpack): NPCs never carry containers, and
+(also unlike the player) are never weight-limited by what they carry, so
+there's no cap to worry about on the `contents` list itself.
+
 ## Worked example: the first branch off the original line
 
 This is what shipped alongside this doc (see `src/level/rooms/corridor.ts`

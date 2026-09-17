@@ -76,6 +76,28 @@ try {
   assert(banditDead, "player killed the bandit with melee attacks");
   assert(bandit.deathSector !== undefined, `bandit got a DeathSector recorded (${bandit.deathSector})`);
 
+  // --- Lootable corpse (room-b.ts seeds the bandit with a gem) ---
+  let lootOpened = false;
+  for (let pitch = -0.2; pitch >= -1.0; pitch -= 0.1) {
+    await faceBandit();
+    await page.evaluate((p) => window.__vibeDungeonDebug.setPitch(p), pitch);
+    await page.keyboard.press("KeyE");
+    await page.waitForTimeout(150);
+    if ((await debug("getContainerState")).isOpen) {
+      lootOpened = true;
+      break;
+    }
+  }
+  assert(lootOpened, "interacting with the bandit's corpse opened the loot panel, not dialogue");
+  const lootState = await debug("getContainerState");
+  const lootedGem = lootState.contents.find((i) => i.itemTypeId === "gem");
+  assert(!!lootedGem, "corpse contains the pre-seeded gem");
+  await debug("takeItemFromContainer", lootedGem.eid);
+  await page.waitForTimeout(150);
+  const gemAfterLoot = (await debug("getItemStates")).find((i) => i.eid === lootedGem.eid);
+  assert(gemAfterLoot.carried === true, "gem taken from the corpse into the player's inventory");
+  await debug("closeContainer");
+
   // --- Player death + respawn ---
   health = await debug("getHealth");
   const presses = Math.ceil(health.current / 10) + 2;

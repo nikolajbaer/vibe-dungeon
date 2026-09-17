@@ -96,6 +96,15 @@ export interface NpcSpawn {
    * radius could sense through the floor. Not fixed here; just don't make a
    * new placement collide with it. */
   floor?: number;
+  /** Item type ids (`ItemAssetDef.id`) this NPC starts out carrying — its
+   * corpse's loot once killed (see `dispatchInteract` in ecs/systems/
+   * doors.ts). Same shape as `PropPlacement.contents` (a barrel's starting
+   * loot), and validated the same "fail loudly at load time" way —
+   * `spawnNpcs` (level/spawning.ts) throws for an unknown item id.
+   * Additionally, an item that's itself a `container` (a backpack) is
+   * rejected here specifically: NPCs never carry containers, and (unlike
+   * the player) are never weight-limited by what they carry either. */
+  contents?: string[];
 }
 
 /** Where the player starts: position plus initial facing (radians, same

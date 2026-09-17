@@ -261,7 +261,10 @@ const HUMANOID_HEIGHT = 1.75;
  * Each also gets a kinematic capsule body driven by the same character
  * controller the player uses (`ecs/systems/character.ts`), so an NPC walks
  * into walls, stands on floors and falls under gravity exactly like the
- * player does. Throws if a spawn references an unknown archetype id.
+ * player does. Also seeds any starting loot (`NpcSpawn.contents`) as
+ * `Carried` items owned by the NPC, found on its corpse once killed. Throws
+ * if a spawn references an unknown archetype id, an unknown item id in
+ * `contents`, or a `contents` entry that's itself a container.
  */
 export function spawnNpcs(world: World, physics: Physics, scene: THREE.Scene, spawns: NpcSpawn[]): void {
   for (const spawn of spawns) {
@@ -308,6 +311,22 @@ export function spawnNpcs(world: World, physics: Physics, scene: THREE.Scene, sp
     const mesh = archetype.createMesh(eid);
     scene.add(mesh);
     Object3DRef[eid] = mesh;
+
+    // Starting loot (`NpcSpawn.contents`) -- same shape as a barrel's
+    // pre-seeded contents (spawnProps above), just owned by the NPC instead
+    // of a container prop. No Position/Object3DRef/physics body: like any
+    // carried item, it's never meant to render until it's actually taken.
+    for (const itemTypeId of spawn.contents ?? []) {
+      const itemDef = ITEM_REGISTRY[itemTypeId];
+      if (!itemDef) throw new Error(`spawnNpcs: "${spawn.id}" contents reference unknown item id "${itemTypeId}"`);
+      if (itemDef.container) throw new Error(`spawnNpcs: "${spawn.id}" contents include "${itemTypeId}", a container -- NPCs can't carry containers`);
+      const itemEid = addEntity(world);
+      addComponent(world, itemEid, Item);
+      addComponent(world, itemEid, Carried);
+      Item.itemTypeId[itemEid] = itemTypeId;
+      Carried.ownerEid[itemEid] = eid;
+      Carried.slot[itemEid] = "inventory";
+    }
   }
 }
 

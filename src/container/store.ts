@@ -49,6 +49,18 @@ class ContainerStore {
    * `inventory/sync.ts`. */
   contents: ContainerItemView[] = [];
 
+  /** Heading shown in the panel — "Storage" for a barrel/backpack, or an
+   * NPC's name for a corpse's loot. Set by `containerSync` (which has the
+   * `world` access needed to tell them apart), defaulting to "Storage"
+   * until the first sync after `open`. */
+  title = "Storage";
+
+  /** True while looting a corpse (`ecs/systems/doors.ts`'s `tryInteract`
+   * opens any dead NPC's `Carried` items the same way it opens a barrel) —
+   * disables the "give" side of the panel (`ContainerPanel.tsx`), since
+   * looting is take-only. Set by `containerSync`. */
+  isLootOnly = false;
+
   private actions: ContainerActions = noopActions;
 
   constructor() {
@@ -63,8 +75,14 @@ class ContainerStore {
     return this.activeEid !== null;
   }
 
+  /** `Infinity` for anything without a real `Container` component — a
+   * corpse being looted, notably, which was never itself flagged as a
+   * `Container` (only its *contents* are `Carried` by it) since there's no
+   * sensible cap on how much loot a dead NPC can yield. */
   get capacity(): number {
-    return this.activeEid === null ? 0 : Container.capacity[this.activeEid];
+    if (this.activeEid === null) return 0;
+    const cap = Container.capacity[this.activeEid];
+    return cap === undefined ? Infinity : cap;
   }
 
   get isFull(): boolean {
@@ -72,16 +90,27 @@ class ContainerStore {
   }
 
   /** Opens `eid`'s container — called from the interact dispatch
-   * (`doors.ts`'s `tryInteract`) when a `Container` entity is hit. Callers
-   * are expected to have already checked `hasComponent(world, eid,
-   * Container)`, same as every other dispatch branch in `tryInteract`. */
+   * (`doors.ts`'s `tryInteract`) when a `Container` entity, or a dead NPC,
+   * is hit. Callers are expected to have already checked
+   * `hasComponent(world, eid, Container)` or `Dead`, same as every other
+   * dispatch branch in `tryInteract`. `title`/`isLootOnly` reset to their
+   * defaults here and get their real values from the next `containerSync`
+   * tick, which alone has the `world` access needed to tell a corpse from
+   * an ordinary container. */
   open(eid: number): void {
     this.activeEid = eid;
+    this.title = "Storage";
+    this.isLootOnly = false;
   }
 
   close(): void {
     this.activeEid = null;
     this.contents = [];
+  }
+
+  setMeta(title: string, isLootOnly: boolean): void {
+    this.title = title;
+    this.isLootOnly = isLootOnly;
   }
 
   setContents(items: ContainerItemView[]): void {
