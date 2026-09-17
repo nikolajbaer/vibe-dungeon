@@ -92,16 +92,18 @@ export interface ItemAssetDef {
    * same container panel a barrel does (`container/store.ts`), instead of
    * trying to equip it — see `CarriedItemView.isContainer`. */
   container?: ContainerSpec;
-  /** Extra carry-weight capacity (kg) this item grants while carried — only
-   * meaningful alongside `container` (a backpack raises what you can carry
-   * in exchange for its own weight, per `maxCarryWeight` in
-   * ecs/systems/items.ts), but declared as its own field rather than folded
-   * into `ContainerSpec` since it's specific to an *item* container, not a
-   * furniture one (a barrel doesn't travel with you, so it never raises
-   * your own cap). Items stored inside the container still count fully
-   * toward the player's total — this only ever raises the ceiling, never
-   * makes anything weightless. */
-  carryCapacityBonus?: number;
+  /** Max total weight (kg) this container's own contents can add up to —
+   * only meaningful alongside `container` (a backpack). A *separate* budget
+   * from the player's own `BASE_CARRY_WEIGHT` (ecs/systems/items.ts): the
+   * backpack doesn't raise what the player can carry directly, it gives
+   * whatever's zipped inside *it specifically* its own extra room, which
+   * stops helping the moment something is taken back out into the main
+   * inventory list. Declared as its own field rather than folded into
+   * `ContainerSpec` since it's specific to an *item* container, not a
+   * furniture one (a barrel doesn't travel with you, and isn't itself
+   * weight-limited either way). Omit for a container with no weight cap of
+   * its own (just `ContainerSpec.capacity`'s item-count limit). */
+  containerWeightCapacity?: number;
 }
 
 /** Half-extents (meters) of the box a furniture asset blocks movement with.

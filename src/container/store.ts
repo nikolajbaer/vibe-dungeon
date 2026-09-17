@@ -61,6 +61,17 @@ class ContainerStore {
    * looting is take-only. Set by `containerSync`. */
   isLootOnly = false;
 
+  /** Total weight (kg) of `contents` right now, and the separate cap it's
+   * checked against for a weight-capped container (a backpack's own
+   * `ItemAssetDef.containerWeightCapacity`) — `Infinity` for anything
+   * without one (a barrel, a corpse), which `ContainerPanel.tsx` reads as
+   * "don't show a weight readout at all." This budget is entirely separate
+   * from the player's own `inventoryStore.weight`/`BASE_CARRY_WEIGHT` (see
+   * `carriedWeight`'s doc comment in ecs/systems/items.ts) — both pushed in
+   * by `containerSync` each frame. */
+  weight = 0;
+  weightCapacity = Infinity;
+
   private actions: ContainerActions = noopActions;
 
   constructor() {
@@ -101,6 +112,8 @@ class ContainerStore {
     this.activeEid = eid;
     this.title = "Storage";
     this.isLootOnly = false;
+    this.weight = 0;
+    this.weightCapacity = Infinity;
   }
 
   close(): void {
@@ -115,6 +128,15 @@ class ContainerStore {
 
   setContents(items: ContainerItemView[]): void {
     this.contents = items;
+  }
+
+  setWeight(weight: number, weightCapacity: number): void {
+    this.weight = weight;
+    this.weightCapacity = weightCapacity;
+  }
+
+  get isOverWeight(): boolean {
+    return this.weight >= this.weightCapacity;
   }
 
   /** Called when an inventory-list item is tapped while a container panel

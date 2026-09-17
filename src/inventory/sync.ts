@@ -1,18 +1,18 @@
 import { hasComponent, query, type World } from "bitecs";
 import { Carried, Item, PlayerControlled, Readable, Container } from "../ecs/components";
 import { ITEM_REGISTRY } from "../assets/itemRegistry";
-import { carriedWeight, maxCarryWeight } from "../ecs/systems/items";
+import { BASE_CARRY_WEIGHT, carriedWeight } from "../ecs/systems/items";
 import { inventoryStore, type CarriedItemView } from "./store";
 
 /**
  * Bridges ECS state to the inventory MobX store (mirrors
  * `ecs/systems/hudSync.ts`): every frame, reads every `Item` the player
  * `Carried`s into a plain view-model array and writes it into
- * `inventoryStore`, along with the running total weight (`carriedWeight`)
- * against its cap (`maxCarryWeight` — not a flat constant, since a carried
- * backpack raises it) for the panel's readout — both from
- * ecs/systems/items.ts; the enforcement itself lives there and in game.ts,
- * not here. Run from
+ * `inventoryStore`, along with the running total weight (`carriedWeight`,
+ * *not* recursive into a carried backpack's own contents — those are a
+ * separate budget, see that function's doc comment) against the flat
+ * `BASE_CARRY_WEIGHT` cap for the panel's readout — the enforcement itself
+ * lives in ecs/systems/items.ts and game.ts, not here. Run from
  * game.ts's pipeline alongside `hudSync`. bitecs has no built-in reactivity
  * and the carried set is tiny, so replacing the whole array unconditionally
  * each frame (rather than diffing it) is simple and cheap — mobx only
@@ -39,5 +39,5 @@ export function inventorySync(world: World): void {
     });
   }
   inventoryStore.setCarried(carried);
-  inventoryStore.setWeight(carriedWeight(world, playerEid), maxCarryWeight(world, playerEid));
+  inventoryStore.setWeight(carriedWeight(world, playerEid), BASE_CARRY_WEIGHT);
 }
