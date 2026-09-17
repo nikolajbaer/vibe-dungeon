@@ -399,22 +399,29 @@ A furniture asset opts into being a lootable container via
 `FurnitureAssetDef.container` (`src/assets/furniture/barrel.ts` is the only
 one so far) — nothing to do per-placement for that part, every barrel is
 already interactable. To give a *specific* placed barrel starting loot,
-add `contents` (an array of `ItemAssetDef` ids) to its `PropPlacement` in a
-room file, alongside `x`/`z`/etc:
+add `contents` (an array of `ContentsEntry` — either a bare `ItemAssetDef`
+id, or `{ id, count }` for a stackable item, see below) to its
+`PropPlacement` in a room file, alongside `x`/`z`/etc:
 
 ```ts
-props: [{ id: "barrel", x: 5.3, z: 8.4, contents: ["gem"] }],
+props: [
+  { id: "barrel", x: 5.3, z: 8.4, contents: ["gem"] },
+  // A stackable item (see "How to add a stackable/commodity item type"
+  // below) needs the object form to say how many units the pile is worth.
+  { id: "barrel", x: -2.3, z: -13.2, contents: [{ id: "coin", count: 15 }] },
+],
 ```
 
 Each entry spawns as a normal item, already carried by that barrel — the
 player finds it already inside on first opening the barrel, exactly as if
 someone had stored it there. `spawnProps` throws at load time if `contents`
 is set on a placement whose furniture asset isn't a `container` (same "fail
-loudly" philosophy as an unknown `id`), and if any entry references an
-unknown item id. There's no capacity check at authoring time — enough
-`contents` entries to exceed the container's own `capacity` would just make
-it start full, which is a level-design mistake to notice by playtesting,
-not something worth a load-time error over.
+loudly" philosophy as an unknown `id`), if any entry references an unknown
+item id, or if a `count` is given for an item that isn't `stackable`. There's
+no capacity check at authoring time — enough `contents` entries to exceed
+the container's own `capacity` would just make it start full, which is a
+level-design mistake to notice by playtesting, not something worth a
+load-time error over.
 
 ## How to give an NPC loot (lootable corpses)
 
@@ -433,6 +440,49 @@ at load time for an unknown item id, and — unlike a barrel — for any item
 that's itself a `container` (a backpack): NPCs never carry containers, and
 (also unlike the player) are never weight-limited by what they carry, so
 there's no cap to worry about on the `contents` list itself.
+
+## How to add a stackable/commodity item type
+
+Some items (coins, arrows, sling rocks — anything you pick up "a pile of" at
+a time) shouldn't take a new inventory slot per pickup. Mark the
+`ItemAssetDef` `stackable: true` (`src/assets/items/coin.ts`):
+
+```ts
+const coin: ItemAssetDef = {
+  id: "coin",
+  name: "Coins",
+  icon: "🪙",
+  slot: null,
+  mass: 0.01, // per-unit -- a pile's total weight scales with its count
+  stackable: true,
+  createWorldMesh: () => createCoinPileMesh(),
+};
+```
+
+`mass` stays per-unit; stacking is purely an inventory-slot convenience,
+never a weight loophole — a pile of 20 coins weighs 20x one coin, checked
+against the carrier's weight cap exactly like any other item (see
+`itemCount`/`stackWeightOf` in `ecs/systems/items.ts`).
+
+A world `ItemSpawn` for a stackable item can say how many units that
+particular pile is worth via `count` (defaulting to 1 if omitted):
+
+```ts
+items: [{ id: "coin", x: 3.3, z: 6.3, count: 6 }],
+```
+
+Picking one up merges it into whatever stack of the same `itemTypeId` the
+picker already holds, if any (`giveItem` in `ecs/systems/items.ts`) — no new
+slot, just a bigger count on the existing one. The same merge-or-create
+logic applies to `contents` entries (see above) and to moving a stack
+between the player and an open container. Moving *part* of a stack (rather
+than the whole pile) is a UI-level choice: tapping a stack of more than 1 in
+the container panel opens a quantity picker (`containerStore.pendingTransfer`,
+`ContainerPanel.tsx`) instead of moving it immediately; a stack of exactly 1,
+or a non-stackable item, still moves on the first tap as before. This works
+identically for a barrel and for a backpack — the container panel doesn't
+distinguish between them, so there was no extra cost to supporting a
+partial transfer into either one.
 
 ## Worked example: the first branch off the original line
 

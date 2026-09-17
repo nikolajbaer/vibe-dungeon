@@ -1,6 +1,6 @@
 import * as THREE from "three";
-import { addComponent, hasComponent, query, type World } from "bitecs";
-import { Carried, Item, Object3DRef, PhysicsBody, Viewmodel, type CarriedSlot } from "../components";
+import { addComponent, addEntity, hasComponent, query, type World } from "bitecs";
+import { Carried, Item, Object3DRef, PhysicsBody, Stackable, Viewmodel, type CarriedSlot } from "../components";
 import { ITEM_REGISTRY } from "../../assets/itemRegistry";
 
 export type HandSlot = "hand-left" | "hand-right";
@@ -34,16 +34,36 @@ export const BASE_CARRY_WEIGHT = 5;
  * subsystem never silently retunes the other. */
 const DEFAULT_ITEM_WEIGHT = 1;
 
-function itemWeight(itemTypeId: string): number {
+/** *Per-unit* weight (kg) for an item type — for a `stackable` item (coins)
+ * this is one coin's weight, not a whole pile's; multiply by however many
+ * units are actually in play (`itemCount`/`stackWeightOf` below). */
+function unitWeight(itemTypeId: string): number {
   return ITEM_REGISTRY[itemTypeId]?.mass ?? DEFAULT_ITEM_WEIGHT;
+}
+
+/** How many units `eid` currently represents — `Stackable.count[eid]` for a
+ * commodity item (coins), or 1 for anything else (including a `Stackable`
+ * entity that's been fully merged away and is sitting inert at 0, which
+ * this correctly reports as 0, not 1). */
+export function itemCount(world: World, eid: number): number {
+  return hasComponent(world, eid, Stackable) ? Stackable.count[eid] : 1;
+}
+
+/** Weight (kg) of `eid`'s *entire current* stack — `unitWeight * itemCount`.
+ * A pile of 50 coins really does weigh 50x one coin; stacking is purely an
+ * inventory-slot convenience, never a weight loophole. */
+function stackWeightOf(world: World, eid: number): number {
+  return unitWeight(Item.itemTypeId[eid]) * itemCount(world, eid);
 }
 
 /** Total weight (kg) of every `Item` directly `Carried` by `ownerEid` — not
  * recursive: a container's own contents are a separate pool with their own
  * cap (`wouldExceedContainerWeight`), not part of whoever carries the
- * container's own total. Used both for the player (their main inventory +
- * hand slots, in any slot — equipped or not, it's all still "on your
- * person") and, with a container's own eid as `ownerEid`, for that
+ * container's own total. A 0-count `Stackable` entity (one merged into
+ * another stack — see `giveItem` below) contributes nothing, same as it
+ * being skipped everywhere else. Used both for the player (their main
+ * inventory + hand slots, in any slot — equipped or not, it's all still "on
+ * your person") and, with a container's own eid as `ownerEid`, for that
  * container's contents weight. Exported for `inventory/store.ts`'s running
  * weight readout and `container/sync.ts`'s (for a weight-capped container
  * like a backpack) as well as the enforcement below. */
@@ -51,7 +71,7 @@ export function carriedWeight(world: World, ownerEid: number): number {
   let total = 0;
   for (const eid of query(world, [Item, Carried])) {
     if (Carried.ownerEid[eid] !== ownerEid) continue;
-    total += itemWeight(Item.itemTypeId[eid]);
+    total += stackWeightOf(world, eid);
   }
   return total;
 }
@@ -65,40 +85,133 @@ export function containerWeightCapacityOf(itemTypeId: string): number {
   return ITEM_REGISTRY[itemTypeId]?.containerWeightCapacity ?? Infinity;
 }
 
-/** True if giving `itemEid` to `ownerEid`'s *main* carried weight — on top
- * of whatever they already directly carry — would push it past
- * `BASE_CARRY_WEIGHT`. Always a real addition to that total now, even for
- * an item coming out of a backpack the player is already carrying: a
- * backpack's contents are their own separate pool (`carriedWeight` isn't
- * recursive), so pulling something out of it and into the main inventory
- * list genuinely adds to the main total, exactly like pulling it out of a
- * barrel or off the floor for the first time would. Shared by `pickUpItem`
- * below (a fresh world pickup) and game.ts's container `moveToPlayer`
- * action (taking an item back out of a barrel/backpack). */
-export function wouldExceedCarryWeight(world: World, ownerEid: number, itemEid: number): boolean {
-  return carriedWeight(world, ownerEid) + itemWeight(Item.itemTypeId[itemEid]) > BASE_CARRY_WEIGHT;
+/** True if giving `quantity` units of `itemEid` to `ownerEid`'s *main*
+ * carried weight — on top of whatever they already directly carry — would
+ * push it past `BASE_CARRY_WEIGHT`. `quantity` defaults to `itemEid`'s
+ * entire current count (1 for a non-stackable item), i.e. "moving the whole
+ * thing"; pass an explicit smaller amount to check a partial stack transfer
+ * (`giveItem`'s own `quantity` parameter) before committing to it. Always a
+ * real addition to that total now, even for an item coming out of a
+ * backpack the player is already carrying: a backpack's contents are their
+ * own separate pool (`carriedWeight` isn't recursive), so pulling something
+ * out of it and into the main inventory list genuinely adds to the main
+ * total, exactly like pulling it out of a barrel or off the floor for the
+ * first time would. Shared by `pickUpItem` below (a fresh world pickup) and
+ * game.ts's container `moveToPlayer` action (taking an item, or part of a
+ * stack, back out of a barrel/backpack). */
+export function wouldExceedCarryWeight(world: World, ownerEid: number, itemEid: number, quantity?: number): boolean {
+  const addedWeight = unitWeight(Item.itemTypeId[itemEid]) * (quantity ?? itemCount(world, itemEid));
+  return carriedWeight(world, ownerEid) + addedWeight > BASE_CARRY_WEIGHT;
 }
 
-/** True if giving `itemEid` to `containerEid` (a backpack) — on top of
- * whatever it already holds — would push its own contents past its
- * `ItemAssetDef.containerWeightCapacity`. Always `false` for anything
- * without one (a barrel), so storing into a barrel stays unconditionally
- * free, same as before this cap existed. Used by game.ts's container
- * `moveToContainer` action. */
-export function wouldExceedContainerWeight(world: World, containerEid: number, itemEid: number): boolean {
+/** True if giving `quantity` units of `itemEid` to `containerEid` (a
+ * backpack) — on top of whatever it already holds — would push its own
+ * contents past its `ItemAssetDef.containerWeightCapacity`. `quantity`
+ * defaults the same way `wouldExceedCarryWeight` does. Always `false` for
+ * anything without a cap of its own (a barrel), so storing into a barrel
+ * stays unconditionally free, same as before this cap existed. Used by
+ * game.ts's container `moveToContainer` action. */
+export function wouldExceedContainerWeight(world: World, containerEid: number, itemEid: number, quantity?: number): boolean {
   const cap = containerWeightCapacityOf(Item.itemTypeId[containerEid]);
   if (!Number.isFinite(cap)) return false;
-  return carriedWeight(world, containerEid) + itemWeight(Item.itemTypeId[itemEid]) > cap;
+  const addedWeight = unitWeight(Item.itemTypeId[itemEid]) * (quantity ?? itemCount(world, itemEid));
+  return carriedWeight(world, containerEid) + addedWeight > cap;
+}
+
+/** Finds the `Stackable` entity `ownerEid` already carries of `itemTypeId`
+ * (with a positive count — a 0-count, fully-merged-away one doesn't count
+ * as "already has one"), other than `excludeEid` itself, or `undefined` if
+ * there isn't one. */
+function findStack(world: World, ownerEid: number, itemTypeId: string, excludeEid: number): number | undefined {
+  for (const eid of query(world, [Item, Carried, Stackable])) {
+    if (eid === excludeEid) continue;
+    if (Carried.ownerEid[eid] !== ownerEid) continue;
+    if (Item.itemTypeId[eid] !== itemTypeId) continue;
+    if (Stackable.count[eid] <= 0) continue;
+    return eid;
+  }
+  return undefined;
+}
+
+/**
+ * Gives `quantity` units of `itemEid` to `destOwnerEid` — the general
+ * "hand this item to someone" mechanic behind a fresh world pickup
+ * (`pickUpItem` below) and every container transfer (game.ts's
+ * `moveToContainer`/`moveToPlayer` actions). `quantity` defaults to
+ * `itemEid`'s entire current count (1 for a non-stackable item, i.e. "move
+ * the whole thing").
+ *
+ * - **Not stackable, or moving the *entire* stack with no matching stack
+ *   already at the destination:** `itemEid` itself becomes
+ *   `destOwnerEid`'s (adding `Carried` if it never had it before — a fresh
+ *   world pickup) — no new entity, exactly how every item move worked
+ *   before stacking existed.
+ * - **`destOwnerEid` already carries a stack of the same item type:** that
+ *   stack's count grows by `quantity`, and `itemEid`'s own count shrinks by
+ *   the same amount — down to 0, permanently inert, if the whole thing
+ *   moved (see `Stackable`'s own doc comment for why that's fine to leave
+ *   behind rather than destroy).
+ * - **Moving *part* of a stack with no existing stack at the destination:**
+ *   splits a freshly created entity off for the moved portion, leaving the
+ *   remainder on `itemEid`.
+ *
+ * Callers are expected to have already checked weight
+ * (`wouldExceedCarryWeight`/`wouldExceedContainerWeight`, which both take
+ * the same `quantity`).
+ */
+export function giveItem(world: World, itemEid: number, destOwnerEid: number, quantity?: number): void {
+  const itemTypeId = Item.itemTypeId[itemEid];
+  const sourceCount = itemCount(world, itemEid);
+  const moveQty = quantity ?? sourceCount;
+  const isStackable = hasComponent(world, itemEid, Stackable);
+  const existingStack = isStackable ? findStack(world, destOwnerEid, itemTypeId, itemEid) : undefined;
+
+  if (existingStack !== undefined) {
+    // Merges into a stack destOwnerEid already holds -- itemEid gives up
+    // however much moved (down to 0 and permanently inert if the whole
+    // thing did) rather than becoming a second stack of the same type.
+    Stackable.count[existingStack] += moveQty;
+    Stackable.count[itemEid] = sourceCount - moveQty;
+  } else if (moveQty < sourceCount) {
+    // No stack to merge into, but only part of it is moving -- split off a
+    // fresh entity carrying just that amount, leaving itemEid behind (still
+    // with its original owner) holding the remainder.
+    const splitEid = addEntity(world);
+    addComponent(world, splitEid, Item);
+    addComponent(world, splitEid, Carried);
+    addComponent(world, splitEid, Stackable);
+    Item.itemTypeId[splitEid] = itemTypeId;
+    Carried.ownerEid[splitEid] = destOwnerEid;
+    Carried.slot[splitEid] = "inventory";
+    Stackable.count[splitEid] = moveQty;
+    Stackable.count[itemEid] = sourceCount - moveQty;
+  }
+  // else: the whole thing moved and there's no existing stack to merge into
+  // -- itemEid itself becomes destOwnerEid's, keeping its current count
+  // as-is (nothing to split off, nothing to zero out).
+
+  if (moveQty >= sourceCount) {
+    // The whole thing moved -- itemEid itself becomes destOwnerEid's (even
+    // if it also just merged into an existing stack above, in which case
+    // it's now permanently inert at count 0).
+    addComponent(world, itemEid, Carried);
+    Carried.ownerEid[itemEid] = destOwnerEid;
+    Carried.slot[itemEid] = "inventory";
+  }
 }
 
 /**
  * Picks up a world item: called from the `Item` branch of `tryInteract`
  * (doors.ts) when the interact raycast hits an `Item` entity that has no
- * `Carried` component yet. Adds `Carried` (slot `"inventory"`, owned by
- * `ownerEid`) and hides the item's in-world pickup mesh — hidden rather than
+ * `Carried` component yet. Gives the whole thing to `ownerEid` (`giveItem`)
+ * — for a stackable item (coins) that merges into a stack `ownerEid`
+ * already carries, exactly the same as any other stack-to-stack transfer —
+ * and hides the item's in-world pickup mesh either way: hidden rather than
  * removed from the scene/ECS so a future "drop" could just flip it back to
  * visible, and so it stops showing up in `tryInteract`'s own interactable
- * list (that list explicitly skips any `Item` that already has `Carried`).
+ * list (that list explicitly skips any `Item` that already has `Carried`,
+ * which `giveItem` always adds to `itemEid` regardless of whether it merged
+ * away).
  *
  * Returns false (and does nothing else) if `ownerEid` is already carrying
  * too much (`wouldExceedCarryWeight`) — callers (`doors.ts`) are expected to
@@ -107,9 +220,7 @@ export function wouldExceedContainerWeight(world: World, containerEid: number, i
 export function pickUpItem(world: World, itemEid: number, ownerEid: number): boolean {
   if (wouldExceedCarryWeight(world, ownerEid, itemEid)) return false;
 
-  addComponent(world, itemEid, Carried);
-  Carried.ownerEid[itemEid] = ownerEid;
-  Carried.slot[itemEid] = "inventory";
+  giveItem(world, itemEid, ownerEid);
 
   const obj = Object3DRef[itemEid];
   if (obj) obj.visible = false;

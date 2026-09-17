@@ -1,7 +1,7 @@
 import * as THREE from "three";
 import { addComponent, addEntity, createWorld, hasComponent } from "bitecs";
 import { query } from "bitecs";
-import { Position, Velocity, Rotation, CharacterBody, DynamicBody, PhysicsBody, PhysicsCollider, PhysicsRotation, RenderOffsetY, PlayerControlled, Object3DRef, Door, Dead, DeathSector, Health, NPC, Item, Carried, Readable, Container } from "./ecs/components";
+import { Position, Velocity, Rotation, CharacterBody, DynamicBody, PhysicsBody, PhysicsCollider, PhysicsRotation, RenderOffsetY, PlayerControlled, Object3DRef, Door, Dead, DeathSector, Health, NPC, Item, Carried, Readable, Container, Stackable } from "./ecs/components";
 import { inputSystem } from "./ecs/systems/input";
 import { characterSystem, physicsSyncSystem, teleportCharacter } from "./ecs/systems/character";
 import { dynamicSyncSystem } from "./ecs/systems/dynamics";
@@ -11,7 +11,7 @@ import { tryMeleeAttack } from "./ecs/systems/combat";
 import { npcSystem, toggleNpcFollow } from "./ecs/systems/npc";
 import { getNpcAnimationDebugState, npcAnimationSystem } from "./ecs/systems/npcAnimation";
 import { corpseCleanupSystem, MIN_LINGER_SECONDS } from "./ecs/systems/corpseCleanup";
-import { equipItem, equipToOpenHandSlot, isHandSlot, unequipItem, viewmodelSwingSystem, wouldExceedCarryWeight, wouldExceedContainerWeight } from "./ecs/systems/items";
+import { equipItem, equipToOpenHandSlot, giveItem, isHandSlot, unequipItem, viewmodelSwingSystem, wouldExceedCarryWeight, wouldExceedContainerWeight } from "./ecs/systems/items";
 import { syncSystem } from "./ecs/systems/sync";
 import { hudSync } from "./ecs/systems/hudSync";
 import { buildLevel } from "./level/level";
@@ -225,7 +225,7 @@ export function startGame(container: HTMLElement): void {
   // its physics body already disabled the moment it's first picked up (see
   // `pickUpItem` in items.ts), regardless of which entity currently owns it.
   const containerActions: ContainerActions = {
-    moveToContainer(itemEid, containerEid) {
+    moveToContainer(itemEid, containerEid, quantity) {
       if (!hasComponent(world, itemEid, Carried)) return;
       // No nesting a container inside another container (a backpack inside
       // a barrel, or inside itself) -- `ContainerPanel.tsx` already hides
@@ -239,14 +239,13 @@ export function startGame(container: HTMLElement): void {
       // A weight-capped container (a backpack) has its own separate budget
       // for its contents -- always false for a plain barrel (no cap), so
       // this never blocks storing into one.
-      if (wouldExceedContainerWeight(world, containerEid, itemEid)) {
+      if (wouldExceedContainerWeight(world, containerEid, itemEid, quantity)) {
         hudStore.showMessage("Too heavy for the backpack.");
         return;
       }
-      Carried.ownerEid[itemEid] = containerEid;
-      Carried.slot[itemEid] = "inventory";
+      giveItem(world, itemEid, containerEid, quantity);
     },
-    moveToPlayer(itemEid) {
+    moveToPlayer(itemEid, quantity) {
       if (!hasComponent(world, itemEid, Carried)) return;
       // The player's own main-carry cap -- same one a fresh world pickup
       // enforces (`wouldExceedCarryWeight` in items.ts). A container's
@@ -255,12 +254,11 @@ export function startGame(container: HTMLElement): void {
       // already carrying is a real addition to their main total, not a
       // weight-neutral shuffle -- the extra room a backpack grants only
       // ever applies to what stays zipped inside it.
-      if (wouldExceedCarryWeight(world, player, itemEid)) {
+      if (wouldExceedCarryWeight(world, player, itemEid, quantity)) {
         hudStore.showMessage("Too heavy to carry.");
         return;
       }
-      Carried.ownerEid[itemEid] = player;
-      Carried.slot[itemEid] = "inventory";
+      giveItem(world, itemEid, player, quantity);
     },
   };
   containerStore.bindActions(containerActions);
@@ -290,6 +288,10 @@ export function startGame(container: HTMLElement): void {
     // `y` is the player's feet (see `CharacterBody`), not the camera — the
     // camera sits EYE_HEIGHT above it.
     getPlayerPosition: () => ({ x: Position.x[player], y: Position.y[player], z: Position.z[player] }),
+    // The player entity's own eid, so a test can tell "carried by the
+    // player" (getItemStates' `ownerEid`) apart from "carried by some
+    // other owner" (a barrel, a corpse) without hardcoding an assumed id.
+    getPlayerEid: () => player,
     // Physics state, for confirming the character controller is actually
     // resting on the floor rather than falling through it or hovering.
     getPlayerPhysics: () => ({
@@ -406,8 +408,18 @@ export function startGame(container: HTMLElement): void {
         eid,
         itemTypeId: Item.itemTypeId[eid],
         carried: hasComponent(world, eid, Carried),
+        // Whoever currently `Carried`s it -- the player, a barrel, a
+        // backpack, or a corpse (see `Carried.ownerEid`) -- so a test can
+        // tell "carried by the player" apart from "carried by a container",
+        // both of which are `carried: true` above. `null` for an uncarried
+        // world item.
+        ownerEid: hasComponent(world, eid, Carried) ? Carried.ownerEid[eid] : null,
         slot: hasComponent(world, eid, Carried) ? Carried.slot[eid] : null,
         worldMeshVisible: Object3DRef[eid]?.visible ?? false,
+        // `undefined` for an ordinary item, and 0 for a `Stackable` entity
+        // that's been fully merged away into another stack (never
+        // destroyed -- see `Stackable`'s doc comment in ecs/components.ts).
+        count: hasComponent(world, eid, Stackable) ? Stackable.count[eid] : undefined,
       })),
     // Carry-weight debug hook (phase 3 of the inventory expansion), for
     // automated (Playwright) testing of the flat `BASE_CARRY_WEIGHT` cap
@@ -485,10 +497,14 @@ export function startGame(container: HTMLElement): void {
       isOpen: containerStore.isOpen,
       activeEid: containerStore.activeEid,
       capacity: containerStore.capacity,
-      contents: containerStore.contents.map((item) => ({ eid: item.eid, itemTypeId: item.itemTypeId })),
+      contents: containerStore.contents.map((item) => ({ eid: item.eid, itemTypeId: item.itemTypeId, count: item.count })),
     }),
-    storeItemInContainer: (itemEid: number) => containerStore.store(itemEid),
-    takeItemFromContainer: (itemEid: number) => containerStore.take(itemEid),
+    // `quantity` lets a test move part of a stack (a coin pile) without
+    // going through the quantity-picker UI (`ContainerPanel.tsx`'s
+    // `pendingTransfer`) -- omitted, this moves the item's entire current
+    // count, same as tapping a non-stackable item.
+    storeItemInContainer: (itemEid: number, quantity?: number) => containerStore.store(itemEid, Item.itemTypeId[itemEid], quantity),
+    takeItemFromContainer: (itemEid: number, quantity?: number) => containerStore.take(itemEid, quantity),
     closeContainer: () => containerStore.close(),
     // Player death/respawn debug hooks (aggressive NPC archetypes can now
     // actually kill the player).

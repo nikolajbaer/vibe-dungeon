@@ -68,7 +68,16 @@ const roomA: RoomContent = {
     // West wall banner, south of the candelabra.
     { id: "banner", x: -2.8, z: 2.2, rotation: Math.PI / 2 },
   ],
-  items: [{ id: "sword", x: 4, z: 7 }],
+  items: [
+    { id: "sword", x: 4, z: 7 },
+    // Two separate coin piles (commodity/stackable inventory) west of the
+    // table, clear of both the NPC's wander circle and the table itself --
+    // picking up the second one merges into the same inventory stack the
+    // first created rather than taking a second slot (see `Stackable` in
+    // ecs/components.ts).
+    { id: "coin", x: 3.3, z: 6.3, count: 6 },
+    { id: "coin", x: 2.6, z: 6.0, count: 4 },
+  ],
   npcs: [{ id: "villager", x: 1.5, z: 3.5 }],
   // A single-page notice on the east wall (narration devices) — clear of
   // the NE furniture grouping (z 6.0-8.6) by mounting it further south, and

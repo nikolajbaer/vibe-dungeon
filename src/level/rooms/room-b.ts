@@ -55,7 +55,11 @@ const roomB: RoomContent = {
     { id: "banner", x: 2.6, z: shrineZ, params: shrineBanner },
     { id: "candelabra", x: 1.5, z: -16.9 },
     { id: "barrel", x: -2.3, z: -12.0 },
-    { id: "barrel", x: -2.3, z: -13.2 },
+    // Holds a coin pile (commodity/stackable inventory) -- demonstrates the
+    // `ContentsEntry` {id, count} shape (as opposed to the bare-string form
+    // room-a's gem-holding barrel uses) and gives the container panel's
+    // quantity picker something to exercise on the "take" side.
+    { id: "barrel", x: -2.3, z: -13.2, contents: [{ id: "coin", count: 15 }] },
   ],
   // Carries a gem (issue: lootable corpses) -- killing the bandit guarding
   // this room drops it, giving the encounter a reward beyond just clearing

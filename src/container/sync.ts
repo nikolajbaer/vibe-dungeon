@@ -1,5 +1,5 @@
 import { hasComponent, query, type World } from "bitecs";
-import { Carried, Dead, Item, NPC } from "../ecs/components";
+import { Carried, Dead, Item, NPC, Stackable } from "../ecs/components";
 import { ITEM_REGISTRY } from "../assets/itemRegistry";
 import { NPC_REGISTRY } from "../assets/npcRegistry";
 import { carriedWeight, containerWeightCapacityOf } from "../ecs/systems/items";
@@ -22,9 +22,11 @@ export function containerSync(world: World): void {
   const contents: ContainerItemView[] = [];
   for (const eid of query(world, [Item, Carried])) {
     if (Carried.ownerEid[eid] !== containerEid) continue;
+    if (hasComponent(world, eid, Stackable) && Stackable.count[eid] <= 0) continue;
     const itemType = ITEM_REGISTRY[Item.itemTypeId[eid]];
     if (!itemType) continue;
-    contents.push({ eid, itemTypeId: itemType.id, name: itemType.name, icon: itemType.icon });
+    const count = hasComponent(world, eid, Stackable) ? Stackable.count[eid] : undefined;
+    contents.push({ eid, itemTypeId: itemType.id, name: itemType.name, icon: itemType.icon, count });
   }
   containerStore.setContents(contents);
 

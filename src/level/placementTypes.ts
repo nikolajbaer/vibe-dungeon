@@ -12,6 +12,14 @@ import type { TileInstance } from "./occupancy";
 // the grid — see `src/level/rooms.ts` for how every room's tiles are
 // aggregated into the one `OccupancyIndex` the whole level is built from.
 
+/** One entry in a container's or NPC's pre-seeded `contents` — a plain
+ * item type id (count 1), or `{ id, count }` for a stackable item type
+ * (a starting pile of coins). `spawnProps`/`spawnNpcs` (level/spawning.ts)
+ * throw at load time if `count` is given for an item type that isn't
+ * `ItemAssetDef.stackable`, same "fail loudly" philosophy as everything
+ * else `contents` already validates. */
+export type ContentsEntry = string | { id: string; count: number };
+
 /** One prop placed in the level. Lives in a `RoomContent.props` array (see
  * below) — one file per room/area under `src/level/rooms/`, so two agents
  * decorating different rooms can never collide on the same lines the way
@@ -50,7 +58,7 @@ export interface PropPlacement {
    * `Item` already `Carried` by this container — no world mesh of its own,
    * since (like any carried item) it's never meant to render outside
    * whichever inventory/container list currently shows it. */
-  contents?: string[];
+  contents?: ContentsEntry[];
 }
 
 /** One item placed in the world as a pickup. Lives in a `RoomContent.items`
@@ -79,6 +87,13 @@ export interface ItemSpawn {
    * `Readable`'s doc comment in `ecs/components.ts`). Omit entirely for a
    * normal, non-readable item. */
   pages?: string[];
+  /** How many units this world pile represents — only meaningful for a
+   * `stackable` item type (a coin pile); omit (or `1`) for any other item.
+   * `spawnItems` gives it a `Stackable` component set to this count; picking
+   * it up merges into (or becomes) the player's one stack for that item
+   * type, exactly like `giveItem` (ecs/systems/items.ts) handles any other
+   * stack-to-stack transfer. */
+  count?: number;
 }
 
 /** One NPC placed in the world. Lives in a `RoomContent.npcs` array. */
@@ -104,7 +119,7 @@ export interface NpcSpawn {
    * Additionally, an item that's itself a `container` (a backpack) is
    * rejected here specifically: NPCs never carry containers, and (unlike
    * the player) are never weight-limited by what they carry either. */
-  contents?: string[];
+  contents?: ContentsEntry[];
 }
 
 /** Where the player starts: position plus initial facing (radians, same
