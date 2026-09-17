@@ -367,6 +367,72 @@
       .notice-close-btn {
         margin-left: auto;
       }
+      /* Container panel (barrels): its own fixed overlay (#container-overlay,
+         see src/container/mount.tsx), same "own container, own
+         pointer-events" split as the notice panel above -- two columns
+         (container contents / player inventory) reusing `.inv-list`'s grid
+         styling from the paper-doll inventory, since both are "a grid of
+         tappable item icons" the same way. */
+      #container-overlay {
+        position: fixed;
+        inset: 0;
+        pointer-events: none;
+      }
+      .container-root {
+        position: fixed;
+        left: 50%;
+        top: 50%;
+        transform: translate(-50%, -50%);
+        width: min(calc(100vw - 32px), 520px);
+        max-height: min(calc(100vh - 64px), 560px);
+        display: flex;
+        flex-direction: column;
+        gap: 12px;
+        padding: 20px 22px;
+        background: rgba(14, 14, 18, 0.92);
+        border: 1px solid rgba(255, 255, 255, 0.3);
+        border-radius: 10px;
+        color: #eee;
+        font: 14px/1.5 system-ui, sans-serif;
+        pointer-events: auto;
+      }
+      .container-title {
+        font-weight: 700;
+        font-size: 18px;
+        letter-spacing: 0.02em;
+        color: #ffcc44;
+        border-bottom: 1px solid rgba(255, 255, 255, 0.25);
+        padding-bottom: 8px;
+      }
+      .container-columns {
+        display: flex;
+        gap: 14px;
+      }
+      .container-column {
+        flex: 1;
+        min-width: 0;
+        display: flex;
+        flex-direction: column;
+        gap: 6px;
+      }
+      .container-column-label {
+        font-size: 12px;
+        color: rgba(255, 255, 255, 0.6);
+      }
+      .container-close-btn {
+        align-self: flex-end;
+        font: inherit;
+        font-weight: 600;
+        color: inherit;
+        padding: 8px 14px;
+        background: rgba(255, 255, 255, 0.08);
+        border: 1px solid rgba(255, 255, 255, 0.3);
+        border-radius: 6px;
+        cursor: pointer;
+      }
+      .container-close-btn:active {
+        background: rgba(255, 255, 255, 0.2);
+      }
       .death-overlay {
         position: fixed;
         inset: 0;

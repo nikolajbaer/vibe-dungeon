@@ -1,6 +1,6 @@
 import * as THREE from "three";
 import { addComponent, addEntity, type World } from "bitecs";
-import { Position, Velocity, CharacterBody, DynamicBody, PhysicsBody, PhysicsCollider, PhysicsRotation, Object3DRef, Item, NPC, NpcState, Health, Readable } from "../ecs/components";
+import { Position, Velocity, CharacterBody, DynamicBody, PhysicsBody, PhysicsCollider, PhysicsRotation, Object3DRef, Item, NPC, NpcState, Health, Readable, Container } from "../ecs/components";
 import { ITEM_REGISTRY } from "../assets/itemRegistry";
 import { FURNITURE_REGISTRY } from "../assets/furnitureRegistry";
 import { NPC_REGISTRY } from "../assets/npcRegistry";
@@ -94,6 +94,12 @@ function withPickupHitbox(mesh: THREE.Object3D, eid: number): THREE.Group {
  * without being climbable via the character controller's autostep. Only a
  * default: an asset with a `footprint.hy` gets exactly that instead. */
 const DEFAULT_PROP_HALF_HEIGHT = 0.6;
+
+// Generous invisible raycast target radius for a container-flagged dynamic
+// prop (a barrel) — same idea as `READABLE_HITBOX_RADIUS`/`ITEM_PICKUP_RADIUS`
+// below: covers the whole visible bulk (a barrel's own footprint radius is
+// ~0.34m) so a precise camera-forward raycast isn't needed to land it.
+const CONTAINER_HITBOX_RADIUS = 0.45;
 
 /** Adds one *static* prop's Rapier box — no ECS entity, exactly like a wall
  * segment (see tileBuilder.ts's `addWall`): it never moves and nothing
@@ -276,6 +282,30 @@ export function spawnProps(world: World, physics: Physics, scene: THREE.Scene, p
       // Measured before the mesh is transformed — `boxShapeOf` is local
       // space, and the body carries the world placement.
       const shape = boxShapeOf(mesh);
+
+      // A container-flagged asset (a barrel) also gets an invisible hitbox
+      // child, added here while `mesh` is still in local space (mirrors
+      // `spawnReadables`' bbox-centering fix below) so it ends up centered
+      // on the barrel's actual visible bulk rather than floating at its
+      // local origin. `userData.eid` can't be set until `eid` exists
+      // (below), but the hitbox's *position* has to be fixed now, before
+      // `mesh` gets transformed to its world placement — as a child it then
+      // rides along with that transform automatically. A raw
+      // `mesh.userData.eid` alone wouldn't work here the way it does for a
+      // single-mesh interactable: `createBarrelMesh` returns a *group* of
+      // several cylinders, and three.js raycasts only ever hit an actual
+      // leaf `Mesh`'s geometry, never an empty `Group` — so without this
+      // sphere, a hit lands on some cylinder that never got `userData.eid`
+      // set on it at all.
+      let containerHitbox: THREE.Mesh | undefined;
+      if (def.container) {
+        const bounds = new THREE.Box3().setFromObject(mesh);
+        containerHitbox = new THREE.Mesh(new THREE.SphereGeometry(CONTAINER_HITBOX_RADIUS, 8, 6));
+        containerHitbox.position.copy(bounds.getCenter(new THREE.Vector3()));
+        containerHitbox.visible = false;
+        mesh.add(containerHitbox);
+      }
+
       mesh.position.set(x, y, z);
       mesh.rotation.y = yaw;
       scene.add(mesh);
@@ -293,6 +323,12 @@ export function spawnProps(world: World, physics: Physics, scene: THREE.Scene, p
       PhysicsRotation.w[eid] = Math.cos(yaw / 2);
       Object3DRef[eid] = mesh;
       PhysicsBody[eid] = addDynamicBox(physics, x, y, z, yaw, shape, def.dynamic.mass);
+
+      if (def.container && containerHitbox) {
+        addComponent(world, eid, Container);
+        Container.capacity[eid] = def.container.capacity;
+        containerHitbox.userData.eid = eid;
+      }
       continue;
     }
 

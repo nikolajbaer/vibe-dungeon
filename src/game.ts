@@ -1,7 +1,7 @@
 import * as THREE from "three";
 import { addComponent, addEntity, createWorld, hasComponent } from "bitecs";
 import { query } from "bitecs";
-import { Position, Velocity, Rotation, CharacterBody, DynamicBody, PhysicsBody, PhysicsCollider, PhysicsRotation, RenderOffsetY, PlayerControlled, Object3DRef, Door, Dead, DeathSector, Health, NPC, Item, Carried, Readable } from "./ecs/components";
+import { Position, Velocity, Rotation, CharacterBody, DynamicBody, PhysicsBody, PhysicsCollider, PhysicsRotation, RenderOffsetY, PlayerControlled, Object3DRef, Door, Dead, DeathSector, Health, NPC, Item, Carried, Readable, Container } from "./ecs/components";
 import { inputSystem } from "./ecs/systems/input";
 import { characterSystem, physicsSyncSystem, teleportCharacter } from "./ecs/systems/character";
 import { dynamicSyncSystem } from "./ecs/systems/dynamics";
@@ -29,6 +29,9 @@ import { mountDialogue } from "./dialogue/mount";
 import { dialogueStore, type DialogueActions } from "./dialogue/store";
 import { mountNotice } from "./notice/mount";
 import { noticeStore } from "./notice/store";
+import { mountContainer } from "./container/mount";
+import { containerSync } from "./container/sync";
+import { containerStore, type ContainerActions } from "./container/store";
 
 const EYE_HEIGHT = 1.6; // camera height above the player's feet
 const PLAYER_RADIUS = 0.35;
@@ -193,6 +196,26 @@ export function startGame(container: HTMLElement): void {
     },
   };
   dialogueStore.bindActions(dialogueActions);
+
+  // Container UI -> ECS action wiring, same shape again: moving an item
+  // between the player's inventory and an open container is just
+  // repointing `Carried.ownerEid`/`slot` — no viewmodel/physics side
+  // effects either way, since a carried item's mesh is already hidden and
+  // its physics body already disabled the moment it's first picked up (see
+  // `pickUpItem` in items.ts), regardless of which entity currently owns it.
+  const containerActions: ContainerActions = {
+    moveToContainer(itemEid, containerEid) {
+      if (!hasComponent(world, itemEid, Carried)) return;
+      Carried.ownerEid[itemEid] = containerEid;
+      Carried.slot[itemEid] = "inventory";
+    },
+    moveToPlayer(itemEid) {
+      if (!hasComponent(world, itemEid, Carried)) return;
+      Carried.ownerEid[itemEid] = player;
+      Carried.slot[itemEid] = "inventory";
+    },
+  };
+  containerStore.bindActions(containerActions);
 
   // Player death/respawn UI -> ECS action wiring, same shape again: resets
   // the player back to the level's spawn point, full health, once the
@@ -389,6 +412,26 @@ export function startGame(container: HTMLElement): void {
     noticeNext: () => noticeStore.next(),
     noticePrev: () => noticeStore.prev(),
     closeNotice: () => noticeStore.close(),
+    // Every placed container (a barrel)'s position plus capacity, so an
+    // automated test can find and walk to one without hand-deriving world
+    // coordinates from a room file.
+    getContainerEntities: () =>
+      Array.from(query(world, [Container, Object3DRef])).map((eid) => {
+        const obj = Object3DRef[eid];
+        return { eid, capacity: Container.capacity[eid], x: obj?.position.x, z: obj?.position.z };
+      }),
+    // Container-panel debug hooks, mirroring the notice/dialogue ones
+    // above, for automated (Playwright) testing of storing/taking items
+    // without a real raycast + click.
+    getContainerState: () => ({
+      isOpen: containerStore.isOpen,
+      activeEid: containerStore.activeEid,
+      capacity: containerStore.capacity,
+      contents: containerStore.contents.map((item) => ({ eid: item.eid, itemTypeId: item.itemTypeId })),
+    }),
+    storeItemInContainer: (itemEid: number) => containerStore.store(itemEid),
+    takeItemFromContainer: (itemEid: number) => containerStore.take(itemEid),
+    closeContainer: () => containerStore.close(),
     // Player death/respawn debug hooks (aggressive NPC archetypes can now
     // actually kill the player).
     isPlayerDefeated: () => hudStore.playerDefeated,
@@ -407,6 +450,7 @@ export function startGame(container: HTMLElement): void {
   mountInventory(container);
   mountDialogue(container);
   mountNotice(container);
+  mountContainer(container);
 
   // Desktop melee attack trigger (issue #48): left-click, but only once
   // pointer lock is already engaged — `PointerLook`'s own click handler
@@ -452,7 +496,7 @@ export function startGame(container: HTMLElement): void {
     // "not open yet" value (this was the actual villager-killing bug: a tap
     // that opened dialogue and a same-frame attack both used one value
     // computed before the dialogue existed).
-    const isModalActive = () => dialogueStore.isOpen || noticeStore.isOpen || hudStore.playerDefeated;
+    const isModalActive = () => dialogueStore.isOpen || noticeStore.isOpen || containerStore.isOpen || hudStore.playerDefeated;
 
     const modalActive = isModalActive();
     if (modalActive) {
@@ -559,6 +603,7 @@ export function startGame(container: HTMLElement): void {
     syncSystem(world);
     hudSync(world);
     inventorySync(world);
+    containerSync(world);
     renderer.render(scene, camera);
   }
   frame();
