@@ -1,5 +1,6 @@
 import { PaperDoll } from "./PaperDoll";
 import { WeightReadout } from "./WeightReadout";
+import { DropZone } from "./DropZone";
 import { InventoryList } from "./InventoryList";
 
 /**
@@ -14,6 +15,7 @@ export function Inventory() {
     <div id="inventory-root">
       <PaperDoll />
       <WeightReadout />
+      <DropZone />
       <InventoryList />
     </div>
   );

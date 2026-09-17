@@ -60,12 +60,19 @@ export interface InventoryActions {
   equipToSlot(itemEid: number, slot: HandSlot): void;
   /** Returns `itemEid` (currently in a hand slot) to the inventory list. */
   unequip(itemEid: number): void;
+  /** Drops `itemEid` back into the world near the player (unequipping it
+   * first if it's currently in a hand slot) — see `dropCarriedItem` in
+   * level/spawning.ts for what actually happens to it. Triggered by the
+   * drop zone (`DropZone.tsx`), never a no-op like `equip`/`unequip` can be:
+   * every carried item is always droppable. */
+  drop(itemEid: number): void;
 }
 
 const noopActions: InventoryActions = {
   equip: () => {},
   equipToSlot: () => {},
   unequip: () => {},
+  drop: () => {},
 };
 
 class InventoryStore {
@@ -90,6 +97,13 @@ class InventoryStore {
    * auto-equip into. `null` when nothing is pending. Consumed (and
    * cleared) by `tapSlot`; tapping the same item again also clears it. */
   selectedItemEid: number | null = null;
+
+  /** True while the drop zone (`DropZone.tsx`) is armed — the next tap on
+   * *any* carried item (in the inventory list or an occupied paper-doll
+   * slot) drops it instead of doing whatever it would normally do
+   * (equip/read/open/unequip). Cleared the moment something's dropped, or
+   * by tapping the drop zone again to cancel. */
+  dropArmed = false;
 
   private actions: InventoryActions = noopActions;
 
@@ -133,6 +147,23 @@ class InventoryStore {
 
   unequip(itemEid: number): void {
     this.actions.unequip(itemEid);
+  }
+
+  /** Called when the drop zone is tapped (`DropZone.tsx`) — arms or
+   * disarms it. Also clears any pending equip-slot selection, so the two
+   * "waiting for the next tap" modes (equip-to-slot, drop) can never both
+   * be active and racing for the same tap. */
+  toggleDropArmed(): void {
+    this.dropArmed = !this.dropArmed;
+    this.selectedItemEid = null;
+  }
+
+  /** Called when an inventory-list item or an occupied paper-doll slot is
+   * tapped while `dropArmed` — drops it and disarms, regardless of what
+   * that tap would otherwise have done. */
+  dropTapped(itemEid: number): void {
+    this.dropArmed = false;
+    this.actions.drop(itemEid);
   }
 
   /** Called when the inventory list is tapped (`InventoryList.tsx`). Three

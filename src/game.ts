@@ -11,10 +11,11 @@ import { tryMeleeAttack } from "./ecs/systems/combat";
 import { npcSystem, toggleNpcFollow } from "./ecs/systems/npc";
 import { getNpcAnimationDebugState, npcAnimationSystem } from "./ecs/systems/npcAnimation";
 import { corpseCleanupSystem, MIN_LINGER_SECONDS } from "./ecs/systems/corpseCleanup";
-import { equipItem, equipToOpenHandSlot, unequipItem, viewmodelSwingSystem, wouldExceedCarryWeight } from "./ecs/systems/items";
+import { equipItem, equipToOpenHandSlot, isHandSlot, unequipItem, viewmodelSwingSystem, wouldExceedCarryWeight } from "./ecs/systems/items";
 import { syncSystem } from "./ecs/systems/sync";
 import { hudSync } from "./ecs/systems/hudSync";
 import { buildLevel } from "./level/level";
+import { dropCarriedItem } from "./level/spawning";
 import { floorForY } from "./level/tiles";
 import { ALL_ITEM_SPAWNS } from "./level/rooms";
 import { Keyboard } from "./input/keyboard";
@@ -34,6 +35,12 @@ import { containerSync } from "./container/sync";
 import { containerStore, type ContainerActions } from "./container/store";
 
 const EYE_HEIGHT = 1.6; // camera height above the player's feet
+// How far in front of the player (meters) and how far above their feet a
+// dropped item lands/falls from -- close enough to immediately walk back
+// onto if you change your mind, falling from just above head height like a
+// freshly-authored `ItemSpawn` (see `ITEM_HEIGHT` in level/spawning.ts).
+const DROP_DISTANCE = 0.8;
+const DROP_HEIGHT = 1.6;
 const PLAYER_RADIUS = 0.35;
 const PLAYER_HEIGHT = 1.8;
 /** Half-height of the capsule's straight section; the two `PLAYER_RADIUS`
@@ -183,6 +190,20 @@ export function startGame(container: HTMLElement): void {
     },
     unequip(itemEid) {
       unequipItem(world, itemEid);
+    },
+    // Drop zone (issue: item drop) -- unequip first (detaches the
+    // viewmodel/frees the hand slot) if it's currently equipped, then drop
+    // it a short distance in front of wherever the player's currently
+    // facing, falling from just above head height like a freshly-authored
+    // `ItemSpawn` would.
+    drop(itemEid) {
+      if (isHandSlot(Carried.slot[itemEid])) unequipItem(world, itemEid);
+
+      const yaw = Rotation.yaw[player];
+      const dropX = Position.x[player] - Math.sin(yaw) * DROP_DISTANCE;
+      const dropZ = Position.z[player] - Math.cos(yaw) * DROP_DISTANCE;
+      const dropY = Position.y[player] + DROP_HEIGHT;
+      dropCarriedItem(world, physics, scene, itemEid, dropX, dropY, dropZ);
     },
   };
   inventoryStore.bindActions(inventoryActions);
