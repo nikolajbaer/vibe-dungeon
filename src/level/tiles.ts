@@ -59,6 +59,18 @@ export function floorBaseline(floor: number): number {
 }
 
 /**
+ * The lowest floor actually built anywhere in the level today (the cellar,
+ * one below the original ground floor — see `rooms/cellar.ts`). `floorForY`
+ * below clamps to this as a defensive floor-of-floors, the same protective
+ * spirit as this function's original `Math.max(0, ...)` clamp (see that
+ * git history / the doc comment below for why 0 was never actually the
+ * right thing to clamp to). Update this the day a floor deeper than -1
+ * gets built — nothing else needs to change, since every consumer just
+ * treats whatever `floorForY` returns as an opaque floor index.
+ */
+const MIN_FLOOR = -1;
+
+/**
  * The inverse of `floorBaseline`, used where code only has a world Y (the
  * player's feet, an NPC's position) and needs to know which floor that
  * actually corresponds to — critically, *not* the same question as "which
@@ -70,12 +82,38 @@ export function floorBaseline(floor: number): number {
  * harmless here because every vertical connection (see `StairConnector` in
  * `placementTypes.ts`) deliberately shares one `sectorId` between its two
  * landings, so which side of the rounding a mid-climb position falls on
- * doesn't change the answer sector tracking actually cares about. Clamped
- * to 0 so a momentary sub-baseline value (e.g. a falling ragdoll a few
- * centimeters under a floor slab before physics resolves it) doesn't read
- * as a nonsensical negative floor. */
+ * doesn't change the answer sector tracking actually cares about.
+ *
+ * This used to also clamp the result to a minimum of 0, before any floor
+ * below the ground floor existed. That clamp's own comment framed it as
+ * jitter protection ("a momentary sub-baseline value... doesn't read as a
+ * nonsensical negative floor") — but rounding-to-nearest already provides
+ * that protection on its own, for *any* floor, not just floor 0: a `y` a
+ * few centimeters either side of a floor's baseline is within `FLOOR_RISE /
+ * 2` of it and rounds straight back to that floor, clamp or no clamp (e.g.
+ * `y = -0.05` gives `round(-0.05 / 6) = round(-0.008) = 0` unaided). What
+ * the old clamp actually did, as opposed to what its comment described, was
+ * unconditionally forbid *any* negative floor at all — correct back when
+ * floor -1 didn't exist (there was nothing else a deeply-negative `y` could
+ * legitimately mean), wrong now that the cellar (`rooms/cellar.ts`) is a
+ * real floor -1 a player can genuinely stand in, where the old clamp would
+ * misreport every position there as floor 0.
+ *
+ * The fix is narrower than deleting the clamp outright: `Math.max` is kept,
+ * just re-pointed at `MIN_FLOOR` (the lowest floor genuinely built today)
+ * instead of a hardcoded 0, so a real floor -1 position still resolves
+ * correctly while a wild physics glitch (a ragdoll clipping meters through
+ * the cellar's own floor slab into never-built space below it) still can't
+ * report a floor that doesn't exist — the same defensive purpose the
+ * original clamp served, just recalibrated to where the level's own lowest
+ * real floor actually is instead of assuming it's always 0. There's no
+ * equivalent clamp on the *upper* end for the same reason there never was
+ * one before this change: nothing currently relies on one, and adding a
+ * `MAX_FLOOR` symmetrically would be speculative until an upper-floor
+ * equivalent of this problem is ever actually observed.
+ */
 export function floorForY(y: number): number {
-  return Math.max(0, Math.round(y / FLOOR_RISE));
+  return Math.max(MIN_FLOOR, Math.round(y / FLOOR_RISE));
 }
 
 /** What a single unit-cell-wide segment of a tile's perimeter is. Doors and

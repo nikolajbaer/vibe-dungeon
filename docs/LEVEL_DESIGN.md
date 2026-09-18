@@ -327,16 +327,6 @@ builds as an ordinary unlocked one) rather than erroring, so confirm it
 worked by checking `getDoorStates()`'s `locked` field via the debug hook
 rather than assuming.
 
-`requiredItemTypeId` references an `ItemAssetDef.id` (`src/assets/items/`)
-— place a matching item somewhere reachable (an `ItemSpawn` in any room
-file's `items` array, same as any other pickup) for the door to actually be
-openable. A locked door renders in a visually distinct material
-(`doorMaterial(true)`, `level/materials.ts`) and, if a player tries it
-without the item, shows a "Door is locked." message
-(`hudStore.showMessage`, `doors.ts`'s `toggleDoor`) rather than opening.
-Once opened with the right item it unlocks permanently — there's no
-mechanic that re-locks it.
-
 ## How to add a readable (a poster fixture or a pickupable scroll)
 
 Both open the same paged reader (`notice/NoticePanel.tsx`) on the same
@@ -707,10 +697,85 @@ valid, deliberate choice here, not an oversight.
 npc.ts`) are still pure XZ distance, blind to Y/floor — an aggressive NPC
 placed directly above (or below) another one's aggro radius could sense
 through the floor. Not exercised by this wing (no aggressive NPC placed
-here, and it's far from `room-b`'s bandit), and not fixed in general —
-flagged on `NpcSpawn.floor`'s doc comment for the next person placing a
-hostile near an existing one on a different floor. The level viewer's
-sector overlay also only tints floor-0 cells now (see
-`levelViewer.ts`'s `addSectorOverlays`) rather than fully supporting
+here), and not fixed in general — flagged on `NpcSpawn.floor`'s doc comment
+for the next person placing a hostile near an existing one on a different
+floor. The level viewer's sector overlay also only tints floor-0 cells now
+(see `levelViewer.ts`'s `addSectorOverlays`) rather than fully supporting
 per-floor display — a deliberate, documented "cheap version," not a full
-fix.
+fix. (The bandit mentioned above as "far away" from this wing has since
+moved to the cellar, floor -1 — see the next section — which is if
+anything further away still.)
+
+## Worked example: a *downward* vertical connection, and the floor-clamp fix it needed (cellar wing)
+
+The level's second vertical connection (training-wing/cellar/dormitory
+task) — floor 0 down to a new floor -1 (the cellar), branching off
+`room-b` this time instead of the main corridor. Mechanically this is the
+*exact same* `StairConnector` + paired `stair_lower`/`stair_upper` tile
+system the upstairs wing uses (see the worked example above) — nothing
+about that system is inherently "upward only" — but building the first
+real negative floor surfaced one genuine bug and one branching decision
+worth recording.
+
+**The bug: `floorForY` (`tiles.ts`) used to hard-clamp to floor 0.** Before
+this task, `floorForY(y)` was `Math.max(0, Math.round(y / FLOOR_RISE))`.
+Its own doc comment framed the clamp as jitter protection (so a falling
+ragdoll a few centimeters under a floor slab doesn't misreport as a
+negative floor) — but rounding-to-nearest already provides exactly that
+protection on its own, for any floor, since a `y` within `FLOOR_RISE / 2`
+of a baseline rounds straight back to it regardless of any clamp. What the
+old clamp actually did was unconditionally forbid *any* negative floor —
+correct back when floor -1 didn't exist (nothing else a deeply-negative `y`
+could legitimately mean), wrong the moment a real floor -1 (the cellar) did.
+The fix re-points the same clamp at `MIN_FLOOR` (`tiles.ts`, currently -1 —
+the lowest floor actually built) instead of a hardcoded 0, so a genuine
+floor -1 position resolves correctly while a wild physics glitch still
+can't report a floor that doesn't exist. See `floorForY`'s doc comment for
+the full reasoning — update `MIN_FLOOR` the day a floor deeper than -1
+exists.
+
+**Branching off `room-b` instead of the main corridor.** The corridor
+(`hallway_cross`) already has all four of its openings spoken for (north/
+south/east/west — room-a, room-b, side-chamber, stairwell), so it couldn't
+take a fifth. `room-b` had a spare option the corridor didn't: `great_hall`
+(its tile type) has three solid, unused faces (north/east/west), and unlike
+the corridor's single, already-fully-used instance, giving *one* of
+`great_hall`'s two instances (`room-a`, `room-b`) a new opening needs a new
+type rather than an in-place edit — editing `great_hall.ts` itself would
+silently add the same opening to `room-a` too, which has nothing behind it
+and would fail `validateOccupancy`. `great_hall_branch.ts` is that new
+type: `great_hall` plus one opening on local west's middle segment, and
+only `room-b`'s instance swapped onto it (`room-a` keeps plain `great_hall`,
+untouched) — the same "new type, swap one instance's `tileTypeId`" pattern
+`docs/LEVEL_DESIGN.md`'s "current limitation" section describes as option
+(a), used here instead of the `hallway`/`hallway_junction` case's option
+(b) because `great_hall` has two instances where `hallway_cross` had one.
+
+**The downward shaft reuses `stair_lower`/`stair_upper` unmodified.** A
+tile type's name describes which *end of a shaft* it is (skips its own
+floor or ceiling slab so the shaft has somewhere to go), not which literal
+floor numbers it connects — so the same `stair_upper` (skips floor slab,
+opens west) works as the shaft's top terminus at `floor: 0`, and the same
+`stair_lower` (skips ceiling slab, opens east) works as its bottom terminus
+at `floor: -1`, with a `StairConnector` naming `floorBelow: -1, floorAbove:
+0`. No new tile types were needed for the shaft itself, only for the two
+rooms it connects (`great_hall_branch` above, `cellar_room` for the
+cellar's own room — kept a separate type from `side_chamber` rather than
+reused, specifically so a later change to `side_chamber`'s own face map
+can never silently leak a second opening into the cellar).
+
+**The warning, and why it's narrative-only.** A poster in `room-b`, next to
+the new opening, tells the player not to go down — the same "foreshadow
+before you get there" device `side-chamber.ts`'s journal scroll uses for
+this same bandit encounter. There's no gate: the stairs are plain
+`"opening"`s, not a locked door, so a curious player can just walk down —
+that's the point (the warning is supposed to *not* stop you).
+
+**The bandit moved down here.** `room-b`'s bandit (issue #70's first
+aggressive archetype) relocated to the cellar with it, unchanged — same
+archetype, same seeded loot (a gem) — making the cellar the level's actual
+final encounter instead of the first room behind a locked door. `room-b`
+itself is left quiet (its shrine/barrels stay, the locked door + key
+pairing stays meaningful as a gate on the room and the stairs beyond it,
+but there's no spawn there anymore) — the "not every room needs a spawn"
+pacing pillar applies same as ever.

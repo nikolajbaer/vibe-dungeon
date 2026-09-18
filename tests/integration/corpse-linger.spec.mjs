@@ -10,16 +10,24 @@ function getBandit(npcs) {
 try {
   await page.evaluate(() => window.__vibeDungeonDebug.setPitch(0));
 
-  // See bandit-combat.spec.mjs: teleport to just outside the bandit's 6m
-  // aggroRange (bandit.ts) rather than walking the ~18m of pure transit
-  // from spawn, then walk the real remaining distance to trigger aggro.
-  await debug("teleportPlayer", 1.5, 0.1, -5);
-  let reachedAggro = false;
-  for (let i = 0; i < 100 && !reachedAggro; i++) {
+  // See bandit-combat.spec.mjs: the bandit relocated to the cellar (cellar
+  // wing task, rooms/cellar.ts) at (18, -13.0, floor -1), behind a real
+  // (unlocked) hinged door. Teleport onto the downward ramp itself, ~6m out
+  // (x=12, y=-4 -- 1/3 up the ramp's linear climb from (15,-6) to (6,0)),
+  // still just outside its 6m aggroRange. Aggro fires from there, but the
+  // bandit's own CHASING movement can't open the door itself (only the
+  // player's interact does -- see `tryInteract`, ecs/systems/doors.ts), so
+  // this walks all the way up to the bandit (pressing `KeyE` periodically to
+  // open the door along the way) rather than stopping the instant aggro
+  // fires -- see bandit-combat.spec.mjs's own comment for the full
+  // reasoning.
+  await debug("teleportPlayer", 12, -3.9, -13.0);
+  for (let i = 0; i < 150; i++) {
+    const bandit = getBandit(await debug("getNpcState"));
     const pos = await debug("getPlayerPosition");
-    const dx = 1.5 - pos.x;
-    const dz = -13 - pos.z;
-    if (Math.hypot(dx, dz) < 1.5) break;
+    const dx = bandit.x - pos.x;
+    const dz = bandit.z - pos.z;
+    if (Math.hypot(dx, dz) < 1.3) break;
     await page.evaluate((y) => window.__vibeDungeonDebug.setYaw(y), Math.atan2(-dx, -dz));
     await page.keyboard.down("KeyW");
     await page.waitForTimeout(100);
@@ -28,7 +36,6 @@ try {
       await page.keyboard.press("KeyE");
       if ((await debug("getDialogueState")).isOpen) await debug("closeDialogue");
     }
-    if (getBandit(await debug("getNpcState")).state !== "LOITERING") reachedAggro = true;
   }
   let bandit = getBandit(await debug("getNpcState"));
   assert(bandit.state === "CHASING" || bandit.state === "ATTACKING", `bandit aggroed (${bandit.state})`);
