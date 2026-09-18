@@ -1,4 +1,5 @@
 import * as THREE from "three";
+import Stats from "three/examples/jsm/libs/stats.module.js";
 import { addComponent, addEntity, createWorld, hasComponent } from "bitecs";
 import { query } from "bitecs";
 import { Position, Velocity, Rotation, CharacterBody, DynamicBody, PhysicsBody, PhysicsCollider, PhysicsRotation, RenderOffsetY, PlayerControlled, Object3DRef, Door, Dead, DeathSector, Health, NPC, Item, Carried, Readable, Container, Stackable } from "./ecs/components";
@@ -94,6 +95,14 @@ export function startGame(container: HTMLElement): void {
   // number here (see PR description).
   renderer.shadowMap.enabled = true;
   container.appendChild(renderer.domElement);
+
+  // Perf-profiling infra -- three's own stock FPS/ms/MB panel (click to
+  // cycle panels), top-left by its own default fixed positioning. Exists
+  // specifically to give the "no perf-profiling infra to confirm that
+  // number" gap noted above (and any future room-culling/instancing work) a
+  // real, always-visible number instead of eyeballing framerate by feel.
+  const stats = new Stats();
+  container.appendChild(stats.dom);
 
   // Issue #64 ("moody dungeon lighting"): the old flat white AmbientLight(0.55)
   // + outdoor-style DirectionalLight(0.85) lit every room evenly, washing out
@@ -572,6 +581,7 @@ export function startGame(container: HTMLElement): void {
   let accumulator = 0;
   function frame() {
     requestAnimationFrame(frame);
+    stats.begin();
     const dt = Math.min(clock.getDelta(), 0.1);
 
     // A dialogue panel, the notice reader, or the death overlay is a modal
@@ -694,6 +704,7 @@ export function startGame(container: HTMLElement): void {
     inventorySync(world);
     containerSync(world);
     renderer.render(scene, camera);
+    stats.end();
   }
   frame();
 }
