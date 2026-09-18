@@ -534,6 +534,21 @@ export function startGame(container: HTMLElement): void {
     // actually kill the player).
     isPlayerDefeated: () => hudStore.playerDefeated,
     respawn: () => hudStore.respawn(),
+    // Perf-profiling debug hooks (see level/visibility.ts and the Stats
+    // panel above) — `renderer.info`'s draw-call/triangle counts are
+    // hardware-independent facts about what's being asked of the GPU each
+    // frame, unlike raw FPS (meaningless in a software-rendered CI/sandbox
+    // browser). `getVisibilityDebugCounts` lets an automated (Playwright)
+    // test confirm sector-based shadow/geometry gating is actually doing
+    // something (a real, measured drop when the player walks away from a
+    // sector) rather than only trusting the code path ran.
+    getRendererInfo: () => ({
+      calls: renderer.info.render.calls,
+      triangles: renderer.info.render.triangles,
+      lines: renderer.info.render.lines,
+      points: renderer.info.render.points,
+    }),
+    getVisibilityDebugCounts: () => level.getVisibilityDebugCounts(),
   };
 
   // Tracks (and logs, on change) the sector the player currently occupies —
@@ -694,6 +709,16 @@ export function startGame(container: HTMLElement): void {
       currentSector = sector;
       console.log(`[sector] entered "${currentSector ?? "(none)"}"`);
     }
+    // Perf investigation (see level/visibility.ts): gates shadow-casting
+    // torches (and, once geometry culling lands, static meshes) down to the
+    // player's current sector plus whatever's one open connection away.
+    // Called every frame rather than only inside the `sector !== currentSector`
+    // branch above on purpose — `updateVisibility` already no-ops internally
+    // when the active set hasn't changed, and calling it unconditionally
+    // means it self-corrects if `currentSector`'s bookkeeping and the actual
+    // active set ever drift apart, rather than trusting they always move in
+    // lockstep.
+    level.updateVisibility(sector);
     // Skipped during a pause along with everything else in the `modalActive`
     // branch above — a corpse's linger timer shouldn't burn down while the
     // game is sitting on a dialogue or the death overlay.

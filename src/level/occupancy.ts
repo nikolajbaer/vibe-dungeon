@@ -285,3 +285,70 @@ export function sectorAt(index: OccupancyIndex, worldX: number, worldY: number, 
   const floor = floorForY(worldY);
   return index.get(worldCellKey(cellX, cellZ, floor))?.sectorId;
 }
+
+/**
+ * Same lookup as `sectorAt`, but for level-authoring code that already knows
+ * the exact `floor` index a placement is on (every `PropPlacement`/
+ * `ItemSpawn`/`NpcSpawn`/`ReadablePlacement`/`StairConnector` carries one —
+ * see `placementTypes.ts`), rather than only a world Y a player/NPC happens
+ * to be standing at. Skips `floorForY`'s Y-to-floor rounding entirely, since
+ * there's no rounding to do when the floor is already known exactly — this
+ * is what `visibility.ts` uses to tag a freshly-built prop/item/NPC/torch
+ * mesh with the sector it belongs to at level-build time.
+ */
+export function sectorAtCell(index: OccupancyIndex, worldX: number, worldZ: number, floor: number, unit: number): string | undefined {
+  const cellX = Math.floor(worldX / unit);
+  const cellZ = Math.floor(worldZ / unit);
+  return index.get(worldCellKey(cellX, cellZ, floor))?.sectorId;
+}
+
+/** Undirected adjacency between sectors: `graph.get(sectorId)` is every other
+ * sector reachable through exactly one open (door/opening) boundary from it.
+ * Built once from the same occupancy index `validateOccupancy` already
+ * proved internally consistent, so it never needs its own separate
+ * validation pass — an edge only ever exists where two neighboring cells
+ * agree on "open" (`validateOccupancy` already guarantees that agreement;
+ * this just also records *which* two sectors that open boundary joins). */
+export type SectorGraph = Map<string, Set<string>>;
+
+function addSectorEdge(graph: SectorGraph, a: string, b: string): void {
+  if (a === b) return; // an open boundary between two cells of the *same* sector isn't a new edge
+  let setA = graph.get(a);
+  if (!setA) graph.set(a, (setA = new Set()));
+  setA.add(b);
+  let setB = graph.get(b);
+  if (!setB) graph.set(b, (setB = new Set()));
+  setB.add(a);
+}
+
+/**
+ * Walks every occupied cell's open (door/opening) boundaries and records an
+ * edge between the two sectors on either side — the foundation `visibility.ts`
+ * builds its "current sector + everything one open connection away should
+ * stay fully rendered/shadow-casting" active set from (see that module's own
+ * doc comment for why one hop, not a raw distance check).
+ *
+ * Deliberately floor-blind in the same way `validateOccupancy`'s own
+ * neighbor walk is: a same-XZ neighbor is only ever considered on the *same*
+ * floor (see `worldCellKey`), so this naturally treats a staircase's own
+ * open ends as ordinary in-plane openings rather than needing any special
+ * vertical-connection case — `stair_lower`/`stair_upper` already get their
+ * cross-floor connectivity for free from sharing one `sectorId` (see
+ * `docs/LEVEL_DESIGN.md`'s "Sector id for the pair" note), and their
+ * *horizontal* openings into whatever hallway/room they connect to on each
+ * respective floor are picked up here exactly like any other doorway.
+ */
+export function buildSectorGraph(index: OccupancyIndex): SectorGraph {
+  const graph: SectorGraph = new Map();
+  for (const [key, cell] of index) {
+    const { x, z } = parseWorldCellKey(key);
+    for (const dir of NEIGHBOR_DIRS) {
+      const kind = cell.sides[dir.mine];
+      if (kind === null || !isOpen(kind)) continue;
+      const neighbor = index.get(worldCellKey(x + dir.dx, z + dir.dz, cell.floor));
+      if (!neighbor) continue; // outer boundary -- nothing on the other side
+      addSectorEdge(graph, cell.sectorId, neighbor.sectorId);
+    }
+  }
+  return graph;
+}
