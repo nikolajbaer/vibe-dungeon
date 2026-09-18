@@ -9,6 +9,7 @@ import { parseWorldCellKey, worldCellKey } from "./occupancy";
 import type { LockedDoorSpec } from "./placementTypes";
 import { wallMaterial, floorMaterial, ceilingMaterial, doorMaterial } from "./materials";
 import { addKinematicBox, addStaticBox, type Physics } from "../physics/world";
+import { registerSectorShadowLight, type SectorVisibility } from "./visibility";
 
 // Decomposes a validated tile occupancy index into the wall/floor/ceiling/
 // door boxes the old hand-placed src/level/level.ts used to build directly
@@ -134,6 +135,8 @@ function addTorch(
   orientation: "x" | "z",
   interiorSign: 1 | -1,
   floorBase: number,
+  sectorId: string,
+  vis: SectorVisibility,
 ): void {
   const mountY = floorBase + Math.min(TORCH_MOUNT_Y, wallHeight - 0.4);
   const offsetX = orientation === "x" ? interiorSign : 0;
@@ -173,6 +176,15 @@ function addTorch(
   light.shadow.camera.far = TORCH_LIGHT_RANGE;
   light.shadow.bias = -0.002;
   group.add(light);
+
+  // Perf investigation (see visibility.ts's header comment): a shadow-casting
+  // PointLight costs a full extra shadow-map render pass every frame it's
+  // enabled for, whether or not the player is anywhere near it. Registering
+  // it here — rather than leaving `castShadow` permanently true — lets
+  // `level.ts`'s `updateVisibility` gate it off for every sector that isn't
+  // the player's current one or one open connection away, with zero visual
+  // change to whichever room(s) actually matter right now.
+  registerSectorShadowLight(vis, sectorId, light);
 }
 
 /**
@@ -312,6 +324,10 @@ interface Segment {
   /** Which floor the owning cell is on — sets the world Y this segment's
    * wall (and any torch on it) is actually built at (`floorBaseline`). */
   floor: number;
+  /** The owning cell's sector — threaded through so a torch built on this
+   * segment (see `pickTorchSegments`/`emitWalls`) registers under the right
+   * sector for `visibility.ts`'s shadow gating. */
+  sectorId: string;
 }
 
 /** A tile instance counts as "room-sized" (torch-eligible) when its footprint
@@ -398,7 +414,7 @@ function pickTorchSegments(segments: Segment[]): Set<Segment> {
   return chosen;
 }
 
-function emitWalls(physics: Physics, scene: THREE.Scene, segments: Segment[]): void {
+function emitWalls(physics: Physics, scene: THREE.Scene, segments: Segment[], vis: SectorVisibility): void {
   const xWallCorners = new Set<string>(); // corners touched by an x-oriented (plane-at-constant-X) wall
   const zWallCorners = new Set<string>(); // corners touched by a z-oriented (plane-at-constant-Z) wall
 
@@ -431,7 +447,7 @@ function emitWalls(physics: Physics, scene: THREE.Scene, segments: Segment[]): v
       const hz = (rangeEnd - rangeStart) / 2;
       addWall(physics, scene, planeCoord, cz, WALL_THICKNESS, hz, seg.wallHeight, floorBase);
       if (torchSegments.has(seg)) {
-        addTorch(scene, planeCoord + seg.interiorSign * WALL_THICKNESS, along, seg.wallHeight, "x", seg.interiorSign, floorBase);
+        addTorch(scene, planeCoord + seg.interiorSign * WALL_THICKNESS, along, seg.wallHeight, "x", seg.interiorSign, floorBase, seg.sectorId, vis);
       }
     } else {
       if (xWallCorners.has(cornerKey(seg.rangeStartCell, seg.planeCell))) rangeStart -= WALL_THICKNESS;
@@ -440,7 +456,7 @@ function emitWalls(physics: Physics, scene: THREE.Scene, segments: Segment[]): v
       const hx = (rangeEnd - rangeStart) / 2;
       addWall(physics, scene, cx, planeCoord, hx, WALL_THICKNESS, seg.wallHeight, floorBase);
       if (torchSegments.has(seg)) {
-        addTorch(scene, along, planeCoord + seg.interiorSign * WALL_THICKNESS, seg.wallHeight, "z", seg.interiorSign, floorBase);
+        addTorch(scene, along, planeCoord + seg.interiorSign * WALL_THICKNESS, seg.wallHeight, "z", seg.interiorSign, floorBase, seg.sectorId, vis);
       }
     }
   }
@@ -457,7 +473,7 @@ function lockedDoorKey(x: number, z: number, side: string): string {
  * `ALL_LOCKED_DOORS`, see `rooms.ts`) marks which already-authored door
  * faces should be built locked — see `LockedDoorSpec`'s doc comment.
  */
-export function buildGeometryFromOccupancy(world: World, physics: Physics, scene: THREE.Scene, index: OccupancyIndex, lockedDoors: LockedDoorSpec[] = []): void {
+export function buildGeometryFromOccupancy(world: World, physics: Physics, scene: THREE.Scene, index: OccupancyIndex, lockedDoors: LockedDoorSpec[] = [], vis: SectorVisibility): void {
   const lockedDoorLookup = new Map<string, string>(); // cell+side key -> requiredItemTypeId
   for (const spec of lockedDoors) {
     lockedDoorLookup.set(lockedDoorKey(spec.x, spec.z, spec.side), spec.requiredItemTypeId);
@@ -548,6 +564,7 @@ export function buildGeometryFromOccupancy(world: World, physics: Physics, scene
             roomSized: isRoomSizedTileType(cell.tileTypeId),
             interiorSign: (dir.dx > 0 ? -1 : 1) as 1 | -1,
             floor: cell.floor,
+            sectorId: cell.sectorId,
           });
         } else {
           addDoorPair(world, physics, scene, "x", planeCell * UNIT, z * UNIT, (z + 1) * UNIT, doorHeaderHeight, floorBase, requiredItemTypeId);
@@ -565,6 +582,7 @@ export function buildGeometryFromOccupancy(world: World, physics: Physics, scene
             roomSized: isRoomSizedTileType(cell.tileTypeId),
             interiorSign: (dir.dz > 0 ? -1 : 1) as 1 | -1,
             floor: cell.floor,
+            sectorId: cell.sectorId,
           });
         } else {
           addDoorPair(world, physics, scene, "z", planeCell * UNIT, x * UNIT, (x + 1) * UNIT, doorHeaderHeight, floorBase, requiredItemTypeId);
@@ -573,5 +591,5 @@ export function buildGeometryFromOccupancy(world: World, physics: Physics, scene
     }
   }
 
-  emitWalls(physics, scene, wallSegments);
+  emitWalls(physics, scene, wallSegments, vis);
 }
