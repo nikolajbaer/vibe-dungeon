@@ -26,6 +26,15 @@ import type { RoomContent } from "../placementTypes";
 // side, well clear of all of the above. The sword sits near the player's
 // spawn point, off the NPC's home/wander spot and its path down to the
 // corridor door.
+//
+// Great-room decor pass (dormitory/decor task): a wall fireplace on the
+// north wall, west of the existing banner and well clear (>1.4m) of the NE
+// furniture grouping's own west edge (~x=3.7), and a crossed-swords-and-
+// shield trophy on the west wall, slotted between the existing banner
+// (z=2.2) and candelabra (z=4.6) with over a meter of clearance from each —
+// both purely decorative, neither with a footprint that could box in the
+// villager's wander circle (center (1.5,3.5), radius 1.5) or the door's
+// swing arc.
 
 const tableX = 4.3;
 const tableZ = 7.2;
@@ -67,6 +76,13 @@ const roomA: RoomContent = {
     { id: "banner", x: -1.3, z: 8.8, rotation: Math.PI },
     // West wall banner, south of the candelabra.
     { id: "banner", x: -2.8, z: 2.2, rotation: Math.PI / 2 },
+
+    // North wall fireplace, hearth facing south into the room -- see header
+    // comment for clearances.
+    { id: "fireplace", x: 2.3, z: 8.5, rotation: Math.PI },
+    // West wall crossed-swords trophy, between the banner and the
+    // candelabra -- see header comment for clearances.
+    { id: "crossed-swords", x: -2.8, z: 3.4, rotation: Math.PI / 2 },
   ],
   items: [
     { id: "sword", x: 4, z: 7 },

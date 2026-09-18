@@ -56,6 +56,36 @@ import type { RoomContent } from "../placementTypes";
 // doc comment on why an aggressive archetype's XZ-only aggro check is worth
 // double-checking before adding one near another) — this wing is quiet by
 // design, proving vertical traversal rather than adding a new encounter.
+//
+// ## Dormitory furnishing pass (expand-upstairs-into-a-dormitory task)
+//
+// The four nooks were originally left bare on purpose (see the props
+// comment further down) -- this pass furnishes them as a dormitory, without
+// touching the wing's tiles/layout at all (still four bare 3m x 3m rooms
+// off one hub, still no aggressive NPC anywhere up here). Each nook is only
+// ~2.7m x 2.7m clear once wall thickness is subtracted, so each gets at
+// most a bed plus one more piece (a chest or the bookshelf), not both, to
+// avoid cramming a tiny room:
+//
+// - `upper-room-south` / `upper-room-north`: bed + chest (the chest gives a
+//   dormitory chest some starter loot -- see its own `contents` below,
+//   `docs/LEVEL_DESIGN.md`'s "how to add a container" section covers a
+//   furniture container's `contents` the same way a barrel's works).
+// - `upper-room-west-1`: bed + bookshelf, for a "someone reads in here"
+//   variant rather than three identical bedrooms.
+// - `upper-room-west-2`: bed only -- kept quiet/sparse on purpose (pacing
+//   pillar), the same "not every room needs everything" reasoning the
+//   original bare-nooks design used, just one notch less bare.
+//
+// Every bed is placed headboard-to-the-back-wall, foot toward the nook's one
+// doorway (an open archway, not a hinged door -- `nook`'s face is
+// `"opening"`, so there's no swing arc to route furniture around, unlike a
+// great_hall door). Static props' collision footprint (`addPropCollider` in
+// level/spawning.ts) is an axis-aligned box taken from the asset's
+// unrotated `hx`/`hz` regardless of a placement's own `rotation` -- an
+// existing simplification this pass doesn't change, so every placement below
+// keeps generous (>0.5m) clearance from walls/other furniture rather than
+// relying on exact rotated-box math.
 
 const stairwell: RoomContent = {
   tiles: [
@@ -137,7 +167,33 @@ const stairwell: RoomContent = {
   // nooks stay bare — proving the vertical traversal works is the point of
   // this wing, not filling every room with set dressing (see the task's own
   // "bare-but-correct is fine" allowance).
-  props: [{ id: "candelabra", x: -21, z: -6, floor: 1 }],
+  props: [
+    { id: "candelabra", x: -21, z: -6, floor: 1 },
+
+    // upper-room-south (world x[-24,-21], z[-12,-9], archway on its north
+    // edge z=-9) -- bed against the south (back) wall, foot toward the
+    // archway; chest tucked by the east wall, clear of the bed's own x
+    // extent ([-23,-22]) regardless of z.
+    { id: "bed", x: -22.5, z: -10.75, rotation: 0, floor: 1 },
+    { id: "chest", x: -21.7, z: -10.0, rotation: -Math.PI / 2, floor: 1, contents: [{ id: "coin", count: 8 }] },
+
+    // upper-room-north (world x[-24,-21], z[-3,0], archway on its south edge
+    // z=-3) -- bed against the north (back) wall, foot toward the archway;
+    // chest by the east wall, same east-wall/clear-of-bed reasoning as above.
+    { id: "bed", x: -22.5, z: -1.25, rotation: Math.PI, floor: 1 },
+    { id: "chest", x: -21.7, z: -1.0, rotation: -Math.PI / 2, floor: 1, contents: ["gem"] },
+
+    // upper-room-west-1 (world x[-27,-24], z[-9,-6], archway on its east
+    // edge x=-24) -- bed against the west (back) wall, foot toward the
+    // archway; bookshelf against the north wall, clear of the bed's own z
+    // extent ([-8,-7]).
+    { id: "bed", x: -25.95, z: -7.5, rotation: Math.PI / 2, floor: 1 },
+    { id: "bookshelf", x: -25.0, z: -6.34, rotation: Math.PI, floor: 1 },
+
+    // upper-room-west-2 (world x[-27,-24], z[-6,-3], archway on its east
+    // edge x=-24) -- bed only, kept sparse (see header comment).
+    { id: "bed", x: -25.95, z: -4.5, rotation: Math.PI / 2, floor: 1 },
+  ],
 };
 
 export default stairwell;
