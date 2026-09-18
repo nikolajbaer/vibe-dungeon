@@ -12,7 +12,10 @@ export type Rotation = 0 | 90 | 180 | 270;
 
 /** A tile placed in the world: a type, a grid origin (the min-corner cell
  * of its footprint *after* rotation is applied), a rotation, and an
- * author-assigned sector id (see README "Sectors" — tracking data only). */
+ * author-assigned sector id (see README "Sectors" — tracking data only).
+ * `id` must be globally unique across all room modules: floor/ceiling slab
+ * generation groups occupied cells by this id to recover each instance's
+ * complete bounds. */
 export interface TileInstance {
   id: string;
   tileTypeId: string;
@@ -162,7 +165,14 @@ export function buildOccupancyIndex(
   tileTypes: Record<string, TileType> = TILE_TYPES,
 ): OccupancyIndex {
   const index: OccupancyIndex = new Map();
+  const instanceIds = new Set<string>();
   for (const instance of instances) {
+    if (instanceIds.has(instance.id)) {
+      throw new Error(
+        `Level error: duplicate tile instance id "${instance.id}". Tile instance ids must be globally unique across every room module.`,
+      );
+    }
+    instanceIds.add(instance.id);
     const type = tileTypes[instance.tileTypeId];
     if (!type) {
       throw new Error(
@@ -293,8 +303,7 @@ export function sectorAt(index: OccupancyIndex, worldX: number, worldY: number, 
  * see `placementTypes.ts`), rather than only a world Y a player/NPC happens
  * to be standing at. Skips `floorForY`'s Y-to-floor rounding entirely, since
  * there's no rounding to do when the floor is already known exactly — this
- * is what `visibility.ts` uses to tag a freshly-built prop/item/NPC/torch
- * mesh with the sector it belongs to at level-build time.
+ * is useful to level-authoring code that already knows the floor exactly.
  */
 export function sectorAtCell(index: OccupancyIndex, worldX: number, worldZ: number, floor: number, unit: number): string | undefined {
   const cellX = Math.floor(worldX / unit);
@@ -323,10 +332,8 @@ function addSectorEdge(graph: SectorGraph, a: string, b: string): void {
 
 /**
  * Walks every occupied cell's open (door/opening) boundaries and records an
- * edge between the two sectors on either side — the foundation `visibility.ts`
- * builds its "current sector + everything one open connection away should
- * stay fully rendered/shadow-casting" active set from (see that module's own
- * doc comment for why one hop, not a raw distance check).
+ * edge between the two sectors on either side. This remains useful for
+ * topology/debug tooling even though rendering no longer culls by sector.
  *
  * Deliberately floor-blind in the same way `validateOccupancy`'s own
  * neighbor walk is: a same-XZ neighbor is only ever considered on the *same*

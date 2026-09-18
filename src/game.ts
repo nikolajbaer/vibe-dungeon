@@ -17,7 +17,6 @@ import { syncSystem } from "./ecs/systems/sync";
 import { hudSync } from "./ecs/systems/hudSync";
 import { buildLevel } from "./level/level";
 import { dropCarriedItem } from "./level/spawning";
-import { refreshDynamicShadows } from "./level/visibility";
 import { floorForY } from "./level/tiles";
 import { ALL_ITEM_SPAWNS } from "./level/rooms";
 import { Keyboard } from "./input/keyboard";
@@ -53,15 +52,6 @@ const DEBUG_HEALTH_STEP = 10; // debug-only nudge, see `[`/`]` handling below
 /** Ceiling on physics steps per rendered frame — see the accumulator in
  * `frame` for why (spiral-of-death guard). */
 const MAX_PHYSICS_STEPS_PER_FRAME = 5;
-
-/** Padding (meters) added to a torch's own light range when deciding
- * whether the player/an NPC is close enough to need a fresh shadow-map
- * render this frame — see `level/visibility.ts`'s `refreshDynamicShadows`.
- * Covers a mover's own size (its shadow can start forming slightly before
- * its center point is within the light's nominal range); the humanoid rig's
- * total height (`HUMANOID_HEIGHT`, level/spawning.ts) is 1.75m, so this
- * comfortably covers a mover at any point along its own height/width. */
-const SHADOW_REFRESH_MARGIN = 2;
 
 // Mirrors `NpcState` (ecs/components.ts) by index, for the debug hook below —
 // `getNpcState` reports every NPC entity now (archetypes), not one hardcoded
@@ -102,12 +92,9 @@ export function startGame(container: HTMLElement): void {
   // shadow map is a full extra render pass per shadow-casting light, every
   // frame it's active, which is a genuinely large cost for essentially zero
   // visible payoff. Disabled globally here rather than per-light: every
-  // individual torch still declares `castShadow = true`/its own shadow-map
-  // settings (tileBuilder.ts's `addTorch`), and `level/visibility.ts`'s
-  // sector-based gating of that flag still runs -- both are simply inert
-  // while this is `false`, so flipping it back to `true` alone is enough to
-  // restore shadows (with all of that machinery already in place) if a
-  // future lighting pass finds a way to make them actually read on screen.
+  // individual torch still declares `castShadow = true` and its own shadow
+  // settings, so a future lighting pass can restore shadows by enabling the
+  // renderer and tuning the lights without rebuilding the level.
   renderer.shadowMap.enabled = false;
   container.appendChild(renderer.domElement);
 
@@ -235,12 +222,7 @@ export function startGame(container: HTMLElement): void {
       const dropX = Position.x[player] - Math.sin(yaw) * DROP_DISTANCE;
       const dropZ = Position.z[player] - Math.cos(yaw) * DROP_DISTANCE;
       const dropY = Position.y[player] + DROP_HEIGHT;
-      // Resolved via the same `level.sectorAt` the frame loop already uses
-      // for sector tracking, so a dropped item's mesh gets (re)tagged to
-      // wherever it's actually landing, not wherever it happened to be
-      // spawned or picked up (see `dropCarriedItem`'s own doc comment).
-      const dropSector = level.sectorAt(dropX, dropY, dropZ);
-      dropCarriedItem(world, physics, scene, level.visibility, dropSector, itemEid, dropX, dropY, dropZ);
+      dropCarriedItem(world, physics, scene, itemEid, dropX, dropY, dropZ);
     },
   };
   inventoryStore.bindActions(inventoryActions);
@@ -554,37 +536,23 @@ export function startGame(container: HTMLElement): void {
     // actually kill the player).
     isPlayerDefeated: () => hudStore.playerDefeated,
     respawn: () => hudStore.respawn(),
-    // Perf-profiling debug hooks (see level/visibility.ts and the Stats
-    // panel above) — `renderer.info`'s draw-call/triangle counts are
+    // Perf-profiling debug hook for the Stats panel above —
+    // `renderer.info`'s draw-call/triangle counts are
     // hardware-independent facts about what's being asked of the GPU each
     // frame, unlike raw FPS (meaningless in a software-rendered CI/sandbox
-    // browser). `getVisibilityDebugCounts` lets an automated (Playwright)
-    // test confirm sector-based shadow/geometry gating is actually doing
-    // something (a real, measured drop when the player walks away from a
-    // sector) rather than only trusting the code path ran.
+    // browser).
     getRendererInfo: () => ({
       calls: renderer.info.render.calls,
       triangles: renderer.info.render.triangles,
       lines: renderer.info.render.lines,
       points: renderer.info.render.points,
     }),
-    getVisibilityDebugCounts: () => level.getVisibilityDebugCounts(),
-    // How many lights `refreshDynamicShadows` flagged `needsUpdate = true`
-    // for on the *previous* rendered frame -- dormant along with the rest of
-    // the shadow system while `renderer.shadowMap.enabled` is `false` (see
-    // that flag's own comment above), but harmless and cheap to keep
-    // reporting in case shadows come back.
-    getShadowRefreshCount: () => lastShadowRefreshCount,
   };
 
   // Tracks (and logs, on change) the sector the player currently occupies —
   // originally authoring/tracking data only (see README "Sectors"); as of
   // issue #59 it also drives `corpseCleanupSystem` below.
   let currentSector: string | undefined;
-  // Last frame's `refreshDynamicShadows` return value -- purely a debug/
-  // measurement number (see `getShadowRefreshCount` below), not read by
-  // anything else.
-  let lastShadowRefreshCount = 0;
 
   const keyboard = new Keyboard();
   const pointerLook = new PointerLook(renderer.domElement);
@@ -739,17 +707,6 @@ export function startGame(container: HTMLElement): void {
       currentSector = sector;
       console.log(`[sector] entered "${currentSector ?? "(none)"}"`);
     }
-    // Perf investigation (see level/visibility.ts): gates shadow-casting
-    // torches and static level geometry (walls/floors/ceilings/doors/
-    // staircases/props/items/readables) down to the player's current sector
-    // plus whatever's one open connection away.
-    // Called every frame rather than only inside the `sector !== currentSector`
-    // branch above on purpose — `updateVisibility` already no-ops internally
-    // when the active set hasn't changed, and calling it unconditionally
-    // means it self-corrects if `currentSector`'s bookkeeping and the actual
-    // active set ever drift apart, rather than trusting they always move in
-    // lockstep.
-    level.updateVisibility(sector);
     // Skipped during a pause along with everything else in the `modalActive`
     // branch above — a corpse's linger timer shouldn't burn down while the
     // game is sitting on a dialogue or the death overlay.
@@ -759,22 +716,8 @@ export function startGame(container: HTMLElement): void {
     hudSync(world);
     inventorySync(world);
     containerSync(world);
-    // Perf follow-up on shadow gating (see level/visibility.ts's
-    // `refreshDynamicShadows`): every currently-active torch has
-    // `shadow.autoUpdate = false` (tileBuilder.ts's `addTorch`), so its
-    // shadow map only gets re-rendered when this says to -- either because
-    // it just turned on (handled inside `applySectorVisibility`) or because
-    // something that actually casts a shadow (the player, an NPC) is close
-    // enough that a stale shadow would be visible. Gathered fresh every
-    // frame since these are exactly the entities that move.
-    const shadowMovers = [{ x: Position.x[player], y: Position.y[player], z: Position.z[player] }];
-    for (const eid of query(world, [NPC, Position])) {
-      shadowMovers.push({ x: Position.x[eid], y: Position.y[eid], z: Position.z[eid] });
-    }
-    lastShadowRefreshCount = refreshDynamicShadows(level.visibility, shadowMovers, SHADOW_REFRESH_MARGIN);
     renderer.render(scene, camera);
     stats.end();
   }
   frame();
 }
-

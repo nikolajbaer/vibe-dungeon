@@ -15,10 +15,9 @@ import type { RoomContent } from "../placementTypes";
 //
 // ## World layout (cell coordinates; multiply by UNIT=3 for world meters)
 //
-// - `stair-upper` (`stair_upper`, floor 0) / `stair-lower` (`stair_lower`,
-//   floor -1): **the same** `originCell` {x:2, z:-5}, a 3-cell shaft.
-//   Reusing these two existing, generic types rather than authoring new
-//   ones is deliberate: a type's name describes which *end of a shaft* it
+// - `cellar-stair-upper` (`stair_upper`, floor 0) / `cellar-stair-lower`
+//   (`stair_lower`, floor -1): **the same** `originCell` {x:2, z:-5}, a
+//   3-cell shaft. A type's name describes which *end of a shaft* it
 //   is (skips its own floor or ceiling slab so the shaft has somewhere to
 //   go — see each type's own doc comment), not which literal floor numbers
 //   it connects, so the exact same pair works for any adjacent floor
@@ -57,7 +56,7 @@ import type { RoomContent } from "../placementTypes";
 const cellar: RoomContent = {
   tiles: [
     {
-      id: "stair-upper",
+      id: "cellar-stair-upper",
       tileTypeId: "stair_upper",
       originCell: { x: 2, z: -5 },
       rotation: 0,
@@ -65,7 +64,7 @@ const cellar: RoomContent = {
       floor: 0,
     },
     {
-      id: "stair-lower",
+      id: "cellar-stair-lower",
       tileTypeId: "stair_lower",
       originCell: { x: 2, z: -5 },
       rotation: 0,
