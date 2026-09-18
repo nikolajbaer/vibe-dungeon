@@ -30,17 +30,23 @@ const SELECTED_STYLE = {
  * drop zone is armed (`inventoryStore.dropArmed`, `DropZone.tsx`), in which
  * case *every* item becomes tappable and any tap drops it instead of doing
  * whatever it would normally do.
+ *
+ * Always renders exactly `MAX_INVENTORY_SLOTS` cells (`inventoryStore.emptySlotCount`
+ * pads out whatever's left) — same "show the whole doll, empty or not" idea
+ * as `PaperDoll.tsx`, so the cap on how much you can carry loose (a
+ * backpack's own contents aren't capped this way — see that constant's doc
+ * comment) is visible up front rather than only discovered by filling it.
  */
 export function InventoryList() {
-  const { items, selectedItemEid, dropArmed } = useObserved(() => ({
+  const { items, emptySlotCount, selectedItemEid, dropArmed } = useObserved(() => ({
     items: inventoryStore.inventoryItems,
+    emptySlotCount: inventoryStore.emptySlotCount,
     selectedItemEid: inventoryStore.selectedItemEid,
     dropArmed: inventoryStore.dropArmed,
   }));
 
   return (
     <div class="inv-list" data-testid="inv-list">
-      {items.length === 0 && <div class="inv-list-empty">Empty</div>}
       {items.map((item) => {
         const selected = item.eid === selectedItemEid;
         const interactive = dropArmed || item.equippable || item.readable || item.isContainer;
@@ -68,6 +74,9 @@ export function InventoryList() {
           </button>
         );
       })}
+      {Array.from({ length: emptySlotCount }, (_, i) => (
+        <button key={`empty-${i}`} type="button" class="inv-list-item" data-testid={`inv-slot-empty-${i}`} disabled title="Empty" />
+      ))}
     </div>
   );
 }

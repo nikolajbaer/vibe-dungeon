@@ -11,7 +11,7 @@ import { tryMeleeAttack } from "./ecs/systems/combat";
 import { npcSystem, toggleNpcFollow } from "./ecs/systems/npc";
 import { getNpcAnimationDebugState, npcAnimationSystem } from "./ecs/systems/npcAnimation";
 import { corpseCleanupSystem, MIN_LINGER_SECONDS } from "./ecs/systems/corpseCleanup";
-import { equipItem, equipToOpenHandSlot, giveItem, isHandSlot, unequipItem, viewmodelSwingSystem, wouldExceedCarryWeight } from "./ecs/systems/items";
+import { equipItem, equipToOpenHandSlot, giveItem, isHandSlot, unequipItem, viewmodelSwingSystem, wouldExceedCarryWeight, wouldExceedInventorySlots } from "./ecs/systems/items";
 import { syncSystem } from "./ecs/systems/sync";
 import { hudSync } from "./ecs/systems/hudSync";
 import { buildLevel } from "./level/level";
@@ -189,6 +189,14 @@ export function startGame(container: HTMLElement): void {
       equipItem(world, camera, itemEid, slot);
     },
     unequip(itemEid) {
+      // Unequipping lands in the main inventory list (slot "inventory"),
+      // same cap a fresh pickup or a container take respects
+      // (`wouldExceedInventorySlots` in items.ts) -- a hand slot isn't part
+      // of that list, so putting an item back into it can push it over.
+      if (wouldExceedInventorySlots(world, player, itemEid)) {
+        hudStore.showMessage("Inventory is full.");
+        return;
+      }
       unequipItem(world, itemEid);
     },
     // Drop zone (issue: item drop) -- unequip first (detaches the
@@ -254,6 +262,15 @@ export function startGame(container: HTMLElement): void {
       // main inventory list doesn't change how much they're carrying.
       if (wouldExceedCarryWeight(world, player, itemEid, quantity)) {
         hudStore.showMessage("Too heavy to carry.");
+        return;
+      }
+      // Same inventory-list slot cap a fresh pickup enforces
+      // (`wouldExceedInventorySlots`) -- taking something out of a barrel or
+      // a backpack still lands in slot "inventory", so it's just as capped
+      // as picking it up off the floor would be (merging into a stack the
+      // player already carries never counts against this, quantity or not).
+      if (wouldExceedInventorySlots(world, player, itemEid)) {
+        hudStore.showMessage("Inventory is full.");
         return;
       }
       giveItem(world, itemEid, player, quantity);

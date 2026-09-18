@@ -11,6 +11,15 @@ function isHandSlot(slot: CarriedSlot): slot is HandSlot {
   return slot === "hand-left" || slot === "hand-right";
 }
 
+/** Max number of distinct entries the main inventory list (`InventoryList.tsx`)
+ * shows/allows — duplicated from `MAX_INVENTORY_SLOTS` in
+ * ecs/systems/items.ts (same reasoning as `HandSlot` above: this module's
+ * public surface doesn't reach into `ecs/systems/*`), so bump both together
+ * if this ever changes. The list always renders exactly this many slots
+ * (`InventoryList.tsx` pads with empty ones via `emptySlotCount` below),
+ * same "show the whole doll even when it's empty" idea as `PaperDoll.tsx`. */
+export const MAX_INVENTORY_SLOTS = 6;
+
 /** One carried item's UI-facing view — a plain snapshot written each frame
  * by `inventorySync` (mirrors `hudStore`'s `setHealth`), never read/written
  * directly by ECS code. */
@@ -140,6 +149,15 @@ class InventoryStore {
 
   get inventoryItems(): CarriedItemView[] {
     return this.carried.filter((item) => item.slot === "inventory");
+  }
+
+  /** How many blank slots `InventoryList.tsx` pads the list with so it
+   * always shows exactly `MAX_INVENTORY_SLOTS` cells up front, filled or
+   * not — never negative, though `inventoryItems.length` should never
+   * actually exceed the cap (`wouldExceedInventorySlots` in
+   * ecs/systems/items.ts enforces it before anything lands here). */
+  get emptySlotCount(): number {
+    return Math.max(0, MAX_INVENTORY_SLOTS - this.inventoryItems.length);
   }
 
   /** The item currently occupying `slot`, or `undefined` if it's open —
