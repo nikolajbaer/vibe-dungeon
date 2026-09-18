@@ -266,23 +266,17 @@ piece of work.
    `UNIT` meters) rather than meters — convert to meters (`cell * UNIT`)
    only when you need a real-world position (e.g. a `props`/`items` entry
    in the same file, or a `spawn`).
-3. Give each instance a unique `id` (used in `validateOccupancy` error
-   messages and by `sectorAt`'s corpse-cleanup consumer indirectly, via
-   `sectorId`) and a `sectorId` — new sector, unless this instance is
-   genuinely a sub-area of an existing sector's same room.
-4. Run the level through `validateOccupancy` before assuming it's right —
-   there's no test harness for this yet, so the fastest local check is a
-   throwaway script:
-   ```ts
-   import { buildOccupancyIndex, validateOccupancy } from "./src/level/occupancy";
-   import { ALL_TILE_INSTANCES } from "./src/level/rooms";
-   validateOccupancy(buildOccupancyIndex(ALL_TILE_INSTANCES)); // throws on any mismatch
-   ```
-   run with `npx tsx <script>.ts`. It throws with the exact cell/instance/
-   direction of the first mismatch, so a bad face map is fast to fix. This
-   is a good candidate to promote into a real repeatable check (a small
-   Vitest/Node test) next time someone touches this area — nothing like
-   that exists yet.
+3. Give each instance a **globally unique** `id`, including across separate
+   files in `src/level/rooms/`. Geometry generation groups occupancy cells by
+   this id to recover one instance's floor and ceiling bounds; reusing an id
+   can otherwise join distant rooms into a single slab. `buildOccupancyIndex`
+   rejects duplicates before emitting any cells. Also give it a `sectorId` —
+   a new sector unless this instance is genuinely a sub-area of an existing
+   sector's same room.
+4. Run `npm run test:layout`. It loads the same auto-aggregated room modules
+   as the game, validates occupancy, enforces globally unique instance ids,
+   and checks the multi-floor stair connections. Add a focused assertion to
+   `tests/layout-validation.mjs` when introducing a new unusual connection.
 5. Actually render it and walk through it (Playwright or by hand) before
    calling it done — validation only catches face-map mismatches, not "this
    room is floating," "this door opens into a wall," or "no torches showed
@@ -881,71 +875,14 @@ id so the two unrelated locked doors don't share one solution) rather than
 a real minigame — find the key, open the door, same as any other locked
 door in the level.
 
-## Sector-scoped render culling (perf investigation)
+## Rendering and sectors
 
-As the level grew to ~9 rooms across 3 floors, two things turned out to cost
-real frame time regardless of where the player actually was: every torch's
-shadow-casting light stayed on everywhere, all the time (a full extra
-shadow-map render pass each, per frame), and every wall/floor/ceiling/prop/
-item ever built stayed in the scene graph forever, fully rendered, no matter
-how far from the player it sat. `src/level/visibility.ts` fixes both by
-gating `light.castShadow` and `mesh.visible` off for any sector that isn't
-the player's current one or one open (door/opening) connection away — see
-that file's own header comment for the full mechanics and the "why one hop,
-not current-only" reasoning.
-
-**Nothing new to author.** This runs entirely off the `sectorId` every tile
-instance already needs (see "Use sectorId meaningfully" in the design
-pillars above) and the occupancy index's own open/wall face data — a new
-room built the normal way (a `RoomContent` with real `sectorId`s and real
-door/opening faces connecting it to whatever's next to it) is automatically
-covered: its walls/floor/ceiling/torches/doors register themselves during
-`tileBuilder.ts`'s/`stairBuilder.ts`'s normal build pass, and its
-props/items/readables register themselves during `spawning.ts`'s normal
-spawn pass, each tagged by resolving its own `(x, z, floor)` against the
-occupancy index (`sectorAtCell`, `occupancy.ts`) — no `sectorId` field was
-added to `PropPlacement`/`ItemSpawn`/`ReadablePlacement` for this; the
-existing `x`/`z`/`floor` already say everything needed.
-
-**One real consequence for level shape: a sector with no open connection to
-anything only ever renders while the player is standing directly inside
-it.** This was already effectively true for *reachability* (an isolated
-sector isn't part of the level graph at all, `validateOccupancy` would
-reject an opening facing empty space) — but it's newly true for *visibility*
-too: there's no way, with this system, to build a room meant to be seen from
-a distance through a window or across a courtyard without an actual open
-connection linking it into the sector graph. Nothing in the current level
-wants that effect; worth knowing before designing a feature that does.
-
-**Two categories of registered object are deliberately *not* culled, for
-correctness rather than performance reasons — see their own doc comments for
-the full reasoning (`spawning.ts`'s `spawnNpcs`/`spawnProps`):**
-
-- **NPCs are never registered at all.** A docile NPC can be told to follow
-  the player (`toggleNpcFollow`) and will then cross sector boundaries as a
-  normal, expected part of play — tagging its mesh to its spawn sector would
-  make it visibly vanish mid-follow. There are only a handful of NPCs in the
-  level, so never culling them costs nothing worth trading for that risk.
-- **A dynamic (physics-shoveable) prop or item is registered at its
-  build-time position's sector and never re-tagged if shoved elsewhere by
-  physics** (a barrel pushed through an open doorway into the next room,
-  say) — unlike a *picked-up-and-dropped* item, which `dropCarriedItem`
-  correctly re-tags to wherever it actually lands, since a player interact
-  action is the one point in the whole system that already knows both the
-  item and its new position at once. A shoved prop crossing an entire sector
-  boundary hasn't been observed in practice (this game's dynamic props settle
-  near where they're authored), but if a future mechanic starts routinely
-  flinging heavy props around, this is the corner that would need real
-  per-frame position tracking to close properly.
-
-**Debugging a sector that looks wrong:** `window.__vibeDungeonDebug`'s
-`getVisibilityDebugCounts()` (visible-vs-total objects, active-vs-total
-shadow lights) and `getRendererInfo()` (`renderer.info`'s draw-call/triangle
-counts) are the two hooks written for exactly this — see
-`tests/integration/sector-visibility.spec.mjs` and
-`geometry-culling.spec.mjs` for the pattern (teleport, poll `getCurrentSector`
-until it settles, then read the debug counts) if a new room needs the same
-kind of verification.
+`sectorId` remains authoring and gameplay-tracking data. Level geometry is
+always rendered; sectors do not toggle object visibility. A previous
+current-sector-plus-neighbors culling pass caused visible geometry to pop in
+at doorways and could leave invisible colliders in front of the player, so it
+was removed until profiling demonstrates a need for a visibility system that
+uses actual camera visibility rather than graph distance.
 
 **A plain `"opening"` joining two different-height (`h`) tile types needs
 its own header seal, same as a `"door"` does.** Found by this exact perf
@@ -964,12 +901,10 @@ the fix's own comment where `effective === "opening"` is handled in
 between a full-height room and a low-ceilinged connector type (a hallway,
 a stairwell landing, a nook).
 
-**Real-time shadow-casting torches were disabled globally** (`renderer.
-shadowMap.enabled = false`, `game.ts`) as part of this same perf pass — in
+**Real-time shadow-casting torches are disabled globally** (`renderer.
+shadowMap.enabled = false`, `game.ts`) — in
 actual play they were never really visible (small light sources close to
 the flat walls they're mounted on), so a full extra render pass per active
 light was pure cost with no payoff. Every torch still declares its own
-shadow settings and still participates in the sector-based gating above;
-both are simply inert while this flag is `false`, so flipping it back to
-`true` alone restores shadows if a future lighting pass finds a way to make
-them actually read on screen.
+shadow settings, so flipping the renderer flag back to `true` restores
+shadows if a future lighting pass finds a way to make them read on screen.

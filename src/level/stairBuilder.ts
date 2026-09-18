@@ -4,7 +4,6 @@ import { wallMaterial } from "./materials";
 import { WALL_THICKNESS } from "./tileBuilder";
 import { addStaticBox, addStaticRampBox, MAX_SLOPE_CLIMB_DEGREES, type Physics } from "../physics/world";
 import type { StairConnector } from "./placementTypes";
-import { registerSectorObject, type SectorVisibility } from "./visibility";
 
 // Builds the actual climbable geometry for a vertical connection between two
 // floors (issue #86) — a real Rapier collider, not a bespoke traversal
@@ -148,7 +147,7 @@ function buildRampCollider(physics: Physics, geo: RampGeometry): void {
  * off the same `entry`/`exit` points), so the visual reads as sitting right
  * on the ramp rather than floating above or clipping through it.
  */
-function buildStairVisual(scene: THREE.Scene, vis: SectorVisibility, sectorId: string, geo: RampGeometry): void {
+function buildStairVisual(scene: THREE.Scene, geo: RampGeometry): void {
   const material = wallMaterial();
   const rise = geo.exit.y - geo.entry.y;
   const totalRunAlong = geo.climbAxis === "x" ? geo.exit.x - geo.entry.x : geo.exit.z - geo.entry.z;
@@ -177,7 +176,6 @@ function buildStairVisual(scene: THREE.Scene, vis: SectorVisibility, sectorId: s
     mesh.castShadow = true;
     mesh.receiveShadow = true;
     scene.add(mesh);
-    registerSectorObject(vis, sectorId, mesh);
   }
 }
 
@@ -214,7 +212,7 @@ function buildStairVisual(scene: THREE.Scene, vis: SectorVisibility, sectorId: s
  * exactly like one) and keeps this correct even if a landing's own height
  * ever changes.
  */
-function buildShaftGuardWalls(physics: Physics, scene: THREE.Scene, vis: SectorVisibility, sectorId: string, geo: RampGeometry): void {
+function buildShaftGuardWalls(physics: Physics, scene: THREE.Scene, geo: RampGeometry): void {
   // `geo.entry.y`/`geo.exit.y` are already `floorBaseline(floorBelow)`/
   // `floorBaseline(floorAbove)` (see `rampGeometryOf`) — reading them back
   // out here instead of recomputing from the connector keeps this correct
@@ -245,7 +243,6 @@ function buildShaftGuardWalls(physics: Physics, scene: THREE.Scene, vis: SectorV
     mesh.castShadow = true;
     mesh.receiveShadow = true;
     scene.add(mesh);
-    registerSectorObject(vis, sectorId, mesh);
   }
 }
 
@@ -277,7 +274,7 @@ function buildShaftGuardWalls(physics: Physics, scene: THREE.Scene, vis: SectorV
  * exactly where that floor's own room continues normally — there is no
  * equivalent height mismatch to seal there, for any staircase.
  */
-function buildEntryHeader(physics: Physics, scene: THREE.Scene, vis: SectorVisibility, sectorId: string, geo: RampGeometry): void {
+function buildEntryHeader(physics: Physics, scene: THREE.Scene, geo: RampGeometry): void {
   const loY = geo.entry.y + STAIR_LANDING_HEIGHT_CELLS * UNIT;
   const hiY = geo.exit.y;
   if (hiY <= loY) return; // nothing to seal for a rise this short
@@ -298,46 +295,24 @@ function buildEntryHeader(physics: Physics, scene: THREE.Scene, vis: SectorVisib
   mesh.castShadow = true;
   mesh.receiveShadow = true;
   scene.add(mesh);
-  registerSectorObject(vis, sectorId, mesh);
 }
 
 /** Builds one staircase's real ramp collider, its cosmetic stepped visual,
  * and the guard walls (long sides plus the entry-side header) that keep a
  * climbing player from stepping off it into empty space, between the two
- * floors a `StairConnector` names. `sectorId` is the shaft's own sector
- * (its two flanking `stair_lower`/`stair_upper` tile instances always share
- * one — see docs/LEVEL_DESIGN.md's "Sector id for the pair" note) — every
- * mesh this builds (the visual steps, both guard walls, the entry header)
- * registers under it for `visibility.ts`'s geometry culling, exactly like
- * the generic per-cell walls `tileBuilder.ts` builds. */
-export function buildStaircase(physics: Physics, scene: THREE.Scene, vis: SectorVisibility, sectorId: string, connector: StairConnector): void {
+ * floors a `StairConnector` names. */
+export function buildStaircase(physics: Physics, scene: THREE.Scene, connector: StairConnector): void {
   const geo = rampGeometryOf(connector);
   buildRampCollider(physics, geo);
-  buildStairVisual(scene, vis, sectorId, geo);
-  buildShaftGuardWalls(physics, scene, vis, sectorId, geo);
-  buildEntryHeader(physics, scene, vis, sectorId, geo);
+  buildStairVisual(scene, geo);
+  buildShaftGuardWalls(physics, scene, geo);
+  buildEntryHeader(physics, scene, geo);
 }
 
 /** Builds every staircase in the level (issue #86) — called once from
  * `level.ts`'s `buildLevel`, after the generic tile geometry, since a
  * staircase's shaft only has somewhere to go once its two flanking tile
- * instances have already skipped their own floor/ceiling slabs there.
- * `sectorOf` resolves each connector's own sector by its (already-built)
- * occupancy index — see `level.ts`'s use of `sectorAtCell` — since a
- * `StairConnector` is placement data (`placementTypes.ts`) with no
- * `sectorId` field of its own, unlike a `TileInstance`. */
-export function buildStaircases(physics: Physics, scene: THREE.Scene, vis: SectorVisibility, connectors: readonly StairConnector[], sectorOf: (x: number, z: number, floor: number) => string | undefined): void {
-  for (const connector of connectors) {
-    // `connector.x`/`.z` are world *cells* (see `StairConnector`'s own doc
-    // comment in placementTypes.ts), but `sectorOf` (level.ts) takes world
-    // *meters*, same convention as every prop/item/readable placement it
-    // otherwise resolves -- multiplying by `UNIT` converts the (already
-    // integer) cell coordinate to the meter coordinate of that same cell's
-    // interior, which resolves to the identical cell either way.
-    const sectorId = sectorOf(connector.x * UNIT, connector.z * UNIT, connector.floorBelow);
-    if (sectorId === undefined) {
-      throw new Error(`buildStaircases: connector at (${connector.x},${connector.z}) floor ${connector.floorBelow} has no resolvable sector -- is it actually inside a placed stair_lower/stair_upper tile instance?`);
-    }
-    buildStaircase(physics, scene, vis, sectorId, connector);
-  }
+ * instances have already skipped their own floor/ceiling slabs there. */
+export function buildStaircases(physics: Physics, scene: THREE.Scene, connectors: readonly StairConnector[]): void {
+  for (const connector of connectors) buildStaircase(physics, scene, connector);
 }
