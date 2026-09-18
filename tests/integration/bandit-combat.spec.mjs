@@ -10,19 +10,35 @@ function getBandit(npcs) {
 try {
   await page.evaluate(() => window.__vibeDungeonDebug.setPitch(0));
 
-  // Player spawns at (1.5, 7.5); the bandit sits at (1.5, -13) in room-b
-  // with a 6m aggroRange (bandit.ts). The ~18m corridor between spawn and
-  // room-b's doorway is pure transit with nothing under test, so teleport
-  // to just outside the aggro radius (8m out) and walk the real remaining
-  // distance -- that still exercises the actual proximity-triggered aggro,
-  // just without the long walk to get there first.
-  await debug("teleportPlayer", 1.5, 0.1, -5);
-  let reachedAggro = false;
-  for (let i = 0; i < 100 && !reachedAggro; i++) {
+  // The bandit relocated from room-b to the cellar (cellar wing task) --
+  // see rooms/cellar.ts -- and now sits at (18, -13.0, floor -1) behind a
+  // real (unlocked) hinged door, with the same 6m aggroRange (bandit.ts).
+  // Its cellar room is only 6m x 6m, so almost the entire room is already
+  // within aggro range of a centrally-placed bandit -- there's no spot
+  // inside the room itself that's meaningfully "outside aggro range" to
+  // teleport to. Instead, teleport onto the downward ramp itself (see
+  // cellar.ts/stairBuilder.ts) at the one point ~6m out along it -- the
+  // ramp climbs linearly from (x=15,y=-6) to (x=6,y=0), so x=12 is exactly
+  // 1/3 of the way up, at y=-4 (an already-established pattern -- see
+  // stairwell-wall-gaps.spec.mjs's own mid-climb teleport).
+  //
+  // Aggro fires the moment the player is within 6m -- which, from the ramp,
+  // is still on the *other side of the closed door* from the bandit, so the
+  // bandit's own CHASING movement gets stuck at the doorway (an NPC never
+  // opens a door itself -- only the player's own interact does, see
+  // `tryInteract` in ecs/systems/doors.ts). So unlike the old room-b
+  // version, this loop doesn't stop the instant aggro fires -- it keeps
+  // walking (and pressing `KeyE` periodically, which opens the door once in
+  // range) all the way up to the bandit, exactly what a real player would
+  // do, rather than standing on the ramp waiting for a bandit that can't
+  // reach them.
+  await debug("teleportPlayer", 12, -3.9, -13.0);
+  for (let i = 0; i < 150; i++) {
+    const bandit = getBandit(await debug("getNpcState"));
     const pos = await debug("getPlayerPosition");
-    const dx = 1.5 - pos.x;
-    const dz = -13 - pos.z;
-    if (Math.hypot(dx, dz) < 1.5) break;
+    const dx = bandit.x - pos.x;
+    const dz = bandit.z - pos.z;
+    if (Math.hypot(dx, dz) < 1.3) break;
     await page.evaluate((y) => window.__vibeDungeonDebug.setYaw(y), Math.atan2(-dx, -dz));
     await page.keyboard.down("KeyW");
     await page.waitForTimeout(100);
@@ -33,8 +49,6 @@ try {
       // blind interact can open its dialogue; dismiss it and carry on.
       if ((await debug("getDialogueState")).isOpen) await debug("closeDialogue");
     }
-    const bandit = getBandit(await debug("getNpcState"));
-    if (bandit.state !== "LOITERING") reachedAggro = true;
   }
 
   let npcs = await debug("getNpcState");
@@ -76,7 +90,7 @@ try {
   assert(banditDead, "player killed the bandit with melee attacks");
   assert(bandit.deathSector !== undefined, `bandit got a DeathSector recorded (${bandit.deathSector})`);
 
-  // --- Lootable corpse (room-b.ts seeds the bandit with a gem) ---
+  // --- Lootable corpse (cellar.ts seeds the bandit with a gem) ---
   let lootOpened = false;
   for (let pitch = -0.2; pitch >= -1.0; pitch -= 0.1) {
     await faceBandit();
