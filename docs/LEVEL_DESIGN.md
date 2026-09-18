@@ -880,3 +880,96 @@ mechanic (a new `rusty_key` item, kept distinct from `key.ts`'s own "key"
 id so the two unrelated locked doors don't share one solution) rather than
 a real minigame — find the key, open the door, same as any other locked
 door in the level.
+
+## Sector-scoped render culling (perf investigation)
+
+As the level grew to ~9 rooms across 3 floors, two things turned out to cost
+real frame time regardless of where the player actually was: every torch's
+shadow-casting light stayed on everywhere, all the time (a full extra
+shadow-map render pass each, per frame), and every wall/floor/ceiling/prop/
+item ever built stayed in the scene graph forever, fully rendered, no matter
+how far from the player it sat. `src/level/visibility.ts` fixes both by
+gating `light.castShadow` and `mesh.visible` off for any sector that isn't
+the player's current one or one open (door/opening) connection away — see
+that file's own header comment for the full mechanics and the "why one hop,
+not current-only" reasoning.
+
+**Nothing new to author.** This runs entirely off the `sectorId` every tile
+instance already needs (see "Use sectorId meaningfully" in the design
+pillars above) and the occupancy index's own open/wall face data — a new
+room built the normal way (a `RoomContent` with real `sectorId`s and real
+door/opening faces connecting it to whatever's next to it) is automatically
+covered: its walls/floor/ceiling/torches/doors register themselves during
+`tileBuilder.ts`'s/`stairBuilder.ts`'s normal build pass, and its
+props/items/readables register themselves during `spawning.ts`'s normal
+spawn pass, each tagged by resolving its own `(x, z, floor)` against the
+occupancy index (`sectorAtCell`, `occupancy.ts`) — no `sectorId` field was
+added to `PropPlacement`/`ItemSpawn`/`ReadablePlacement` for this; the
+existing `x`/`z`/`floor` already say everything needed.
+
+**One real consequence for level shape: a sector with no open connection to
+anything only ever renders while the player is standing directly inside
+it.** This was already effectively true for *reachability* (an isolated
+sector isn't part of the level graph at all, `validateOccupancy` would
+reject an opening facing empty space) — but it's newly true for *visibility*
+too: there's no way, with this system, to build a room meant to be seen from
+a distance through a window or across a courtyard without an actual open
+connection linking it into the sector graph. Nothing in the current level
+wants that effect; worth knowing before designing a feature that does.
+
+**Two categories of registered object are deliberately *not* culled, for
+correctness rather than performance reasons — see their own doc comments for
+the full reasoning (`spawning.ts`'s `spawnNpcs`/`spawnProps`):**
+
+- **NPCs are never registered at all.** A docile NPC can be told to follow
+  the player (`toggleNpcFollow`) and will then cross sector boundaries as a
+  normal, expected part of play — tagging its mesh to its spawn sector would
+  make it visibly vanish mid-follow. There are only a handful of NPCs in the
+  level, so never culling them costs nothing worth trading for that risk.
+- **A dynamic (physics-shoveable) prop or item is registered at its
+  build-time position's sector and never re-tagged if shoved elsewhere by
+  physics** (a barrel pushed through an open doorway into the next room,
+  say) — unlike a *picked-up-and-dropped* item, which `dropCarriedItem`
+  correctly re-tags to wherever it actually lands, since a player interact
+  action is the one point in the whole system that already knows both the
+  item and its new position at once. A shoved prop crossing an entire sector
+  boundary hasn't been observed in practice (this game's dynamic props settle
+  near where they're authored), but if a future mechanic starts routinely
+  flinging heavy props around, this is the corner that would need real
+  per-frame position tracking to close properly.
+
+**Debugging a sector that looks wrong:** `window.__vibeDungeonDebug`'s
+`getVisibilityDebugCounts()` (visible-vs-total objects, active-vs-total
+shadow lights) and `getRendererInfo()` (`renderer.info`'s draw-call/triangle
+counts) are the two hooks written for exactly this — see
+`tests/integration/sector-visibility.spec.mjs` and
+`geometry-culling.spec.mjs` for the pattern (teleport, poll `getCurrentSector`
+until it settles, then read the debug counts) if a new room needs the same
+kind of verification.
+
+**A plain `"opening"` joining two different-height (`h`) tile types needs
+its own header seal, same as a `"door"` does.** Found by this exact perf
+investigation, not by design: `room-b` (`great_hall_branch`, `h: 2`) opens
+directly into `stair_upper` (`h: 1`) via a plain opening (no door leaf
+wanted there), and `tileBuilder.ts`'s wall/door emission pass used to treat
+every `"opening"` as "just empty space, no geometry" unconditionally — fine
+when both sides share one `h` (every `"opening"` in the level did, until
+this one), but a real hole straight through to the scene's background color
+when they don't, since nothing else seals the gap between the shorter
+side's own ceiling height and the taller side's. Fixed generically (any
+future `"opening"` between mismatched `h` values gets the same header a
+`"door"` there would) rather than special-cased to this one instance — see
+the fix's own comment where `effective === "opening"` is handled in
+`buildGeometryFromOccupancy`. Worth checking for on any future opening
+between a full-height room and a low-ceilinged connector type (a hallway,
+a stairwell landing, a nook).
+
+**Real-time shadow-casting torches were disabled globally** (`renderer.
+shadowMap.enabled = false`, `game.ts`) as part of this same perf pass — in
+actual play they were never really visible (small light sources close to
+the flat walls they're mounted on), so a full extra render pass per active
+light was pure cost with no payoff. Every torch still declares its own
+shadow settings and still participates in the sector-based gating above;
+both are simply inert while this flag is `false`, so flipping it back to
+`true` alone restores shadows if a future lighting pass finds a way to make
+them actually read on screen.

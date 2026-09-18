@@ -13,7 +13,19 @@ try {
   }
   assert(bodies.length >= 9, `all props + items are simulated bodies (${bodies.length})`);
   assert(bodies.every((b) => b.speed < 0.02), "everything has come to rest");
-  assert(bodies.every((b) => b.y > -0.2), "nothing fell through the floor");
+  // Not a flat `b.y > -0.2` any more -- the cellar wing (floor -1) put real
+  // dynamic props (crates) at that floor's own baseline, `floorBaseline(-1)`
+  // = -FLOOR_RISE = -6, which is a legitimate resting height, not a fall.
+  // Checks each body settled near *some* floor's baseline (a multiple of
+  // FLOOR_RISE) rather than assuming every dynamic body lives on floor 0.
+  const FLOOR_RISE = 6; // keep in sync with FLOOR_RISE in src/level/tiles.ts
+  assert(
+    bodies.every((b) => {
+      const nearestFloorY = Math.round(b.y / FLOOR_RISE) * FLOOR_RISE;
+      return b.y > nearestFloorY - 0.5;
+    }),
+    "nothing fell through the floor",
+  );
 
   // The gem used to be a floor-spawned dynamic body here too, but now
   // starts inside room-a's barrel instead (see item-door-regression.spec.mjs

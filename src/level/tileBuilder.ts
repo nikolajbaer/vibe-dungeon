@@ -9,7 +9,7 @@ import { parseWorldCellKey, worldCellKey } from "./occupancy";
 import type { LockedDoorSpec } from "./placementTypes";
 import { wallMaterial, floorMaterial, ceilingMaterial, doorMaterial } from "./materials";
 import { addKinematicBox, addStaticBox, type Physics } from "../physics/world";
-import { registerSectorShadowLight, type SectorVisibility } from "./visibility";
+import { registerSectorObject, registerSectorShadowLight, type SectorVisibility } from "./visibility";
 
 // Decomposes a validated tile occupancy index into the wall/floor/ceiling/
 // door boxes the old hand-placed src/level/level.ts used to build directly
@@ -44,7 +44,7 @@ const DOOR_HEIGHT = 2.2;
  * sitting from `DOOR_HEIGHT` up simply doesn't intersect anything walking
  * underneath it.
  */
-function addWall(physics: Physics, scene: THREE.Scene, cx: number, cz: number, hx: number, hz: number, height: number, baseY: number = 0): void {
+function addWall(physics: Physics, scene: THREE.Scene, vis: SectorVisibility, sectorId: string, cx: number, cz: number, hx: number, hz: number, height: number, baseY: number = 0): void {
   const centerY = baseY + height / 2;
   const mesh = new THREE.Mesh(new THREE.BoxGeometry(hx * 2, height, hz * 2), wallMaterial());
   mesh.position.set(cx, centerY, cz);
@@ -55,6 +55,13 @@ function addWall(physics: Physics, scene: THREE.Scene, cx: number, cz: number, h
   mesh.castShadow = true;
   mesh.receiveShadow = true;
   scene.add(mesh);
+
+  // Perf investigation (see visibility.ts): a wall belonging to a sector
+  // that's neither the player's current one nor one open connection away
+  // gets `visible = false` -- purely a rendering skip (the collider below is
+  // completely untouched, so collision/physics behave identically in every
+  // sector regardless of whether the player has ever been near it).
+  registerSectorObject(vis, sectorId, mesh);
 
   addStaticBox(physics, cx, centerY, cz, hx, height / 2, hz);
 }
@@ -68,7 +75,7 @@ const SLAB_HALF_THICKNESS = 0.1;
  * `kind` is also stamped onto `userData.slabKind` as an identification tag
  * for external consumers (the level viewer hides ceilings to see inside a
  * room from outside — see `src/viewer/`). */
-function addSlab(physics: Physics, scene: THREE.Scene, cx: number, cz: number, hx: number, hz: number, y: number, material: THREE.Material, kind: "floor" | "ceiling"): void {
+function addSlab(physics: Physics, scene: THREE.Scene, vis: SectorVisibility, sectorId: string, cx: number, cz: number, hx: number, hz: number, y: number, material: THREE.Material, kind: "floor" | "ceiling"): void {
   const mesh = new THREE.Mesh(new THREE.BoxGeometry(hx * 2, SLAB_HALF_THICKNESS * 2, hz * 2), material);
   mesh.position.set(cx, y, cz);
   mesh.userData.slabKind = kind;
@@ -77,6 +84,8 @@ function addSlab(physics: Physics, scene: THREE.Scene, cx: number, cz: number, h
   // cast since nothing subsequently placed relies on their shadow.
   mesh.receiveShadow = true;
   scene.add(mesh);
+
+  registerSectorObject(vis, sectorId, mesh);
 
   addStaticBox(physics, cx, y, cz, hx, SLAB_HALF_THICKNESS, hz);
 }
@@ -175,6 +184,25 @@ function addTorch(
   light.shadow.camera.near = 0.1;
   light.shadow.camera.far = TORCH_LIGHT_RANGE;
   light.shadow.bias = -0.002;
+  // Perf follow-up on the sector-gating above: three.js re-renders a
+  // shadow-casting light's shadow map from scratch every frame by default
+  // (`light.shadow.autoUpdate`, true by default), even though nothing near
+  // most torches ever moves — the level's static geometry never changes
+  // shape, so a shadow map computed once stays correct until something that
+  // actually casts a shadow (the player, an NPC) moves through this light's
+  // range. `light.shadow.autoUpdate = false` turns that automatic
+  // every-frame re-render off; `visibility.ts`'s `refreshDynamicShadows`
+  // (called once per rendered frame from game.ts) is what sets
+  // `shadow.needsUpdate = true` for exactly the frames that actually need a
+  // fresh render — a mover in range, or this light just having turned back
+  // on (see `applySectorVisibility`'s own transition handling) — rather
+  // than every frame unconditionally. This is a cheaper approximation of
+  // "bake the shadows once": not a true offline lightmap bake (this level's
+  // procedurally-generated geometry has no UV2 unwrap for one, and baking
+  // would need its own one-time render pass and texture storage), but it
+  // gets most of the same win for near-zero additional complexity, reusing
+  // the sector registry this module already threads through.
+  light.shadow.autoUpdate = false;
   group.add(light);
 
   // Perf investigation (see visibility.ts's header comment): a shadow-casting
@@ -185,6 +213,12 @@ function addTorch(
   // the player's current one or one open connection away, with zero visual
   // change to whichever room(s) actually matter right now.
   registerSectorShadowLight(vis, sectorId, light);
+  // Same gating, applied to the torch's own visual bracket+flame geometry
+  // (step 3 of the perf investigation, geometry culling) -- the light's
+  // shadow-casting is gated separately above since a torch just past a
+  // doorway should keep lighting the room the player is standing in even
+  // while its own tiny visual mesh (in the next room over) is hidden.
+  registerSectorObject(vis, sectorId, group);
 }
 
 /**
@@ -205,6 +239,8 @@ function addDoorLeaf(
   world: World,
   physics: Physics,
   scene: THREE.Scene,
+  vis: SectorVisibility,
+  sectorId: string,
   leafCx: number,
   leafCz: number,
   hx: number,
@@ -222,6 +258,15 @@ function addDoorLeaf(
   const group = new THREE.Group();
   group.position.set(hingeX, closedY, hingeZ);
   scene.add(group);
+  // A door sits exactly on a sector boundary, tagged with whichever cell
+  // "owns" the boundary for wall/door emission purposes (see `WALL_DIRS`) --
+  // since that owning sector is always either the player's current sector or
+  // one open connection away whenever the player is on either side of the
+  // door (the door itself *is* the open connection), this never hides a door
+  // the player could actually be standing next to. Never affects the door's
+  // kinematic collider below -- interacting with (and colliding with) a door
+  // works identically whether or not its leaf is currently drawn.
+  registerSectorObject(vis, sectorId, group);
 
   const mesh = new THREE.Mesh(new THREE.BoxGeometry(hx * 2, DOOR_HEIGHT, hz * 2), doorMaterial(!!requiredItemTypeId));
   mesh.position.set(offsetX, 0, offsetZ);
@@ -262,7 +307,7 @@ function addDoorLeaf(
  * doorway (see `addWall`). It's a separate box from the door leaves and
  * never affects leaf swinging, which still only occupies `0..DOOR_HEIGHT`.
  */
-function addDoorPair(world: World, physics: Physics, scene: THREE.Scene, orientation: "x" | "z", planeCoord: number, rangeStart: number, rangeEnd: number, wallHeight: number, floorBase: number, requiredItemTypeId: string | undefined): void {
+function addDoorPair(world: World, physics: Physics, scene: THREE.Scene, vis: SectorVisibility, sectorId: string, orientation: "x" | "z", planeCoord: number, rangeStart: number, rangeEnd: number, wallHeight: number, floorBase: number, requiredItemTypeId: string | undefined): void {
   const leafHalf = (rangeEnd - rangeStart) / 4; // half-width of each ~1.5m leaf
 
   let eidA: number;
@@ -270,13 +315,13 @@ function addDoorPair(world: World, physics: Physics, scene: THREE.Scene, orienta
   if (orientation === "x") {
     // Wall plane at constant X (a +x/-x boundary); leaves split the Z span,
     // slab thickness runs along X.
-    eidA = addDoorLeaf(world, physics, scene, planeCoord, rangeStart + leafHalf, WALL_THICKNESS, leafHalf, planeCoord, rangeStart, 1, floorBase, requiredItemTypeId);
-    eidB = addDoorLeaf(world, physics, scene, planeCoord, rangeEnd - leafHalf, WALL_THICKNESS, leafHalf, planeCoord, rangeEnd, -1, floorBase, requiredItemTypeId);
+    eidA = addDoorLeaf(world, physics, scene, vis, sectorId, planeCoord, rangeStart + leafHalf, WALL_THICKNESS, leafHalf, planeCoord, rangeStart, 1, floorBase, requiredItemTypeId);
+    eidB = addDoorLeaf(world, physics, scene, vis, sectorId, planeCoord, rangeEnd - leafHalf, WALL_THICKNESS, leafHalf, planeCoord, rangeEnd, -1, floorBase, requiredItemTypeId);
   } else {
     // Wall plane at constant Z (a +z/-z boundary); leaves split the X span,
     // slab thickness runs along Z.
-    eidA = addDoorLeaf(world, physics, scene, rangeStart + leafHalf, planeCoord, leafHalf, WALL_THICKNESS, rangeStart, planeCoord, 1, floorBase, requiredItemTypeId);
-    eidB = addDoorLeaf(world, physics, scene, rangeEnd - leafHalf, planeCoord, leafHalf, WALL_THICKNESS, rangeEnd, planeCoord, -1, floorBase, requiredItemTypeId);
+    eidA = addDoorLeaf(world, physics, scene, vis, sectorId, rangeStart + leafHalf, planeCoord, leafHalf, WALL_THICKNESS, rangeStart, planeCoord, 1, floorBase, requiredItemTypeId);
+    eidB = addDoorLeaf(world, physics, scene, vis, sectorId, rangeEnd - leafHalf, planeCoord, leafHalf, WALL_THICKNESS, rangeEnd, planeCoord, -1, floorBase, requiredItemTypeId);
   }
   Door.pairId[eidA] = eidA;
   Door.pairId[eidB] = eidA;
@@ -286,9 +331,9 @@ function addDoorPair(world: World, physics: Physics, scene: THREE.Scene, orienta
     const cRange = (rangeStart + rangeEnd) / 2;
     const hRange = (rangeEnd - rangeStart) / 2;
     if (orientation === "x") {
-      addWall(physics, scene, planeCoord, cRange, WALL_THICKNESS, hRange, headerHeight, floorBase + DOOR_HEIGHT);
+      addWall(physics, scene, vis, sectorId, planeCoord, cRange, WALL_THICKNESS, hRange, headerHeight, floorBase + DOOR_HEIGHT);
     } else {
-      addWall(physics, scene, cRange, planeCoord, hRange, WALL_THICKNESS, headerHeight, floorBase + DOOR_HEIGHT);
+      addWall(physics, scene, vis, sectorId, cRange, planeCoord, hRange, WALL_THICKNESS, headerHeight, floorBase + DOOR_HEIGHT);
     }
   }
 }
@@ -306,6 +351,11 @@ interface InstanceBounds {
    * per `TileType.skipFloorSlab`/`skipCeilingSlab` (a staircase's landings —
    * see `stair_lower.ts`/`stair_upper.ts`). */
   tileTypeId: string;
+  /** The instance's sector — every cell of one instance shares one sector id
+   * (see docs/LEVEL_DESIGN.md's "use sectorId meaningfully" pillar), so its
+   * floor/ceiling slabs register under this same id for `visibility.ts`'s
+   * geometry culling. */
+  sectorId: string;
 }
 
 /** A pending wall or door segment, collected in cell-grid units during the
@@ -445,7 +495,7 @@ function emitWalls(physics: Physics, scene: THREE.Scene, segments: Segment[], vi
       if (zWallCorners.has(cornerKey(seg.planeCell, seg.rangeStartCell + 1))) rangeEnd += WALL_THICKNESS;
       const cz = (rangeStart + rangeEnd) / 2;
       const hz = (rangeEnd - rangeStart) / 2;
-      addWall(physics, scene, planeCoord, cz, WALL_THICKNESS, hz, seg.wallHeight, floorBase);
+      addWall(physics, scene, vis, seg.sectorId, planeCoord, cz, WALL_THICKNESS, hz, seg.wallHeight, floorBase);
       if (torchSegments.has(seg)) {
         addTorch(scene, planeCoord + seg.interiorSign * WALL_THICKNESS, along, seg.wallHeight, "x", seg.interiorSign, floorBase, seg.sectorId, vis);
       }
@@ -454,7 +504,7 @@ function emitWalls(physics: Physics, scene: THREE.Scene, segments: Segment[], vi
       if (xWallCorners.has(cornerKey(seg.rangeStartCell + 1, seg.planeCell))) rangeEnd += WALL_THICKNESS;
       const cx = (rangeStart + rangeEnd) / 2;
       const hx = (rangeEnd - rangeStart) / 2;
-      addWall(physics, scene, cx, planeCoord, hx, WALL_THICKNESS, seg.wallHeight, floorBase);
+      addWall(physics, scene, vis, seg.sectorId, cx, planeCoord, hx, WALL_THICKNESS, seg.wallHeight, floorBase);
       if (torchSegments.has(seg)) {
         addTorch(scene, along, planeCoord + seg.interiorSign * WALL_THICKNESS, seg.wallHeight, "z", seg.interiorSign, floorBase, seg.sectorId, vis);
       }
@@ -485,7 +535,7 @@ export function buildGeometryFromOccupancy(world: World, physics: Physics, scene
     const { x, z } = parseWorldCellKey(key);
     const b = bounds.get(cell.instanceId);
     if (!b) {
-      bounds.set(cell.instanceId, { minX: x, maxX: x, minZ: z, maxZ: z, heightCells: cell.heightCells, floor: cell.floor, tileTypeId: cell.tileTypeId });
+      bounds.set(cell.instanceId, { minX: x, maxX: x, minZ: z, maxZ: z, heightCells: cell.heightCells, floor: cell.floor, tileTypeId: cell.tileTypeId, sectorId: cell.sectorId });
     } else {
       b.minX = Math.min(b.minX, x);
       b.maxX = Math.max(b.maxX, x);
@@ -506,8 +556,8 @@ export function buildGeometryFromOccupancy(world: World, physics: Physics, scene
     // through where one would sit) and the upper landing has no floor (it
     // stands on riser geometry instead — see `stairBuilder.ts`). Every other
     // tile type leaves both flags unset and gets the normal pair of slabs.
-    if (!type?.skipFloorSlab) addSlab(physics, scene, cx, cz, hx, hz, floorBase - 0.1, floorMaterial(), "floor");
-    if (!type?.skipCeilingSlab) addSlab(physics, scene, cx, cz, hx, hz, ceilingY + 0.1, ceilingMaterial(), "ceiling");
+    if (!type?.skipFloorSlab) addSlab(physics, scene, vis, b.sectorId, cx, cz, hx, hz, floorBase - 0.1, floorMaterial(), "floor");
+    if (!type?.skipCeilingSlab) addSlab(physics, scene, vis, b.sectorId, cx, cz, hx, hz, ceilingY + 0.1, ceilingMaterial(), "ceiling");
   }
 
   // --- Walls & doors, one segment per unit-cell face. A shared boundary
@@ -540,7 +590,37 @@ export function buildGeometryFromOccupancy(world: World, physics: Physics, scene
         effective = kind;
       }
 
-      if (effective === "opening") continue; // just empty space, no geometry
+      if (effective === "opening") {
+        // A plain opening (no door leaf, so none of `addDoorPair`'s own
+        // header-capping logic below ever runs for it) still needs sealing
+        // above the shorter side's own wall height when the two tiles it
+        // joins have different `h` -- otherwise the taller side's ceiling
+        // simply never gets closed off on this boundary at all, leaving a
+        // real hole straight through to empty world space (the scene's flat
+        // background color) rather than a wall or a ceiling.
+        //
+        // Every "opening" this level had before the cellar wing happened to
+        // join same-height tiles (a hallway/nook/landing next to another of
+        // the same or a matching `h: 1`), so this gap never showed up in
+        // practice. `room-b` (`great_hall_branch`, `h: 2`) opening directly
+        // into `stair_upper` (`h: 1`) is the first mismatch — found by
+        // actually looking through that opening from inside room-b and
+        // seeing straight through to the background rather than a sealed
+        // ceiling transition.
+        if (neighbor && neighbor.heightCells !== cell.heightCells) {
+          const neighborWallHeight = neighbor.heightCells * UNIT;
+          const loHeight = Math.min(wallHeight, neighborWallHeight);
+          const hiHeight = Math.max(wallHeight, neighborWallHeight);
+          if (dir.dx !== 0) {
+            const planeCell = dir.dx > 0 ? x + 1 : x;
+            addWall(physics, scene, vis, cell.sectorId, planeCell * UNIT, (z + 0.5) * UNIT, WALL_THICKNESS, UNIT / 2, hiHeight - loHeight, floorBase + loHeight);
+          } else {
+            const planeCell = dir.dz > 0 ? z + 1 : z;
+            addWall(physics, scene, vis, cell.sectorId, (x + 0.5) * UNIT, planeCell * UNIT, UNIT / 2, WALL_THICKNESS, hiHeight - loHeight, floorBase + loHeight);
+          }
+        }
+        continue; // still no geometry across the opening's own walkable height
+      }
 
       // A door's header must reach the taller of the two rooms it connects
       // (e.g. a great_hall door opening onto a lower-ceilinged hallway) —
@@ -567,7 +647,7 @@ export function buildGeometryFromOccupancy(world: World, physics: Physics, scene
             sectorId: cell.sectorId,
           });
         } else {
-          addDoorPair(world, physics, scene, "x", planeCell * UNIT, z * UNIT, (z + 1) * UNIT, doorHeaderHeight, floorBase, requiredItemTypeId);
+          addDoorPair(world, physics, scene, vis, cell.sectorId, "x", planeCell * UNIT, z * UNIT, (z + 1) * UNIT, doorHeaderHeight, floorBase, requiredItemTypeId);
         }
       } else {
         // +z or -z boundary: a plane of constant Z, spanning this cell's X extent.
@@ -585,7 +665,7 @@ export function buildGeometryFromOccupancy(world: World, physics: Physics, scene
             sectorId: cell.sectorId,
           });
         } else {
-          addDoorPair(world, physics, scene, "z", planeCell * UNIT, x * UNIT, (x + 1) * UNIT, doorHeaderHeight, floorBase, requiredItemTypeId);
+          addDoorPair(world, physics, scene, vis, cell.sectorId, "z", planeCell * UNIT, x * UNIT, (x + 1) * UNIT, doorHeaderHeight, floorBase, requiredItemTypeId);
         }
       }
     }
