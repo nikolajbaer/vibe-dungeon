@@ -8,6 +8,16 @@ import { NPC_REGISTRY } from "../assets/npcRegistry";
 import type { PropPlacement, ItemSpawn, NpcSpawn, ReadablePlacement, ContentsEntry } from "./placementTypes";
 import { floorBaseline } from "./tiles";
 import { addCharacter, addDynamicBox, addStaticBox, type BoxShape, type Physics } from "../physics/world";
+import { registerSectorObject, retagSectorObject, type SectorVisibility } from "./visibility";
+
+// Perf investigation (see visibility.ts): a placement's own `x`/`z`/`floor`
+// (not a `sectorId` field -- unlike a `TileInstance`, none of `PropPlacement`/
+// `ItemSpawn`/`NpcSpawn`/`ReadablePlacement` carry one, see placementTypes.ts)
+// is enough to resolve which sector it belongs to via the already-built
+// occupancy index, so every spawner below takes this resolver rather than a
+// new authoring field -- placing a prop/item/NPC/readable inside a room
+// tags it for geometry culling automatically, with nothing new to author.
+export type SectorOf = (x: number, z: number, floor: number) => string | undefined;
 
 // Generic spawners for the asset-authoring system: turn plain `PropPlacement`/
 // `ItemSpawn` data (src/level/rooms/*.ts) into real ECS entities + three.js
@@ -143,8 +153,16 @@ function addPropCollider(physics: Physics, x: number, z: number, hx: number, hy:
  * time instead of level-load time. Assumes `eid` already has `Item` (with
  * `itemTypeId` set) — everything else (`Position`/`Object3DRef`/
  * `DynamicBody`/`PhysicsBody`/`PhysicsRotation`) is added here.
+ *
+ * `sector` (perf investigation, `visibility.ts`) is `undefined` for a
+ * runtime drop (`dropCarriedItem` below never resolves one) — an item
+ * dropped by the player mid-game simply stays permanently visible rather
+ * than being tagged into the geometry-culling system, a deliberate "fail
+ * open, never incorrectly hidden" choice for the rare, low-volume case of
+ * player-dropped items (see `visibility.ts`'s own registration functions'
+ * `undefined`-sectorId handling).
  */
-function buildItemWorldBody(world: World, physics: Physics, scene: THREE.Scene, eid: number, def: ItemAssetDef, x: number, y: number, z: number): void {
+function buildItemWorldBody(world: World, physics: Physics, scene: THREE.Scene, vis: SectorVisibility, sector: string | undefined, eid: number, def: ItemAssetDef, x: number, y: number, z: number): void {
   addComponent(world, eid, Position);
   addComponent(world, eid, Object3DRef);
   addComponent(world, eid, DynamicBody);
@@ -166,6 +184,7 @@ function buildItemWorldBody(world: World, physics: Physics, scene: THREE.Scene, 
   PhysicsRotation.w[eid] = 1; // identity until the first physics step
   scene.add(group);
   Object3DRef[eid] = group;
+  registerSectorObject(vis, sector, group);
 
   PhysicsBody[eid] = addDynamicBox(physics, x, y, z, 0, shape, def.mass ?? DEFAULT_ITEM_MASS);
 }
@@ -216,7 +235,7 @@ function spawnContentsItem(world: World, callerLabel: string, ownerEid: number, 
   }
 }
 
-export function spawnItems(world: World, physics: Physics, scene: THREE.Scene, spawns: ItemSpawn[]): void {
+export function spawnItems(world: World, physics: Physics, scene: THREE.Scene, vis: SectorVisibility, sectorOf: SectorOf, spawns: ItemSpawn[]): void {
   for (const spawn of spawns) {
     const def = ITEM_REGISTRY[spawn.id];
     if (!def) throw new Error(`spawnItems: unknown item id "${spawn.id}"`);
@@ -254,9 +273,10 @@ export function spawnItems(world: World, physics: Physics, scene: THREE.Scene, s
     }
 
     const x = spawn.x;
-    const y = floorBaseline(spawn.floor ?? 0) + (spawn.y ?? ITEM_HEIGHT);
+    const floor = spawn.floor ?? 0;
+    const y = floorBaseline(floor) + (spawn.y ?? ITEM_HEIGHT);
     const z = spawn.z;
-    buildItemWorldBody(world, physics, scene, eid, def, x, y, z);
+    buildItemWorldBody(world, physics, scene, vis, sectorOf(x, z, floor), eid, def, x, y, z);
   }
 }
 
@@ -281,7 +301,7 @@ export function spawnItems(world: World, physics: Physics, scene: THREE.Scene, s
  * Called from game.ts's `InventoryActions.drop`, itself triggered by the
  * inventory panel's drop zone (`inventory/DropZone.tsx`).
  */
-export function dropCarriedItem(world: World, physics: Physics, scene: THREE.Scene, itemEid: number, x: number, y: number, z: number): void {
+export function dropCarriedItem(world: World, physics: Physics, scene: THREE.Scene, vis: SectorVisibility, sector: string | undefined, itemEid: number, x: number, y: number, z: number): void {
   removeComponent(world, itemEid, Carried);
 
   const existingBody = PhysicsBody[itemEid];
@@ -293,12 +313,22 @@ export function dropCarriedItem(world: World, physics: Physics, scene: THREE.Sce
     existingBody.setRotation({ x: 0, y: 0, z: 0, w: 1 }, true);
     existingBody.setEnabled(true);
     existingMesh.visible = true;
+    // This mesh may already be registered under whatever sector it was
+    // originally *spawned* in (see `buildItemWorldBody`) -- meaningless now
+    // that it's been carried off and dropped somewhere else, possibly a
+    // completely different sector. `sector` is the caller's own
+    // already-resolved current sector (game.ts already computes this via
+    // `level.sectorAt` every frame for its own sector-tracking, so the drop
+    // handler just passes that straight through) -- re-tagging here keeps a
+    // dropped-and-re-picked-up-elsewhere item correctly gated by wherever it
+    // actually now sits, rather than permanently exempt from culling.
+    retagSectorObject(existingMesh, sector);
     return;
   }
 
   const def = ITEM_REGISTRY[Item.itemTypeId[itemEid]];
   if (!def) throw new Error(`dropCarriedItem: unknown item id "${Item.itemTypeId[itemEid]}"`);
-  buildItemWorldBody(world, physics, scene, itemEid, def, x, y, z);
+  buildItemWorldBody(world, physics, scene, vis, sector, itemEid, def, x, y, z);
 }
 
 const NPC_INITIAL_WANDER_PAUSE = 2; // seconds before its first idle wander leg
@@ -321,6 +351,20 @@ const HUMANOID_HEIGHT = 1.75;
  * `Carried` items owned by the NPC, found on its corpse once killed. Throws
  * if a spawn references an unknown archetype id, an unknown item id in
  * `contents`, or a `contents` entry that's itself a container.
+ *
+ * Deliberately **not** registered with `visibility.ts`'s geometry-culling
+ * system (unlike static props/items/readables — see `spawnProps`/
+ * `spawnItems`/`spawnReadables` below), even though it would seem the same:
+ * a docile NPC can be told to follow the player (`toggleNpcFollow`), and a
+ * following NPC walks with the player across sector boundaries as a normal,
+ * expected part of play — not a rare physics-shove edge case like a dynamic
+ * prop's. Tagging its mesh to its spawn sector would make it visibly vanish
+ * mid-follow the moment the player (and the NPC right beside them) crosses
+ * into a sector two-or-more connections from wherever the NPC started. An
+ * NPC's mesh simply stays permanently visible instead (the same "fail open"
+ * default every other unregistered object gets) — there are only a handful
+ * of NPCs in the whole level, so the perf cost of never culling them is
+ * negligible next to the correctness risk of getting this wrong.
  */
 export function spawnNpcs(world: World, physics: Physics, scene: THREE.Scene, spawns: NpcSpawn[]): void {
   for (const spawn of spawns) {
@@ -400,7 +444,7 @@ export function spawnNpcs(world: World, physics: Physics, scene: THREE.Scene, sp
  *
  * Throws if a placement references an unknown furniture id.
  */
-export function spawnProps(world: World, physics: Physics, scene: THREE.Scene, placements: PropPlacement[]): void {
+export function spawnProps(world: World, physics: Physics, scene: THREE.Scene, vis: SectorVisibility, sectorOf: SectorOf, placements: PropPlacement[]): void {
   for (const placement of placements) {
     const def = FURNITURE_REGISTRY[placement.id];
     if (!def) throw new Error(`spawnProps: unknown furniture id "${placement.id}"`);
@@ -410,7 +454,8 @@ export function spawnProps(world: World, physics: Physics, scene: THREE.Scene, p
 
     const mesh = def.createMesh(placement.params);
     const x = placement.x;
-    const y = floorBaseline(placement.floor ?? 0) + (placement.y ?? 0);
+    const floor = placement.floor ?? 0;
+    const y = floorBaseline(floor) + (placement.y ?? 0);
     const z = placement.z;
     const yaw = placement.rotation ?? 0;
 
@@ -467,6 +512,18 @@ export function spawnProps(world: World, physics: Physics, scene: THREE.Scene, p
       PhysicsRotation.w[eid] = Math.cos(yaw / 2);
       Object3DRef[eid] = mesh;
       PhysicsBody[eid] = addDynamicBox(physics, x, y, z, yaw, shape, def.dynamic.mass);
+      // Perf investigation (see visibility.ts): registered at its authored
+      // (build-time) position's sector, same as every other static-at-load
+      // registration. A dynamic prop *can* in principle be shoved far enough
+      // to cross into a different sector (issue-class known limitation, see
+      // this PR's report) -- not corrected the way a picked-up-and-dropped
+      // item is (`dropCarriedItem` retags on drop), since nothing else in
+      // this codebase already tracks "which container/NPC last shoved this,"
+      // and it would need real per-frame position tracking to fix properly.
+      // Not observed in practice: this game's dynamic props (barrels,
+      // crates, tables) settle near where they're authored and don't get
+      // shoved room-to-room in normal play.
+      registerSectorObject(vis, sectorOf(x, z, floor), mesh);
 
       if (def.container && containerHitbox) {
         addComponent(world, eid, Container);
@@ -485,6 +542,10 @@ export function spawnProps(world: World, physics: Physics, scene: THREE.Scene, p
     mesh.position.set(x, y, z);
     mesh.rotation.y = yaw;
     scene.add(mesh);
+    // A static prop's own position never changes after this, so unlike the
+    // dynamic branch above there's no "could get shoved elsewhere" caveat --
+    // safe to register unconditionally.
+    registerSectorObject(vis, sectorOf(x, z, floor), mesh);
 
     // Compared against the *placement's own* relative height, not the
     // absolute world `y` above — a ground-level prop on the upper floor has
@@ -518,7 +579,7 @@ const READABLE_HITBOX_RADIUS = 0.4;
  * pages — the same "fail loudly at load time" philosophy as
  * `occupancy.ts`'s `validateOccupancy`.
  */
-export function spawnReadables(world: World, scene: THREE.Scene, placements: ReadablePlacement[]): void {
+export function spawnReadables(world: World, scene: THREE.Scene, vis: SectorVisibility, sectorOf: SectorOf, placements: ReadablePlacement[]): void {
   for (const placement of placements) {
     const def = FURNITURE_REGISTRY[placement.id];
     if (!def) throw new Error(`spawnReadables: unknown furniture id "${placement.id}"`);
@@ -547,11 +608,15 @@ export function spawnReadables(world: World, scene: THREE.Scene, placements: Rea
     group.add(mesh, hitbox);
 
     const x = placement.x;
-    const y = floorBaseline(placement.floor ?? 0) + (placement.y ?? 0);
+    const floor = placement.floor ?? 0;
+    const y = floorBaseline(floor) + (placement.y ?? 0);
     const z = placement.z;
     group.position.set(x, y, z);
     group.rotation.y = placement.rotation ?? 0;
     scene.add(group);
     Object3DRef[eid] = group;
+    // A poster/notice fixture never moves once placed -- no dynamic-prop
+    // caveat needed here (see spawnProps above).
+    registerSectorObject(vis, sectorOf(x, z, floor), group);
   }
 }
