@@ -93,8 +93,8 @@ const TORCH_BRACKET_THICKNESS = 0.06;
 const TORCH_FLAME_RADIUS = 0.09;
 const TORCH_FLAME_HEIGHT = 0.22;
 const TORCH_LIGHT_COLOR = 0xffaa55; // warm torchlight
-const TORCH_LIGHT_INTENSITY = 1.4;
-const TORCH_LIGHT_RANGE = 6; // meters — a warm pool of light, not a room-flooding one
+const TORCH_LIGHT_INTENSITY = 1.82; // +30% over the original 1.4 -- main rooms read too dark with just two of these per room
+const TORCH_LIGHT_RANGE = 7.8; // meters, +30% over the original 6 -- still a warm pool, not room-flooding, just a wider one
 
 let torchBracketMaterial: THREE.MeshStandardMaterial | null = null;
 function getTorchBracketMaterial(): THREE.MeshStandardMaterial {

@@ -2,7 +2,7 @@ import * as THREE from "three";
 import { hasComponent, query, type World } from "bitecs";
 import { Dead, DeathSector, Door, DoorState, Object3DRef, PhysicsBody, Position, NPC, Item, Carried, PlayerControlled, Readable, Container } from "../components";
 import { toggleNpcFollow } from "./npc";
-import { pickUpItem } from "./items";
+import { pickUpItem, type PickUpResult } from "./items";
 import { NPC_REGISTRY } from "../../assets/npcRegistry";
 import { dialogueStore } from "../../dialogue/store";
 import { hudStore } from "../../hud/store";
@@ -243,12 +243,17 @@ function dispatchInteract(world: World, hitEid: number): boolean {
   return false;
 }
 
+/** Shows the right HUD message for a refused `pickUpItem` — a no-op for
+ * `"picked-up"`. Shared by both pickup paths below. */
+function showPickUpRefusal(result: PickUpResult): void {
+  if (result === "too-heavy") hudStore.showMessage("Too heavy to carry.");
+  else if (result === "inventory-full") hudStore.showMessage("Inventory is full.");
+}
+
 function pickUpItemEid(world: World, itemEid: number): boolean {
   const [playerEid] = query(world, [PlayerControlled]);
   if (playerEid === undefined) return false;
-  if (!pickUpItem(world, itemEid, playerEid)) {
-    hudStore.showMessage("Too heavy to carry.");
-  }
+  showPickUpRefusal(pickUpItem(world, itemEid, playerEid));
   return true; // handled either way — don't fall through to something else
 }
 
@@ -277,9 +282,7 @@ function tryPickupNearbyItem(world: World): boolean {
     }
   }
   if (nearestEid === undefined) return false;
-  if (!pickUpItem(world, nearestEid, playerEid)) {
-    hudStore.showMessage("Too heavy to carry.");
-  }
+  showPickUpRefusal(pickUpItem(world, nearestEid, playerEid));
   return true; // handled either way — don't fall through to something else
 }
 

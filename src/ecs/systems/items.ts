@@ -22,6 +22,18 @@ export function isHandSlot(slot: CarriedSlot): slot is HandSlot {
  * everything at once isn't — without a backpack, anyway. */
 export const BASE_CARRY_WEIGHT = 5;
 
+/** Max number of distinct entries the player's main inventory list
+ * (`Carried.slot === "inventory"`) can hold — equipped items (either hand
+ * slot) and whatever's zipped inside a carried backpack don't count against
+ * this, so it's specifically "how many separate things can you be holding
+ * loose at once," not a total-item cap. A `Stackable` entity (a coin pile)
+ * is one slot no matter its count — see `wouldExceedInventorySlots` below —
+ * since stacking exists specifically to avoid spending a slot per pickup.
+ * Carrying a backpack is the way to hold more than this at once: its own
+ * contents get their own separate item-count capacity
+ * (`ItemAssetDef.container.capacity`). */
+export const MAX_INVENTORY_SLOTS = 6;
+
 /** Weight (kg) for an item type that doesn't declare `mass` — intentionally
  * a separate constant from `DEFAULT_ITEM_MASS` in level/spawning.ts (that
  * one's a physics-feel default for a world item's falling body; this one's
@@ -139,6 +151,39 @@ function findStack(world: World, ownerEid: number, itemTypeId: string, excludeEi
   return undefined;
 }
 
+/** Number of distinct entities currently sitting in `ownerEid`'s main
+ * inventory list (`Carried.slot === "inventory"`) — a multi-count
+ * `Stackable` entity (a coin pile) is still just one entry, whatever its
+ * count, and a 0-count merged-away one doesn't count at all. Doesn't look
+ * at hand slots or anything zipped inside a carried container — see
+ * `MAX_INVENTORY_SLOTS`'s doc comment for why those don't count against
+ * this. */
+function inventorySlotCount(world: World, ownerEid: number): number {
+  let count = 0;
+  for (const eid of query(world, [Item, Carried])) {
+    if (Carried.ownerEid[eid] !== ownerEid) continue;
+    if (Carried.slot[eid] !== "inventory") continue;
+    if (hasComponent(world, eid, Stackable) && Stackable.count[eid] <= 0) continue;
+    count++;
+  }
+  return count;
+}
+
+/** True if giving `itemEid` to `ownerEid`'s main inventory list (slot
+ * `"inventory"`) would need a slot beyond `MAX_INVENTORY_SLOTS` — `false`
+ * if `itemEid` would instead merge into a stack `ownerEid`'s list already
+ * holds (`findStack`), since merging never spends a new slot regardless of
+ * how full the list already is. Used by `pickUpItem` below (a fresh world
+ * pickup) and game.ts's container `moveToPlayer`/`unequip` actions —
+ * anywhere something is about to land in slot `"inventory"` specifically;
+ * equipping into a hand slot or storing into a container never needs this
+ * check, since neither targets the capped list. */
+export function wouldExceedInventorySlots(world: World, ownerEid: number, itemEid: number): boolean {
+  const itemTypeId = Item.itemTypeId[itemEid];
+  if (hasComponent(world, itemEid, Stackable) && findStack(world, ownerEid, itemTypeId, itemEid) !== undefined) return false;
+  return inventorySlotCount(world, ownerEid) >= MAX_INVENTORY_SLOTS;
+}
+
 /**
  * Gives `quantity` units of `itemEid` to `destOwnerEid` — the general
  * "hand this item to someone" mechanic behind a fresh world pickup
@@ -207,6 +252,12 @@ export function giveItem(world: World, itemEid: number, destOwnerEid: number, qu
   }
 }
 
+/** What `pickUpItem` actually did — `"too-heavy"`/`"inventory-full"` let
+ * callers (`doors.ts`) show the right refusal message rather than one
+ * generic one, since a fresh pickup can be blocked for either reason
+ * independently. */
+export type PickUpResult = "picked-up" | "too-heavy" | "inventory-full";
+
 /**
  * Picks up a world item: called from the `Item` branch of `tryInteract`
  * (doors.ts) when the interact raycast hits an `Item` entity that has no
@@ -220,12 +271,16 @@ export function giveItem(world: World, itemEid: number, destOwnerEid: number, qu
  * which `giveItem` always adds to `itemEid` regardless of whether it merged
  * away).
  *
- * Returns false (and does nothing else) if `ownerEid` is already carrying
- * too much (`wouldExceedCarryWeight`) — callers (`doors.ts`) are expected to
- * show a message and still treat the interact as handled either way.
+ * Does nothing else and reports why if `ownerEid` is already carrying too
+ * much (`wouldExceedCarryWeight`) or their inventory list is already full
+ * (`wouldExceedInventorySlots`, checked second so a too-heavy pickup always
+ * gets that message even when the list also happens to be full) —
+ * `doors.ts` is expected to show a message either way and still treat the
+ * interact as handled.
  */
-export function pickUpItem(world: World, itemEid: number, ownerEid: number): boolean {
-  if (wouldExceedCarryWeight(world, ownerEid, itemEid)) return false;
+export function pickUpItem(world: World, itemEid: number, ownerEid: number): PickUpResult {
+  if (wouldExceedCarryWeight(world, ownerEid, itemEid)) return "too-heavy";
+  if (wouldExceedInventorySlots(world, ownerEid, itemEid)) return "inventory-full";
 
   giveItem(world, itemEid, ownerEid);
 
@@ -238,7 +293,7 @@ export function pickUpItem(world: World, itemEid: number, ownerEid: number): boo
   // stops colliding and stops being simulated, so a carried sword can't be
   // kicked around the room by someone standing where it used to be.
   PhysicsBody[itemEid]?.setEnabled(false);
-  return true;
+  return "picked-up";
 }
 
 /** Camera-relative offsets for each hand's viewmodel — lower corners of the
