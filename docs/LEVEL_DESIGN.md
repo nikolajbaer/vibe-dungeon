@@ -327,6 +327,22 @@ builds as an ordinary unlocked one) rather than erroring, so confirm it
 worked by checking `getDoorStates()`'s `locked` field via the debug hook
 rather than assuming.
 
+**One specific way to get it wrong, found building the training wing's
+lockpicking nook:** for a boundary *shared* between two instances (as
+opposed to one that faces empty space), `tileBuilder.ts`'s wall/door
+emission only ever looks the lock data up from the boundary's "owner"
+direction — `posX`/`posZ` (see `WALL_DIRS` in `tileBuilder.ts`; `negX`/
+`negZ` are never the owner) — regardless of which of the two instances'
+*type* actually declares the `"door"` face. `rooms/room-b.ts`'s own example
+happens to already use an owner-direction side (`posZ`), which is why it
+doesn't demonstrate this trap. Concretely: a door on `lock_nook`'s own
+`negX` face, shared with a neighboring room to its west, has to be
+addressed from *that neighbor's* cell and `posX` side, not from
+`lock_nook`'s own cell and `negX` side — even though `negX` is the side the
+`"door"` `FaceKind` is literally authored on. When a locked door's neighbor
+is another placed instance (not empty space), try the *other* cell/side
+first if the straightforward reading doesn't show up as locked.
+
 ## How to add a readable (a poster fixture or a pickupable scroll)
 
 Both open the same paged reader (`notice/NoticePanel.tsx`) on the same
@@ -779,3 +795,88 @@ itself is left quiet (its shrine/barrels stay, the locked door + key
 pairing stays meaningful as a gate on the room and the stairs beyond it,
 but there's no spawn there anymore) — the "not every room needs a spawn"
 pacing pillar applies same as ever.
+
+**A trap this uncovered for testing an NPC behind a real door:** the
+cellar's bandit sits behind an ordinary (unlocked) hinged door, and an
+NPC's own `CHASING` movement never opens a door itself — only the player's
+interact does (`tryInteract`, `ecs/systems/doors.ts`). A Playwright spec
+that teleports the player just outside the bandit's aggro range and then
+stops walking the instant aggro fires (the pattern the original room-b
+tests used) leaves the bandit stuck at the far side of a door it can't
+open, `CHASING` forever without ever reaching `ATTACKING`. The fix (see
+`bandit-combat.spec.mjs`/`corpse-linger.spec.mjs`) is to keep walking (and
+pressing the interact key periodically) all the way up to the bandit's
+*live* position after aggro fires, exactly what a real player would do,
+rather than assuming proximity alone finishes the encounter.
+
+## Worked example: the training wing (branching off an already-branched room)
+
+The training wing (training wing task) adds four small rooms — melee,
+ranged (dressed for a mechanic that doesn't exist yet), equipment, and a
+locked "lockpicking" alcove — fanning out from one hub, branching east off
+`side-chamber.ts`'s room. See `rooms/training-wing.ts` for the full
+authored layout and cell-by-cell reasoning; this section covers the
+decisions worth remembering.
+
+**Why `side-chamber`, not `room-b`, as the branch point.** Both the cellar
+wing (see above) and this wing needed a new branch off the existing map at
+the same time. `room-b`'s type (`great_hall`) is shared with `room-a`, so
+giving it a second opening needed a whole new type (`great_hall_branch`).
+`side_chamber` (the original side-chamber room's type) has exactly *one*
+instance, so it could just be edited in place — the lower-friction option,
+and it happened to have an already-clear corner (its north-east, past all
+of its existing crate/lantern/backpack/scroll clutter) to put the new
+opening on. When two unrelated features both need a new branch, picking
+whichever existing type has the fewest instances to disturb is worth
+checking before reaching for a brand-new type.
+
+**A hub with five spokes, sized for the job.** `training_hub` is a fresh
+3x3 type (matching `great_hall`'s footprint), not a reuse of the upstairs
+wing's 2x2 `upper_landing` — a 2x2 hub was tried first and didn't have
+enough room: two of its four spoke rooms (each 2x2 themselves) ended up
+needing overlapping footprints once actually laid out in cell coordinates
+(caught by `validateOccupancy`'s overlap error, not by eyeballing the
+plan). Sizing the hub up to 3x3 gave every spoke a full cell of separation
+from its neighbors along the hub's own walls, which is the real fix — not
+anything specific to this wing, just "a hub needs to be big enough for as
+many 2x2+ rooms as you're hanging off it without their footprints
+colliding," worth checking arithmetically (or just building it and letting
+`validateOccupancy` catch it) rather than assuming a hub type scales down
+freely.
+
+**`small_room`, not a second use of the (already-modified) `side_chamber`
+type.** The training wing's melee/ranged/equipment rooms are the exact
+same shape `side_chamber` used to be (a plain single-door 2x2) — but
+`side_chamber` itself now has a *second* opening (the one this wing
+branches off of). Placing another instance of `side_chamber` for, say, the
+melee room would have silently given the melee room that same second
+opening too, with nothing on the other side of it — caught immediately by
+`validateOccupancy` (a real mistake made and reverted while building this
+wing, not a hypothetical). `small_room.ts` is a new type that's simply what
+`side_chamber` looked like before its second opening was added, reused via
+rotation for all three spoke rooms exactly the way `great_hall`/
+`side_chamber` are elsewhere. The general lesson: once a previously
+single-purpose type picks up a second opening for one specific feature
+(exactly the "worked example: the first branch" pattern earlier in this
+doc), *every other* place reusing that type inherits the new opening too —
+worth checking before reusing a type that's just been extended, not only
+when defining a brand-new one.
+
+**Owner-direction locked doors:** see the "how to lock a door" section
+above — the lockpicking nook's door needed addressing from its neighbor's
+cell/side, not its own, and that's now documented there rather than
+repeated here.
+
+**Deliberately out of scope, dressed but not functional:** the ranged
+training room has no real ranged-combat mechanic (none exists in this
+codebase yet) — it's crates standing in for target bales and a poster
+that says so outright, rather than a half-built mechanic. The equipment
+room has no buy/sell/trade system (also not implemented anywhere) — its
+quartermaster NPC (a second docile archetype, `quartermaster.ts`, same
+template as `villager.ts`) says plainly that trading isn't set up, and its
+display gear is just free-standing world items like any other pickup. The
+lockpicking nook nods at lockpicking via the existing `Door.locked`/key
+mechanic (a new `rusty_key` item, kept distinct from `key.ts`'s own "key"
+id so the two unrelated locked doors don't share one solution) rather than
+a real minigame — find the key, open the door, same as any other locked
+door in the level.
