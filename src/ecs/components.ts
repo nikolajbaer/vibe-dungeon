@@ -196,6 +196,27 @@ export const Health = {
   max: [] as number[],
 };
 
+/** Per-entity melee timing. Attack recovery prevents input-spam; parry has
+ * a short anticipation before its active window, followed by recovery. */
+export const Combat = {
+  attackRecovery: [] as number[],
+  parryStartup: [] as number[],
+  parryWindow: [] as number[],
+  parryRecovery: [] as number[],
+  parryMitigation: [] as number[],
+  /** Reactive NPC parry chance per detected incoming melee attack (0..1). */
+  agility: [] as number[],
+};
+
+/** Temporary non-lethal sparring score. While active, melee damage drains
+ * these points instead of Health and can never add Dead. */
+export const Practice = {
+  active: [] as number[],
+  points: [] as number[],
+  maxPoints: [] as number[],
+  opponentEid: [] as number[],
+};
+
 /** Tag: this entity's `Health.current` has reached 0 (see `tryMeleeAttack`
  * in combat.ts). Systems that treat entities as alive and interactable —
  * `npcSystem`'s wander/follow, `tryInteract`'s interactable list, and

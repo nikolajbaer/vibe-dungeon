@@ -15,7 +15,9 @@
 export interface DialogueChoice {
   text: string;
   next?: string;
-  effect?: "toggleFollow";
+  effect?: "toggleFollow" | "startPractice";
+  /** Used by startPractice: 0..1 reactive parry chance for this bout. */
+  practiceAgility?: number;
 }
 
 export interface DialogueNode {

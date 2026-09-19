@@ -211,6 +211,10 @@ export interface NpcArchetypeDef {
   /** Aggressive only: seconds between attacks while `ATTACKING` and still
    * in range. */
   attackCooldown?: number;
+  /** Chance from 0..1 to detect and parry an incoming melee attack. */
+  agility?: number;
+  /** What the NPC visually parries with; controls damage reduction. */
+  parryWeaponClass?: "unarmed" | "dagger" | "oneHanded";
   /** Aggressive only: movement speed (m/s) while `CHASING` — deliberately a
    * separate field from a docile archetype's (shared, module-level) wander/
    * follow speeds in `npc.ts`, since only aggressive archetypes need to

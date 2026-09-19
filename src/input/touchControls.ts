@@ -5,6 +5,16 @@ export function isTouchDevice(): boolean {
   return "ontouchstart" in window || navigator.maxTouchPoints > 0;
 }
 
+export type CombatGesture = "jab" | "cross" | "chop" | "parry";
+
+/** Maps a completed attack-button drag to a combat action. Ten pixels or
+ * less remains a tap; beyond that the dominant axis wins. */
+export function classifyCombatGesture(dx: number, dy: number): CombatGesture {
+  if (Math.hypot(dx, dy) <= 10) return "jab";
+  if (Math.abs(dx) > Math.abs(dy)) return dx < 0 ? "cross" : "jab";
+  return dy > 0 ? "parry" : "chop";
+}
+
 /**
  * A plain tappable circle, bottom-right (issue: move controls to
  * center-left to match Minecraft mobile's convention, freeing up the
@@ -19,20 +29,33 @@ export function isTouchDevice(): boolean {
 class TouchAttackButton {
   readonly el: HTMLDivElement;
   private requested = false;
+  private startX = 0;
+  private startY = 0;
+  private gesture: CombatGesture | null = null;
 
-  constructor() {
+  constructor(label = "JAB", modifier = "") {
     this.el = document.createElement("div");
-    this.el.className = "touch-attack-btn";
-    this.el.textContent = "ATK";
+    this.el.className = `touch-attack-btn ${modifier}`.trim();
+    this.el.textContent = label;
 
     this.el.addEventListener(
       "touchstart",
       (e) => {
         e.preventDefault();
-        this.requested = true;
+        const touch = e.changedTouches[0];
+        this.startX = touch.clientX;
+        this.startY = touch.clientY;
       },
       { passive: false },
     );
+    this.el.addEventListener("touchend", (e) => {
+      e.preventDefault();
+      const touch = e.changedTouches[0];
+      const dx = touch.clientX - this.startX;
+      const dy = touch.clientY - this.startY;
+      this.gesture = classifyCombatGesture(dx, dy);
+      this.requested = true;
+    }, { passive: false });
   }
 
   /** True once for the touch that pressed this button. */
@@ -42,6 +65,14 @@ class TouchAttackButton {
       return true;
     }
     return false;
+  }
+
+  consumeGesture(): CombatGesture | null {
+    if (!this.requested) return null;
+    this.requested = false;
+    const gesture = this.gesture;
+    this.gesture = null;
+    return gesture;
   }
 }
 
@@ -85,4 +116,21 @@ export class TouchControls {
   consumeAttackRequest(): boolean {
     return this.attackButton?.consumeAttackRequest() ?? false;
   }
+
+  consumeAttackType(): "jab" | "cross" | "chop" | null {
+    const primaryGesture = this.attackButton?.consumeGesture();
+    if (primaryGesture && primaryGesture !== "parry") return primaryGesture;
+    if (primaryGesture === "parry") this.pendingGestureParry = true;
+    return null;
+  }
+
+  consumeParryRequest(): boolean {
+    if (this.pendingGestureParry) {
+      this.pendingGestureParry = false;
+      return true;
+    }
+    return false;
+  }
+
+  private pendingGestureParry = false;
 }

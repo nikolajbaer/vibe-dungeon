@@ -25,6 +25,8 @@ const bandit: NpcArchetypeDef = {
   attackRange: 1.5,
   attackDamage: 8,
   attackCooldown: 1.2,
+  agility: 0.35,
+  parryWeaponClass: "dagger",
   chaseSpeed: 2.5,
   leashRange: 10,
   createMesh: (eid) => {

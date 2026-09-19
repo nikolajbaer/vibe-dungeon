@@ -154,6 +154,22 @@
         font: 10px/1 system-ui, sans-serif;
         text-shadow: 0 1px 2px rgba(0, 0, 0, 0.8);
       }
+      .practice-score {
+        position: fixed;
+        left: 50%;
+        bottom: 82px;
+        transform: translateX(-50%);
+        min-width: 360px;
+        display: flex;
+        justify-content: space-between;
+        gap: 22px;
+        padding: 9px 14px;
+        border: 1px solid rgba(220, 190, 120, .65);
+        background: rgba(24, 18, 12, .82);
+        color: #ead9b0;
+        font: 600 13px/1.2 system-ui, sans-serif;
+        pointer-events: none;
+      }
       /* Short-lived on-screen message (hudStore.showMessage, e.g. "Door is
          locked."), top-center so it doesn't collide with the health bar or
          either touch control at the bottom. */

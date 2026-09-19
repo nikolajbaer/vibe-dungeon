@@ -2,13 +2,14 @@ import * as THREE from "three";
 import Stats from "three/examples/jsm/libs/stats.module.js";
 import { addComponent, addEntity, createWorld, hasComponent } from "bitecs";
 import { query } from "bitecs";
-import { Position, Velocity, Rotation, CharacterBody, DynamicBody, PhysicsBody, PhysicsCollider, PhysicsRotation, RenderOffsetY, PlayerControlled, Object3DRef, Door, Dead, DeathSector, Health, NPC, Item, Carried, Readable, Container, Stackable } from "./ecs/components";
+import { Position, Velocity, Rotation, CharacterBody, DynamicBody, PhysicsBody, PhysicsCollider, PhysicsRotation, RenderOffsetY, PlayerControlled, Object3DRef, Door, Dead, DeathSector, Health, Combat, Practice, NPC, Item, Carried, Readable, Container, Stackable } from "./ecs/components";
 import { inputSystem } from "./ecs/systems/input";
 import { characterSystem, physicsSyncSystem, teleportCharacter } from "./ecs/systems/character";
 import { dynamicSyncSystem } from "./ecs/systems/dynamics";
 import { addCharacter, createPhysics, PHYSICS_DT } from "./physics/world";
 import { doorAnimationSystem, tryInteract } from "./ecs/systems/doors";
-import { tryMeleeAttack } from "./ecs/systems/combat";
+import { combatSystem, tryMeleeAttack, tryParry, type AttackType } from "./ecs/systems/combat";
+import { practiceSystem, startPractice } from "./ecs/systems/practice";
 import { npcSystem, toggleNpcFollow } from "./ecs/systems/npc";
 import { getNpcAnimationDebugState, npcAnimationSystem } from "./ecs/systems/npcAnimation";
 import { corpseCleanupSystem, MIN_LINGER_SECONDS } from "./ecs/systems/corpseCleanup";
@@ -149,6 +150,7 @@ export function startGame(container: HTMLElement): void {
   addComponent(world, player, PlayerControlled);
   addComponent(world, player, Object3DRef);
   addComponent(world, player, Health);
+  addComponent(world, player, Combat);
   // `Position` is the player's *feet* now, not the camera — see
   // `CharacterBody` in components.ts. The camera is offset back up to eye
   // height by `RenderOffsetY` at sync time, which also makes the player's
@@ -171,6 +173,12 @@ export function startGame(container: HTMLElement): void {
   Object3DRef[player] = camera;
   Health.current[player] = 100;
   Health.max[player] = 100;
+  Combat.attackRecovery[player] = 0;
+  Combat.parryStartup[player] = 0;
+  Combat.parryWindow[player] = 0;
+  Combat.parryRecovery[player] = 0;
+  Combat.parryMitigation[player] = 0;
+  Combat.agility[player] = 0;
 
   // NPCs (issue #36, extended into archetypes: docile villager + aggressive
   // bandit — src/assets/npcs/*.ts) are spawned generically by `buildLevel`
@@ -233,6 +241,19 @@ export function startGame(container: HTMLElement): void {
   const dialogueActions: DialogueActions = {
     toggleFollow(npcEid) {
       toggleNpcFollow(npcEid);
+    },
+    startPractice(npcEid, agility) {
+      const woodenSword = Array.from(query(world, [Item, Carried])).find(eid =>
+        Carried.ownerEid[eid] === player && Item.itemTypeId[eid] === "wooden_sword");
+      if (woodenSword === undefined) {
+        hudStore.showMessage("Pick up the wooden sword first.");
+        return;
+      }
+      for (const eid of query(world, [Item, Carried])) {
+        if (Carried.ownerEid[eid] === player && Carried.slot[eid] === "hand-right" && eid !== woodenSword) unequipItem(world, eid);
+      }
+      if (!isHandSlot(Carried.slot[woodenSword])) equipItem(world, camera, woodenSword, "hand-right");
+      startPractice(world, npcEid, agility);
     },
   };
   dialogueStore.bindActions(dialogueActions);
@@ -424,7 +445,20 @@ export function startGame(container: HTMLElement): void {
     // combat (issue #48) without needing to simulate real pointer-lock
     // clicks/touches — fires the exact same `tryMeleeAttack` the real
     // click/touch-button wiring below calls.
-    attack: () => tryMeleeAttack(world, camera),
+    attack: (attackType: AttackType = "jab") => tryMeleeAttack(world, camera, attackType),
+    parry: () => tryParry(world, player),
+    getCombatState: () => ({
+      attackRecovery: Combat.attackRecovery[player],
+      parryStartup: Combat.parryStartup[player],
+      parryWindow: Combat.parryWindow[player],
+      parryRecovery: Combat.parryRecovery[player],
+    }),
+    getPracticeState: () => ({
+      active: hasComponent(world, player, Practice) && !!Practice.active[player],
+      points: Practice.points[player] ?? 0,
+      maxPoints: Practice.maxPoints[player] ?? 0,
+      opponentEid: Practice.opponentEid[player],
+    }),
     // Item/inventory debug hooks (issue #39) for manual/automated smoke
     // testing — world item positions to walk to, and each item's current
     // carry/equip state and world-mesh visibility.
@@ -592,6 +626,15 @@ export function startGame(container: HTMLElement): void {
 
   const clock = new THREE.Clock();
   let accumulator = 0;
+  const resolvePractice = () => {
+    const result = practiceSystem(world);
+    if (!result) return;
+    const decisive = result.remainingFraction >= .5;
+    const node = result.playerWon
+      ? decisive ? "player-decisive" : "player-close"
+      : decisive ? "master-decisive" : "master-close";
+    dialogueStore.openAt(result.masterEid, "weapons-master", node);
+  };
   function frame() {
     requestAnimationFrame(frame);
     stats.begin();
@@ -638,6 +681,7 @@ export function startGame(container: HTMLElement): void {
         accumulator -= PHYSICS_DT;
         steps++;
         npcSystem(world, PHYSICS_DT);
+        combatSystem(world, PHYSICS_DT);
         characterSystem(world, physics, PHYSICS_DT);
         doorAnimationSystem(world, PHYSICS_DT);
         physics.world.step();
@@ -645,6 +689,7 @@ export function startGame(container: HTMLElement): void {
         dynamicSyncSystem(world);
       }
       if (steps === MAX_PHYSICS_STEPS_PER_FRAME) accumulator = 0;
+      resolvePractice();
     }
     // Runs every frame regardless of `modalActive` — see its own doc
     // comment for why a death/hit one-shot has to keep playing through a
@@ -665,9 +710,17 @@ export function startGame(container: HTMLElement): void {
     // different rays, not the same one in disguise.
     if (interactRequested && !isModalActive()) tryInteract(world, camera, touchInteractPoint ?? undefined);
 
-    const attackRequestedThisFrame = attackRequested || touch.consumeAttackRequest();
+    const touchAttackType = touch.consumeAttackType();
+    const attackRequestedThisFrame = attackRequested;
     attackRequested = false;
-    if (attackRequestedThisFrame && !isModalActive()) tryMeleeAttack(world, camera);
+    let requestedAttack: AttackType | undefined;
+    if (touchAttackType) requestedAttack = touchAttackType;
+    else if (attackRequestedThisFrame || keyboard.consumeJustPressed("Digit1")) requestedAttack = "jab";
+    else if (keyboard.consumeJustPressed("Digit2")) requestedAttack = "cross";
+    else if (keyboard.consumeJustPressed("Digit3")) requestedAttack = "chop";
+    if (requestedAttack && !isModalActive()) tryMeleeAttack(world, camera, requestedAttack);
+    if ((keyboard.consumeJustPressed("KeyF") || touch.consumeParryRequest()) && !isModalActive()) tryParry(world);
+    resolvePractice();
     viewmodelSwingSystem(dt);
 
     // Belt-and-suspenders alongside the pause above: if the NPC a dialogue

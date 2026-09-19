@@ -10,11 +10,15 @@ export function createHumanoidRig(options: HumanoidOptions = {}): HumanoidRig {
 }
 let sharedRig: HumanoidRig | undefined;
 let banditRig: HumanoidRig | undefined;
+let weaponsMasterRig: HumanoidRig | undefined;
 export function getSharedHumanoidRig(): HumanoidRig {
   return sharedRig ??= createHumanoidRig();
 }
 export function getBanditHumanoidRig(): HumanoidRig {
   return banditRig ??= createHumanoidRig({ weapon: 'dagger' });
+}
+export function getWeaponsMasterHumanoidRig(): HumanoidRig {
+  return weaponsMasterRig ??= createHumanoidRig({ weapon: 'woodenSword', tunic: 0x496b4d });
 }
 export function tintClonedMesh(mesh: THREE.Object3D, color: number): void {
   mesh.traverse(child => {

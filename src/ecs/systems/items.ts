@@ -431,6 +431,8 @@ const STAB_INWARD = 0.06; // meters, drifts toward screen-center at the peak
 interface SwingState {
   itemEid: number;
   elapsed: number;
+  attackType: import("./combat").AttackType | "parry";
+  duration: number;
 }
 
 /** Items currently mid-swing (see `triggerViewmodelSwing`/
@@ -444,10 +446,16 @@ const activeSwings: SwingState[] = [];
  * not a reaction to a hit. No-ops harmlessly next frame in
  * `viewmodelSwingSystem` if the item turns out not to have a viewmodel
  * (unarmed) or gets unequipped mid-swing. */
-export function triggerViewmodelSwing(itemEid: number): void {
+export function triggerViewmodelSwing(itemEid: number, attackType: import("./combat").AttackType = "jab", duration = SWING_DURATION): void {
   const existing = activeSwings.find((s) => s.itemEid === itemEid);
-  if (existing) existing.elapsed = 0;
-  else activeSwings.push({ itemEid, elapsed: 0 });
+  if (existing) Object.assign(existing, { elapsed: 0, attackType, duration });
+  else activeSwings.push({ itemEid, elapsed: 0, attackType, duration });
+}
+
+export function triggerViewmodelParry(itemEid: number, duration: number): void {
+  const existing = activeSwings.find((s) => s.itemEid === itemEid);
+  if (existing) Object.assign(existing, { elapsed: 0, attackType: "parry" as const, duration });
+  else activeSwings.push({ itemEid, elapsed: 0, attackType: "parry", duration });
 }
 
 /**
@@ -476,15 +484,27 @@ export function viewmodelSwingSystem(dt: number): void {
     }
 
     swing.elapsed += dt;
-    const t = Math.min(1, swing.elapsed / SWING_DURATION);
+    const t = Math.min(1, swing.elapsed / swing.duration);
     const arc = Math.sin(t * Math.PI);
     // hand-right sits at a positive resting X, hand-left at negative — this
     // sign always points back toward screen-center regardless of which hand.
     const inwardSign = slot === "hand-right" ? -1 : 1;
     const base = VIEWMODEL_OFFSET[slot];
 
-    mesh.position.set(base.pos[0] + inwardSign * STAB_INWARD * arc, base.pos[1], base.pos[2] - arc * STAB_DISTANCE);
-    mesh.rotation.set(...base.rot);
+    if (swing.attackType === "parry") {
+      mesh.position.set(base.pos[0] + inwardSign * .20 * arc, base.pos[1] + .15 * arc, base.pos[2] - .06 * arc);
+      mesh.rotation.set(base.rot[0] - .25 * arc, base.rot[1] + inwardSign * .75 * arc, base.rot[2] + inwardSign * 1.15 * arc);
+    } else if (swing.attackType === "jab") {
+      mesh.position.set(base.pos[0] + inwardSign * STAB_INWARD * arc, base.pos[1], base.pos[2] - arc * STAB_DISTANCE);
+      mesh.rotation.set(...base.rot);
+    } else if (swing.attackType === "cross") {
+      mesh.position.set(base.pos[0] + inwardSign * .18 * arc, base.pos[1] + .03 * arc, base.pos[2] - .18 * arc);
+      mesh.rotation.set(base.rot[0], base.rot[1] + inwardSign * .9 * arc, base.rot[2] + inwardSign * .45 * arc);
+    } else {
+      const chamber = Math.sin(Math.min(1, t * 2) * Math.PI / 2);
+      mesh.position.set(base.pos[0] + inwardSign * .08 * arc, base.pos[1] + .12 * chamber - .16 * arc, base.pos[2] - .16 * arc);
+      mesh.rotation.set(base.rot[0] - .95 * chamber + 1.7 * arc, base.rot[1], base.rot[2] + inwardSign * .22 * arc);
+    }
 
     if (t >= 1) activeSwings.splice(i, 1);
   }
