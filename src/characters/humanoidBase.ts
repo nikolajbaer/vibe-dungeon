@@ -4,7 +4,12 @@ import sword from '../assets/items/sword';
 import woodenSword from '../assets/items/wooden_sword';
 
 export type HumanoidSpecies = 'human' | 'elf' | 'goblin' | 'dwarf';
-export interface HumanoidOptions { species?: HumanoidSpecies; skin?: number; tunic?: number; trousers?: number; weapon?: 'shortSword' | 'dagger' | 'woodenSword'; }
+export type HairStyle = 'none' | 'short' | 'long';
+export interface HumanoidOptions {
+  species?: HumanoidSpecies; skin?: number; tunic?: number; trousers?: number;
+  weapon?: 'shortSword' | 'dagger' | 'woodenSword';
+  hair?: HairStyle; hairColor?: number; chainmail?: boolean; nasalHelmet?: boolean;
+}
 const presets = {
   human: { scale: [1, 1, 1], ear: .04, skin: 0xc68d67 },
   elf: { scale: [.88, 1, .92], ear: .13, skin: 0xd4aa87 },
@@ -146,6 +151,32 @@ export function createHumanoidBase(options: HumanoidOptions = {}) {
   mesh.add(bones[0]); mesh.updateMatrixWorld(true);
   const skeleton = new THREE.Skeleton(bones); mesh.bind(skeleton);
   mesh.castShadow=true; mesh.receiveShadow=true; mesh.frustumCulled=false;
+  const accessoryMaterial = (color:number, metalness=0, roughness=.9) => new THREE.MeshStandardMaterial({color,metalness,roughness,flatShading:true});
+  const attach = (boneName:string, child:THREE.Mesh, name:string) => {
+    child.name=name; child.castShadow=true; child.receiveShadow=true; bones[ids[boneName]].add(child); return child;
+  };
+  const hairStyle=options.hair ?? 'none', hairColor=options.hairColor ?? 0x4b3024;
+  if(hairStyle!=='none') {
+    const cap=attach('head',new THREE.Mesh(new THREE.SphereGeometry(1,8,5,0,Math.PI*2,0,Math.PI*.58),accessoryMaterial(hairColor)),'hair');
+    cap.scale.set(.112*sx,.10*sy,.105*sz);
+    cap.position.set(0,.165*sy,-.006*sz);
+    if(hairStyle==='long') {
+      const back=attach('head',new THREE.Mesh(new THREE.BoxGeometry(.19*sx,.28*sy,.055*sz),accessoryMaterial(hairColor)),'longHair');
+      back.position.set(0,.015*sy,-.095*sz);
+    }
+  }
+  if(options.chainmail) {
+    const mail=attach('chest',new THREE.Mesh(new THREE.CylinderGeometry(.16*sx,.205*sx,.38*sy,8),accessoryMaterial(0x6f7478,.55,.72)),'chainmail');
+    mail.scale.z=.72*sz; mail.position.set(0,-.12*sy,0);
+  }
+  if(options.nasalHelmet) {
+    const steel=accessoryMaterial(0x777d82,.65,.55);
+    const helm=attach('head',new THREE.Mesh(new THREE.ConeGeometry(.132*sx,.22*sy,8),steel),'nasalHelmet');
+    helm.scale.z=sz/sx;
+    helm.position.set(0,.235*sy,-.005*sz);
+    const guard=attach('head',new THREE.Mesh(new THREE.BoxGeometry(.025*sx,.18*sy,.026*sz),steel),'noseGuard');
+    guard.position.set(0,.075*sy,.108*sz);
+  }
   const duration=1.1, samples=32;
   const times=Array.from({length:samples+1},(_,i)=>i*duration/samples);
   const tracks: THREE.KeyframeTrack[]=[];

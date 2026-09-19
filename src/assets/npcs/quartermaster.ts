@@ -1,4 +1,4 @@
-import { getSharedHumanoidRig } from "../../characters/humanoidRig";
+import { getQuartermasterHumanoidRig } from "../../characters/humanoidRig";
 import { createAnimatedNpcMesh } from "../../ecs/systems/npcAnimation";
 import type { NpcArchetypeDef } from "../types";
 
@@ -25,7 +25,7 @@ const quartermaster: NpcArchetypeDef = {
   behavior: "docile",
   halfExtent: 0.4,
   dialogueId: "quartermaster-greeting",
-  createMesh: (eid) => createAnimatedNpcMesh(getSharedHumanoidRig(), eid),
+  createMesh: (eid) => createAnimatedNpcMesh(getQuartermasterHumanoidRig(), eid),
 };
 
 export default quartermaster;

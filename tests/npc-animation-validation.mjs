@@ -10,7 +10,7 @@ try {
   assert(MIN_LINGER_SECONDS>getSharedHumanoidRig().clips.death.duration);
   const world=createWorld();
   const meshes=[];
-  for(const role of ['villager','bandit','quartermaster','weapons-master']) {
+  for(const role of ['villager','bandit','quartermaster','weapons-master','guard']) {
     const {default:archetype}=await server.ssrLoadModule(`/src/assets/npcs/${role}.ts`);
     const eid=addEntity(world);addComponent(world,eid,NPC);addComponent(world,eid,Velocity);
     Velocity.x[eid]=0;Velocity.z[eid]=0;
@@ -19,6 +19,7 @@ try {
     assert.equal(mesh.geometry.index.count/3,1580);assert.equal(mesh.userData.eid,eid);
     if(role==='bandit') assert(mesh.getObjectByName('dagger'),'bandit carries a dagger');
     else if(role==='weapons-master') assert(mesh.getObjectByName('woodenSword'),'weapons master carries a wooden sword');
+    else if(role==='guard') {assert(mesh.getObjectByName('nasalHelmet'));assert(mesh.getObjectByName('noseGuard'));assert(mesh.getObjectByName('chainmail'));}
     else assert(!mesh.getObjectByName('dagger'),`${role} remains unarmed`);
     const tick=(seconds,paused=false)=>{for(let t=0;t<seconds;t+=1/60)animation.npcAnimationSystem(world,1/60,paused);};
     const state=()=>animation.getNpcAnimationDebugState(eid);
