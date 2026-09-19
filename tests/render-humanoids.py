@@ -28,7 +28,7 @@ for f in range(90 if combat else 100 if attack else 90 if actions else 32):
     draw.text((43,79),'Parry / unarmed right cross / axe-mace chopping arc' if combat else 'One-handed short-sword stab / crouched guard / compact recovery' if attack else 'Loiter / Take damage / Death — actual rig animation' if actions else '1,580 triangles  /  23 bones  /  shared skeleton  /  walk cycle',font=small,fill=(152,173,200))
     for col,(s,d) in enumerate(zip(species,data)):
         if attack or combat:
-            az = [0,.85,1.57][col]
+            az = ([0,.85,0] if combat else [0,.85,1.57])[col]
             right=np.array([np.cos(az),0,-np.sin(az)])
             up=np.array([-np.sin(az)*np.sin(.12),np.cos(.12),-np.cos(az)*np.sin(.12)])
             view=np.cross(right,up)
