@@ -14,7 +14,7 @@ try {
   const guard=createHumanoidBase({chainmail:true,nasalHelmet:true});
   for(const name of ['chainmail','chainmailShoulder.L','chainmailShoulder.R','nasalHelmet','noseGuard'])assert(guard.mesh.getObjectByName(name),`${name} exists`);
   const helmet=guard.mesh.getObjectByName('nasalHelmet');helmet.geometry.computeBoundingBox();
-  assert(helmet.geometry.boundingBox.min.y<=.101&&helmet.geometry.boundingBox.max.y>.33,'rounded helmet runs from brow to crown');
+  assert(helmet.geometry.boundingBox.min.y>=.139&&helmet.geometry.boundingBox.max.y>.34,'rounded helmet starts above the brow and reaches the crown');
   const vertexColors=guard.mesh.geometry.attributes.color.array;
   assert(vertexColors.some(value=>value>.85),'eyes include white sclera');
   assert(vertexColors.some(value=>value<.02),'eyes include dark pupils');

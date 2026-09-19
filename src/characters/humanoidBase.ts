@@ -158,7 +158,7 @@ export function createHumanoidBase(options: HumanoidOptions = {}) {
   };
   const hairStyle=options.hair ?? 'none', hairColor=options.hairColor ?? 0x4b3024;
   if(hairStyle!=='none') {
-    const cap=attach('head',new THREE.Mesh(new THREE.SphereGeometry(1,8,5,0,Math.PI*2,0,Math.PI*.58),accessoryMaterial(hairColor)),'hair');
+    const cap=attach('head',new THREE.Mesh(new THREE.SphereGeometry(1,8,5,0,Math.PI*2,0,Math.PI*.52),accessoryMaterial(hairColor)),'hair');
     cap.scale.set(.128*sx,.125*sy,.121*sz);
     cap.position.set(0,.168*sy,-.009*sz);
     if(hairStyle==='long') {
@@ -177,11 +177,11 @@ export function createHumanoidBase(options: HumanoidOptions = {}) {
   }
   if(options.nasalHelmet) {
     const steel=accessoryMaterial(0x777d82,.65,.55);
-    const profile=[new THREE.Vector2(.15*sx,.10*sy),new THREE.Vector2(.148*sx,.15*sy),new THREE.Vector2(.132*sx,.21*sy),new THREE.Vector2(.095*sx,.27*sy),new THREE.Vector2(.035*sx,.32*sy),new THREE.Vector2(0,.335*sy)];
+    const profile=[new THREE.Vector2(.15*sx,.14*sy),new THREE.Vector2(.148*sx,.18*sy),new THREE.Vector2(.132*sx,.23*sy),new THREE.Vector2(.095*sx,.285*sy),new THREE.Vector2(.035*sx,.33*sy),new THREE.Vector2(0,.345*sy)];
     const helm=attach('head',new THREE.Mesh(new THREE.LatheGeometry(profile,10),steel),'nasalHelmet');
     helm.scale.z=sz/sx;helm.position.z=-.005*sz;
     const guard=attach('head',new THREE.Mesh(new THREE.BoxGeometry(.027*sx,.17*sy,.03*sz),steel),'noseGuard');
-    guard.position.set(0,.035*sy,.116*sz);
+    guard.position.set(0,.06*sy,.116*sz);
   }
   const duration=1.1, samples=32;
   const times=Array.from({length:samples+1},(_,i)=>i*duration/samples);
