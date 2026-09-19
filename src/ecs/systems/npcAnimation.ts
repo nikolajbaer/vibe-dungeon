@@ -1,25 +1,27 @@
 import * as THREE from "three";
 import * as SkeletonUtils from "three/examples/jsm/utils/SkeletonUtils.js";
 import { hasComponent, type World } from "bitecs";
-import { NPC, Velocity } from "../components";
+import { NPC, NpcState, Velocity } from "../components";
 import type { HumanoidRig } from "../../characters/humanoidRig";
 
 const MOVING_EPSILON = 0.05; // m/s — Velocity magnitude above this counts as "walking" (issue #54); NpcState
 // alone isn't enough since LOITERING covers both a paused-between-legs NPC and one mid-wander-leg.
 const CROSSFADE_DURATION = 0.2; // seconds
 
-/** Which one-shot clip, if any, is currently overriding idle/walk. `hit`
- * clears itself (back to idle/walk) once its clip finishes; `death` never
- * clears — the corpse stays frozen on its final frame forever (issue #59). */
-type OneShot = "hit" | "death" | undefined;
+/** Which one-shot clip, if any, is currently overriding locomotion/guard.
+ * `attack` and `hit` hand control back when finished; `death` never clears. */
+type OneShot = "attack" | "hit" | "death" | undefined;
 
 interface NpcAnimationState {
   mixer: THREE.AnimationMixer;
   idleAction: THREE.AnimationAction;
   walkAction: THREE.AnimationAction;
+  combatIdleAction: THREE.AnimationAction;
+  attackAction: THREE.AnimationAction;
   hitAction: THREE.AnimationAction;
   deathAction: THREE.AnimationAction;
   moving: boolean; // which of idle/walk is currently the "target" state, for edge-detecting a transition
+  guarding: boolean;
   oneShot: OneShot;
 }
 
@@ -51,38 +53,43 @@ export function createAnimatedNpcMesh(rig: HumanoidRig, eid: number): THREE.Obje
   const walkAction = mixer.clipAction(rig.clips.walk);
   const hitAction = mixer.clipAction(rig.clips.hit);
   const deathAction = mixer.clipAction(rig.clips.death);
+  const combatIdleAction = mixer.clipAction(rig.clips.combatIdle);
+  const attackAction = mixer.clipAction(rig.clips.attack);
 
   idleAction.play();
   walkAction.play();
+  combatIdleAction.play();
   idleAction.setEffectiveWeight(1);
   walkAction.setEffectiveWeight(0);
+  combatIdleAction.setEffectiveWeight(0);
 
-  // Both one-shots (issue #59): played once, not looped. `hit` fades back
+  // All one-shots play once. `attack`/`hit` hand control back
   // out to nothing once it finishes (default `clampWhenFinished = false`) —
   // the `finished` handler below then hands control back to idle/walk.
   // `death` clamps on its last frame instead, so the corpse stays visibly
   // collapsed rather than snapping back to a stand.
   hitAction.setLoop(THREE.LoopOnce, 1);
+  attackAction.setLoop(THREE.LoopOnce, 1);
   deathAction.setLoop(THREE.LoopOnce, 1);
   deathAction.clampWhenFinished = true;
 
-  npcAnimations.set(eid, { mixer, idleAction, walkAction, hitAction, deathAction, moving: false, oneShot: undefined });
+  npcAnimations.set(eid, { mixer, idleAction, walkAction, combatIdleAction, attackAction, hitAction, deathAction, moving: false, guarding: false, oneShot: undefined });
 
-  // `hit` is the only one-shot that needs to hand control back afterward —
-  // once it finishes, resume idle/walk at whatever `moving` has become in
+  // Once an attack or hit finishes, resume locomotion/guard at whatever
+  // `moving` and `guarding` have become in
   // the meantime (it may have changed mid-flinch) rather than crossfading
   // back in, since the interrupt already popped visually.
   mixer.addEventListener("finished", (e) => {
     const state = npcAnimations.get(eid);
-    if (!state || state.oneShot !== "hit" || e.action !== state.hitAction) return;
+    if (!state || !state.oneShot || state.oneShot === "death") return;
+    if (e.action !== state.hitAction && e.action !== state.attackAction) return;
     state.oneShot = undefined;
-    const target = state.moving ? state.walkAction : state.idleAction;
-    const other = state.moving ? state.idleAction : state.walkAction;
+    const target = state.moving ? state.walkAction : state.guarding ? state.combatIdleAction : state.idleAction;
+    const others = [state.idleAction, state.walkAction, state.combatIdleAction].filter(action => action !== target);
     target.stopFading();
-    other.stopFading();
     target.enabled = true;
     target.setEffectiveWeight(1);
-    other.setEffectiveWeight(0);
+    for (const other of others) { other.stopFading(); other.setEffectiveWeight(0); }
   });
 
   return clone;
@@ -103,12 +110,30 @@ export function triggerHitReaction(eid: number): void {
   if (!state || state.oneShot === "death") return; // a corpse doesn't flinch
   state.idleAction.stopFading();
   state.walkAction.stopFading();
+  state.combatIdleAction.stopFading();
+  state.attackAction.stop();
   state.idleAction.setEffectiveWeight(0);
   state.walkAction.setEffectiveWeight(0);
+  state.combatIdleAction.setEffectiveWeight(0);
+  state.attackAction.setEffectiveWeight(0);
   state.hitAction.enabled = true;
   state.hitAction.setEffectiveWeight(1);
   state.hitAction.reset().play();
   state.oneShot = "hit";
+}
+
+/** Plays the humanoid's right-handed lunge for an NPC melee strike. */
+export function triggerAttack(eid: number): void {
+  const state = npcAnimations.get(eid);
+  if (!state || state.oneShot) return;
+  for (const action of [state.idleAction, state.walkAction, state.combatIdleAction]) {
+    action.stopFading();
+    action.setEffectiveWeight(0);
+  }
+  state.attackAction.enabled = true;
+  state.attackAction.setEffectiveWeight(1);
+  state.attackAction.reset().play();
+  state.oneShot = "attack";
 }
 
 /**
@@ -125,10 +150,14 @@ export function triggerDeathCollapse(eid: number): void {
   if (!state || state.oneShot === "death") return;
   state.idleAction.stopFading();
   state.walkAction.stopFading();
+  state.combatIdleAction.stopFading();
   state.hitAction.stop();
+  state.attackAction.stop();
   state.idleAction.setEffectiveWeight(0);
   state.walkAction.setEffectiveWeight(0);
+  state.combatIdleAction.setEffectiveWeight(0);
   state.hitAction.setEffectiveWeight(0);
+  state.attackAction.setEffectiveWeight(0);
   state.deathAction.enabled = true;
   state.deathAction.setEffectiveWeight(1);
   state.deathAction.reset().play();
@@ -171,15 +200,16 @@ export function npcAnimationSystem(world: World, dt: number, paused: boolean): v
 
     const speed = Math.hypot(Velocity.x[eid], Velocity.z[eid]);
     const moving = speed > MOVING_EPSILON;
+    const guarding = !moving && NPC.state[eid] === NpcState.ATTACKING;
 
-    // While a one-shot (hit/death, issue #59) is overriding idle/walk, keep
-    // tracking `moving` (so `hit`'s `finished` handler resumes into the
-    // right one once it's done) but don't crossfade idle/walk themselves —
+    // While a one-shot is overriding the base pose, keep tracking movement
+    // and guard state so its finished handler resumes into the right action,
+    // but don't crossfade those base actions themselves —
     // their weights are pinned at 0 for the duration of the interrupt.
-    if (moving !== state.moving) {
+    if (moving !== state.moving || guarding !== state.guarding) {
       if (!state.oneShot) {
-        const from = state.moving ? state.walkAction : state.idleAction;
-        const to = moving ? state.walkAction : state.idleAction;
+        const from = state.moving ? state.walkAction : state.guarding ? state.combatIdleAction : state.idleAction;
+        const to = moving ? state.walkAction : guarding ? state.combatIdleAction : state.idleAction;
         // `fadeIn`/`fadeOut`'s weight ramp is a *multiplier* on the action's
         // own `.weight`, not an absolute value (see three.js's
         // AnimationAction._updateWeight) — and a fully-faded-out action gets
@@ -195,6 +225,7 @@ export function npcAnimationSystem(world: World, dt: number, paused: boolean): v
         from.crossFadeTo(to, CROSSFADE_DURATION, false);
       }
       state.moving = moving;
+      state.guarding = guarding;
     }
 
     state.mixer.update(dt);
@@ -215,6 +246,7 @@ export function getNpcAnimationDebugState(eid: number):
       idleWeight: number;
       walkWeight: number;
       hitWeight: number;
+      attackWeight: number;
       deathWeight: number;
       mixerTime: number;
       /** The death action's own clip time (seconds) — unlike `mixerTime`
@@ -222,7 +254,7 @@ export function getNpcAnimationDebugState(eid: number):
        * what `clampWhenFinished` actually freezes once the clip ends, so
        * it's the right field to assert "frozen on the final frame" against. */
       deathClipTime: number;
-      activeClip: "idle" | "walk" | "hit" | "death";
+      activeClip: "idle" | "walk" | "combatIdle" | "attack" | "hit" | "death";
     }
   | undefined {
   const state = npcAnimations.get(eid);
@@ -232,9 +264,10 @@ export function getNpcAnimationDebugState(eid: number):
     idleWeight: state.idleAction.getEffectiveWeight(),
     walkWeight: state.walkAction.getEffectiveWeight(),
     hitWeight: state.hitAction.getEffectiveWeight(),
+    attackWeight: state.attackAction.getEffectiveWeight(),
     deathWeight: state.deathAction.getEffectiveWeight(),
     mixerTime: state.mixer.time,
     deathClipTime: state.deathAction.time,
-    activeClip: state.oneShot ?? (state.moving ? "walk" : "idle"),
+    activeClip: state.oneShot ?? (state.moving ? "walk" : state.guarding ? "combatIdle" : "idle"),
   };
 }

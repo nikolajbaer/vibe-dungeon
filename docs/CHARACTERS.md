@@ -25,6 +25,8 @@ Animation names deliberately retain the existing gameplay contract:
 | attack | 1.7-second right-handed step-lunge, maximum extension around 0.62 s |
 
 Pass `weapon: 'shortSword'` to attach a shortened sword to `hand.R`.
+Pass `weapon: 'dagger'` for the compact blade used by the bandit. The bandit
+switches to the crouched guard in attack range and plays `attack` on each hit.
 The character viewer includes the weapon and both combat clips. The stab
 returns to the crouched guard and has no root-motion translation. These new
 combat clips are currently an animation preview: the NPC damage timing and

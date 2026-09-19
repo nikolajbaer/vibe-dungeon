@@ -1,8 +1,9 @@
 import * as THREE from 'three';
+import dagger from '../assets/items/dagger';
 import sword from '../assets/items/sword';
 
 export type HumanoidSpecies = 'human' | 'elf' | 'goblin' | 'dwarf';
-export interface HumanoidOptions { species?: HumanoidSpecies; skin?: number; tunic?: number; trousers?: number; weapon?: 'shortSword'; }
+export interface HumanoidOptions { species?: HumanoidSpecies; skin?: number; tunic?: number; trousers?: number; weapon?: 'shortSword' | 'dagger'; }
 const presets = {
   human: { scale: [1, 1, 1], ear: .04, skin: 0xc68d67 },
   elf: { scale: [.88, 1, .92], ear: .13, skin: 0xd4aa87 },
@@ -310,10 +311,10 @@ export function createHumanoidBase(options: HumanoidOptions = {}) {
     { t: 1.28, pose: guard },
     { t: 1.7, pose: guard },
   ]), true);
-  if (options.weapon === 'shortSword') {
-    const weapon = sword.createWorldMesh();
-    weapon.name = 'shortSword';
-    weapon.scale.set(.72, .72, .72);
+  if (options.weapon) {
+    const weapon = options.weapon === 'dagger' ? dagger.createWorldMesh() : sword.createWorldMesh();
+    weapon.name = options.weapon;
+    weapon.scale.setScalar(options.weapon === 'dagger' ? .82 : .72);
     weapon.rotation.x = Math.PI / 2;
     weapon.position.set(0, -.065 * sy, .014 * sz);
     bones[ids['hand.R']].add(weapon);
