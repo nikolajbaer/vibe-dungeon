@@ -44,8 +44,9 @@ try {
     assert(jabContact.z>jabStart.z+.18,`${species}: unarmed jab extends the lead hand`);
     pose('unarmedChop',.30);const hammerHigh=point('hand.R');pose('unarmedChop',.58);const hammerLow=point('hand.R');
     assert(hammerHigh.y>hammerLow.y+.3*sy,`${species}: unarmed chop drives downward`);
-    assert.equal(rig.clips.weaponJab.duration,1.7);
-    assert.equal(rig.clips.unarmedCross.duration,1.25);
+    assert.equal(rig.clips.weaponJab.duration,.5);
+    assert.equal(rig.clips.unarmedCross.duration,.75);
+    assert.equal(rig.clips.weaponChop.duration,1);
     console.log(`${species}: face guard/right cross, crossing parry and overhead chop passed`);
   }
 

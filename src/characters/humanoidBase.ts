@@ -439,6 +439,17 @@ export function createHumanoidBase(options: HumanoidOptions = {}) {
     { t: .42, pose: boxingGuard },
     { t: .75, pose: boxingGuard },
   ]), true);
+  const retimeClip = (source: THREE.AnimationClip, name: string, duration: number) => {
+    const clip = source.clone();
+    const scale = duration / source.duration;
+    clip.name = name;
+    clip.duration = duration;
+    for (const track of clip.tracks) for (let i = 0; i < track.times.length; i++) track.times[i] *= scale;
+    return clip;
+  };
+  const weaponJab = retimeClip(attack, 'weaponJab', .5);
+  const unarmedCross = retimeClip(unarmedStrike, 'unarmedCross', .75);
+  const weaponChop = retimeClip(chop, 'weaponChop', 1);
   if (options.weapon) {
     const weapon = options.weapon === 'dagger' ? dagger.createWorldMesh() : sword.createWorldMesh();
     weapon.name = options.weapon;
@@ -450,8 +461,8 @@ export function createHumanoidBase(options: HumanoidOptions = {}) {
   // Existing NPC state machine uses idle/hit; workshop labels these loiter/damage.
   const canonicalClips={
     idle,walk,hit,death,combatIdle,parry,unarmedParry,
-    weaponJab: attack,weaponCross,weaponChop: chop,
-    unarmedJab,unarmedCross: unarmedStrike,unarmedChop,
+    weaponJab,weaponCross,weaponChop,
+    unarmedJab,unarmedCross,unarmedChop,
   };
   // Non-enumerable aliases preserve older callers without exporting the
   // same AnimationClip multiple times into GLB files.
