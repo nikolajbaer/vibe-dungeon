@@ -1,5 +1,5 @@
 import { hasComponent, query, type World } from "bitecs";
-import { Dead, Health, NPC, NpcState, Position, Velocity, PlayerControlled } from "../components";
+import { Dead, Health, NPC, NpcState, Position, Rotation, Velocity, PlayerControlled } from "../components";
 import { NPC_REGISTRY } from "../../assets/npcRegistry";
 import type { NpcArchetypeDef } from "../../assets/types";
 import { triggerAttack } from "./npcAnimation";
@@ -159,6 +159,10 @@ function updateAggressive(eid: number, playerEid: number | undefined, archetype:
   const dz = Position.z[playerEid] - Position.z[eid];
   const distToPlayer = Math.hypot(dx, dz);
   const attackRange = archetype.attackRange ?? 0;
+
+  // Humanoids face local +Z, so this yaw points the bandit's chest, head,
+  // and held weapon at the player throughout both pursuit and melee guard.
+  Rotation.yaw[eid] = Math.atan2(dx, dz);
 
   if (distToPlayer > attackRange) {
     NPC.state[eid] = NpcState.CHASING;

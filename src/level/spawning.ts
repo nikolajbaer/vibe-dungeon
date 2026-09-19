@@ -1,6 +1,6 @@
 import * as THREE from "three";
 import { addComponent, addEntity, removeComponent, type World } from "bitecs";
-import { Position, Velocity, CharacterBody, DynamicBody, PhysicsBody, PhysicsCollider, PhysicsRotation, Object3DRef, Item, NPC, NpcState, Health, Readable, Container, Carried, Stackable } from "../ecs/components";
+import { Position, Velocity, Rotation, CharacterBody, DynamicBody, PhysicsBody, PhysicsCollider, PhysicsRotation, Object3DRef, Item, NPC, NpcState, Health, Readable, Container, Carried, Stackable } from "../ecs/components";
 import { ITEM_REGISTRY } from "../assets/itemRegistry";
 import type { ItemAssetDef } from "../assets/types";
 import { FURNITURE_REGISTRY } from "../assets/furnitureRegistry";
@@ -334,6 +334,7 @@ export function spawnNpcs(world: World, physics: Physics, scene: THREE.Scene, sp
     const eid = addEntity(world);
     addComponent(world, eid, Position);
     addComponent(world, eid, Velocity);
+    addComponent(world, eid, Rotation);
     addComponent(world, eid, CharacterBody);
     addComponent(world, eid, PhysicsBody);
     addComponent(world, eid, PhysicsCollider);
@@ -346,6 +347,8 @@ export function spawnNpcs(world: World, physics: Physics, scene: THREE.Scene, sp
     Position.z[eid] = spawn.z;
     Velocity.x[eid] = 0;
     Velocity.z[eid] = 0;
+    Rotation.yaw[eid] = 0;
+    Rotation.pitch[eid] = 0;
 
     const radius = archetype.halfExtent;
     const halfHeight = Math.max(0.05, HUMANOID_HEIGHT / 2 - radius);

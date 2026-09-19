@@ -43,4 +43,7 @@ try {
   }
   assert.notEqual(meshes[0].skeleton.bones[0],meshes[1].skeleton.bones[0]);
   assert.notEqual(meshes[0].material,meshes[1].material,'bandit tint is independent');
+  const {default:cellar}=await server.ssrLoadModule('/src/level/rooms/cellar.ts');
+  const banditSpawn=cellar.npcs.find(npc=>npc.id==='bandit');
+  assert(banditSpawn.contents.includes('dagger'),'bandit dagger is seeded as corpse loot');
 } finally {await server.close();}

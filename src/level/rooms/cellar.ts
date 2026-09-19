@@ -42,8 +42,8 @@ import type { RoomContent } from "../placementTypes";
 // player falls on not matter for sector tracking).
 //
 // The bandit that used to guard room-b (issue #70's "first aggressive
-// archetype") moved down here — same archetype, same starting loot (a
-// gem), just relocated to be the dungeon's actual final encounter rather
+// archetype") moved down here — same archetype and gem loot, plus the dagger
+// visible in his hand, just relocated to be the dungeon's actual final encounter rather
 // than the first room behind a locked door. `cellar-room` is otherwise kept
 // deliberately sparse and undecorated (a couple of crates, no banners/
 // candelabra/tables) — this should read as neglected and forgotten, the
@@ -94,7 +94,7 @@ const cellar: RoomContent = {
   // descending the stairs walks essentially straight at it rather than
   // drifting sideways off the ramp partway down -- the same "on the spine
   // leading to the door" placement room-b's original bandit used.
-  npcs: [{ id: "bandit", x: 18, z: -13.0, floor: -1, contents: ["gem"] }],
+  npcs: [{ id: "bandit", x: 18, z: -13.0, floor: -1, contents: ["gem", "dagger"] }],
   props: [
     // Sparse, neglected clutter -- clear of the door's swing arc (west
     // wall, z in [-15,-12]) and the bandit above.
