@@ -370,6 +370,9 @@ export function spawnNpcs(world: World, physics: Physics, scene: THREE.Scene, sp
     NPC.wanderTimer[eid] = NPC_INITIAL_WANDER_PAUSE;
     NPC.archetypeId[eid] = archetype.id;
     NPC.attackCooldownRemaining[eid] = 0;
+    NPC.drawRemaining[eid] = 0;
+    NPC.provocationHits[eid] = 0;
+    NPC.provoked[eid] = 0;
     Health.current[eid] = archetype.health;
     Health.max[eid] = archetype.health;
     Combat.attackRecovery[eid] = 0;

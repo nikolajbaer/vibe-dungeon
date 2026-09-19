@@ -137,6 +137,7 @@ const trainingWing: RoomContent = {
   ],
   npcs: [
     { id: "weapons-master", x: 30.0, z: 5.7 },
+    { id: "guard", x: 29.0, z: 1.5 },
     // Equipment room's quartermaster, wandering near the table, clear of
     // the door's swing arc (west wall, x~36-37).
     { id: "quartermaster", x: 38.0, z: -3.0 },

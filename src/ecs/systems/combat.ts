@@ -1,6 +1,6 @@
 import * as THREE from "three";
 import { addComponent, hasComponent, query, type World } from "bitecs";
-import { Carried, Combat, Dead, Health, Item, Object3DRef, PlayerControlled, Practice } from "../components";
+import { Carried, Combat, Dead, Health, Item, NPC, NpcState, Object3DRef, PlayerControlled, Practice } from "../components";
 import { ITEM_REGISTRY } from "../../assets/itemRegistry";
 import { isHandSlot, triggerViewmodelParry, triggerViewmodelSwing } from "./items";
 import { triggerDeathCollapse, triggerHitReaction, triggerParry } from "./npcAnimation";
@@ -89,7 +89,7 @@ export function tryParry(world: World, defenderEid?: number): boolean {
 }
 
 /** Applies one resolved hit and returns the actual post-parry damage. */
-export function applyMeleeDamage(world: World, targetEid: number, rawDamage: number): number {
+export function applyMeleeDamage(world: World, targetEid: number, rawDamage: number, attackerEid?: number): number {
   if (!hasComponent(world, targetEid, Health) || hasComponent(world, targetEid, Dead)) return 0;
   if (hasComponent(world, targetEid, Combat)
       && Combat.parryRecovery[targetEid] <= 0
@@ -112,6 +112,18 @@ export function applyMeleeDamage(world: World, targetEid: number, rawDamage: num
     return damage;
   }
   Health.current[targetEid] = Math.max(0, Health.current[targetEid] - damage);
+
+  // Friendly NPCs tolerate one accidental strike. A second real hit makes
+  // them defend themselves using the same chase/attack path as hostiles.
+  if (attackerEid !== undefined && hasComponent(world, attackerEid, PlayerControlled)
+      && hasComponent(world, targetEid, NPC) && NPC.provoked[targetEid] === 0) {
+    NPC.provocationHits[targetEid] = (NPC.provocationHits[targetEid] || 0) + 1;
+    if (NPC.provocationHits[targetEid] >= 2) {
+      NPC.provoked[targetEid] = 1;
+      NPC.state[targetEid] = NpcState.CHASING;
+      NPC.drawRemaining[targetEid] = .5;
+    }
+  }
 
   if (Health.current[targetEid] <= 0) {
     addComponent(world, targetEid, Dead);
@@ -149,6 +161,6 @@ export function tryMeleeAttack(world: World, camera: THREE.Camera, attackType: A
   if (hitEid === undefined) return false;
 
   const damage = Math.round((weapon?.damage ?? UNARMED_DAMAGE) * profile.damageMultiplier);
-  applyMeleeDamage(world, hitEid, damage);
+  applyMeleeDamage(world, hitEid, damage, attackerEid);
   return true;
 }

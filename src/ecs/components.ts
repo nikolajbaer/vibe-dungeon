@@ -185,6 +185,12 @@ export const NPC = {
   wanderTimer: [] as number[], // seconds until the next wander re-target
   archetypeId: [] as string[],
   attackCooldownRemaining: [] as number[],
+  /** Seconds left in the one-time weapon draw before this NPC can strike. */
+  drawRemaining: [] as number[],
+  /** Number of real (non-practice) hits received while still friendly. */
+  provocationHits: [] as number[],
+  /** Set after the second friendly-fire hit; uses the aggressive state path. */
+  provoked: [] as number[],
 };
 
 /** Hit points. Added ahead of real combat (#16) so the HUD health bar (#23)

@@ -4,7 +4,12 @@ import sword from '../assets/items/sword';
 import woodenSword from '../assets/items/wooden_sword';
 
 export type HumanoidSpecies = 'human' | 'elf' | 'goblin' | 'dwarf';
-export interface HumanoidOptions { species?: HumanoidSpecies; skin?: number; tunic?: number; trousers?: number; weapon?: 'shortSword' | 'dagger' | 'woodenSword'; }
+export type HairStyle = 'none' | 'short' | 'long';
+export interface HumanoidOptions {
+  species?: HumanoidSpecies; skin?: number; tunic?: number; trousers?: number;
+  weapon?: 'shortSword' | 'dagger' | 'woodenSword';
+  hair?: HairStyle; hairColor?: number; chainmail?: boolean; nasalHelmet?: boolean;
+}
 const presets = {
   human: { scale: [1, 1, 1], ear: .04, skin: 0xc68d67 },
   elf: { scale: [.88, 1, .92], ear: .13, skin: 0xd4aa87 },
@@ -130,7 +135,8 @@ export function createHumanoidBase(options: HumanoidOptions = {}) {
       [.12,.057,.085,s*.105,.025,w(foot)],[.23,.058,.063,s*.105,0,w(knee,foot,.75)]],leather);
     loft([[1.59,.015,.021,s*.108,0,w('head')],[1.64,.023,.024,s*.12,0,w('head')],
       [preset.ear>.05?1.70:1.666,.007,.01,s*(preset.ear>.05?.113+preset.ear:.124),-.005,w('head')]],skin,6);
-    loft([[1.631,.022,.008,s*.047,.088,w('head')],[1.652,.022,.008,s*.047,.093,w('head')]],0x20272a,6);
+    loft([[1.631,.024,.009,s*.047,.088,w('head')],[1.652,.024,.009,s*.047,.093,w('head')]],0xf1eee5,6);
+    loft([[1.637,.008,.006,s*.047,.099,w('head')],[1.649,.008,.006,s*.047,.101,w('head')]],0x17191b,6);
     loft([[1.659,.03,.012,s*.047,.088,w('head')],[1.674,.029,.011,s*.047,.089,w('head')]],0x594235,6);
   }
   // A narrow belt provides a replaceable costume boundary.
@@ -146,6 +152,37 @@ export function createHumanoidBase(options: HumanoidOptions = {}) {
   mesh.add(bones[0]); mesh.updateMatrixWorld(true);
   const skeleton = new THREE.Skeleton(bones); mesh.bind(skeleton);
   mesh.castShadow=true; mesh.receiveShadow=true; mesh.frustumCulled=false;
+  const accessoryMaterial = (color:number, metalness=0, roughness=.9) => new THREE.MeshStandardMaterial({color,metalness,roughness,flatShading:true});
+  const attach = (boneName:string, child:THREE.Mesh, name:string) => {
+    child.name=name; child.castShadow=true; child.receiveShadow=true; bones[ids[boneName]].add(child); return child;
+  };
+  const hairStyle=options.hair ?? 'none', hairColor=options.hairColor ?? 0x4b3024;
+  if(hairStyle!=='none') {
+    const cap=attach('head',new THREE.Mesh(new THREE.SphereGeometry(1,8,5,0,Math.PI*2,0,Math.PI*.52),accessoryMaterial(hairColor)),'hair');
+    cap.scale.set(.128*sx,.125*sy,.121*sz);
+    cap.position.set(0,.168*sy,-.009*sz);
+    if(hairStyle==='long') {
+      const back=attach('head',new THREE.Mesh(new THREE.BoxGeometry(.225*sx,.30*sy,.072*sz),accessoryMaterial(hairColor)),'longHair');
+      back.position.set(0,.012*sy,-.105*sz);
+    }
+  }
+  if(options.chainmail) {
+    const mailMaterial=accessoryMaterial(0x6f7478,.55,.72);
+    const mail=attach('chest',new THREE.Mesh(new THREE.CylinderGeometry(.105*sx,.22*sx,.42*sy,8,2,true),mailMaterial),'chainmail');
+    mail.scale.z=.82*sz; mail.position.set(0,-.08*sy,0);
+    for(const [side,s] of [['L',1],['R',-1]] as const){
+      const shoulder=attach(`clavicle.${side}`,new THREE.Mesh(new THREE.SphereGeometry(1,8,5),mailMaterial),`chainmailShoulder.${side}`);
+      shoulder.scale.set(.135*sx,.065*sy,.10*sz);shoulder.position.set(s*.125*sx,.035*sy,0);
+    }
+  }
+  if(options.nasalHelmet) {
+    const steel=accessoryMaterial(0x777d82,.65,.55);
+    const profile=[new THREE.Vector2(.15*sx,.14*sy),new THREE.Vector2(.148*sx,.18*sy),new THREE.Vector2(.132*sx,.23*sy),new THREE.Vector2(.095*sx,.285*sy),new THREE.Vector2(.035*sx,.33*sy),new THREE.Vector2(0,.345*sy)];
+    const helm=attach('head',new THREE.Mesh(new THREE.LatheGeometry(profile,10),steel),'nasalHelmet');
+    helm.scale.z=sz/sx;helm.position.z=-.005*sz;
+    const guard=attach('head',new THREE.Mesh(new THREE.BoxGeometry(.027*sx,.17*sy,.03*sz),steel),'noseGuard');
+    guard.position.set(0,.06*sy,.116*sz);
+  }
   const duration=1.1, samples=32;
   const times=Array.from({length:samples+1},(_,i)=>i*duration/samples);
   const tracks: THREE.KeyframeTrack[]=[];
@@ -288,6 +325,22 @@ export function createHumanoidBase(options: HumanoidOptions = {}) {
       chest: [.18 + .012 * breathe, -.14, 0], head: [-.25 - .012 * breathe, .35, 0],
     } };
   }, true);
+  // Right-handed draw from the left hip. The weapon itself is hidden until
+  // the hand reaches the scabbard and revealed by npcAnimationSystem, which
+  // avoids showing a sword glued to an empty hand during ordinary loitering.
+  const drawWeapon = poseClip('drawWeapon', .5, keyed([
+    { t: 0, pose: neutral },
+    { t: .16, pose: { y: .86, joints: {
+      hips: [.03, -.10, 0], spine: [.04, -.10, 0], chest: [.08, -.18, 0], head: [-.05, .20, 0],
+      'upperArm.R': [-.72, .52, -.48], 'forearm.R': [-1.48, 0, -.12], 'hand.R': [-.72, -.35, -.35],
+      'upperArm.L': [-.12, 0, .08], 'forearm.L': [-.28, 0, 0],
+    } } },
+    { t: .27, pose: { y: .82, joints: { ...guard.joints,
+      hips: [.05, -.04, 0], spine: [.08, .02, 0], chest: [.12, .12, 0], head: [-.12, -.15, 0],
+      'upperArm.R': [-1.25, -.42, -.24], 'forearm.R': [-.92, 0, 0], 'hand.R': [-.45, -.20, .10],
+    } } },
+    { t: .5, pose: guard },
+  ]), true);
   const attack = poseClip('attack', 1.7, keyed([
     { t: 0, pose: guard },
     { t: .32, pose: { ...guard, y: .70, z: -.025, joints: { ...guard.joints,
@@ -461,7 +514,7 @@ export function createHumanoidBase(options: HumanoidOptions = {}) {
   }
   // Existing NPC state machine uses idle/hit; workshop labels these loiter/damage.
   const canonicalClips={
-    idle,walk,hit,death,combatIdle,parry,unarmedParry,
+    idle,walk,hit,death,combatIdle,drawWeapon,parry,unarmedParry,
     weaponJab,weaponCross,weaponChop,
     unarmedJab,unarmedCross,unarmedChop,
   };

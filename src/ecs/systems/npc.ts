@@ -2,7 +2,7 @@ import { hasComponent, query, type World } from "bitecs";
 import { Dead, NPC, NpcState, Position, Rotation, Velocity, PlayerControlled, Practice } from "../components";
 import { NPC_REGISTRY } from "../../assets/npcRegistry";
 import type { NpcArchetypeDef } from "../../assets/types";
-import { triggerAttack } from "./npcAnimation";
+import { triggerAttack, triggerWeaponDraw } from "./npcAnimation";
 import { applyMeleeDamage } from "./combat";
 
 const FOLLOW_SPEED = 2; // m/s — slower than the player's 3.2 so it doesn't ride the player's heels
@@ -73,7 +73,7 @@ export function npcSystem(world: World, dt: number): void {
 
     const archetype = NPC_REGISTRY[NPC.archetypeId[eid]];
     const sparring = hasComponent(world, eid, Practice) && !!Practice.active[eid];
-    if (archetype?.behavior === "aggressive" || sparring) {
+    if (archetype?.behavior === "aggressive" || sparring || !!NPC.provoked[eid]) {
       updateAggressive(world, eid, playerEid, archetype, dt, sparring);
       continue;
     }
@@ -144,6 +144,8 @@ function updateAggressive(world: World, eid: number, playerEid: number | undefin
     const dz = Position.z[playerEid] - Position.z[eid];
     if (sparring || Math.hypot(dx, dz) <= (archetype.aggroRange ?? 0)) {
       NPC.state[eid] = NpcState.CHASING;
+      NPC.drawRemaining[eid] = .5;
+      triggerWeaponDraw(eid);
     } else {
       wander(eid, dt);
     }
@@ -160,7 +162,11 @@ function updateAggressive(world: World, eid: number, playerEid: number | undefin
   const dx = Position.x[playerEid] - Position.x[eid];
   const dz = Position.z[playerEid] - Position.z[eid];
   const distToPlayer = Math.hypot(dx, dz);
-  const attackRange = archetype.attackRange ?? 0;
+  const attackRange = archetype.attackRange ?? (NPC.provoked[eid] ? 1.5 : 0);
+
+  if (NPC.drawRemaining[eid] > 0) {
+    if (triggerWeaponDraw(eid)) NPC.drawRemaining[eid] = Math.max(0, NPC.drawRemaining[eid] - dt);
+  }
 
   // Humanoids face local +Z, so this yaw points the bandit's chest, head,
   // and held weapon at the player throughout both pursuit and melee guard.
@@ -177,9 +183,10 @@ function updateAggressive(world: World, eid: number, playerEid: number | undefin
   Velocity.z[eid] = 0;
 
   NPC.attackCooldownRemaining[eid] -= dt;
-  if (NPC.attackCooldownRemaining[eid] <= 0) {
+  if (NPC.drawRemaining[eid] <= 0 && NPC.attackCooldownRemaining[eid] <= 0) {
     triggerAttack(eid);
-    applyMeleeDamage(world, playerEid, archetype.attackDamage ?? 0);
+    const fallbackDamage = archetype.parryWeaponClass === "oneHanded" ? 7 : archetype.parryWeaponClass === "dagger" ? 5 : 3;
+    applyMeleeDamage(world, playerEid, archetype.attackDamage ?? fallbackDamage, eid);
     NPC.attackCooldownRemaining[eid] = archetype.attackCooldown ?? 1;
   }
 }
