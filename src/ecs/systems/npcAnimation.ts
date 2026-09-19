@@ -74,10 +74,12 @@ export function createAnimatedNpcMesh(rig: HumanoidRig, eid: number): THREE.Obje
   // back in, since the interrupt already popped visually.
   mixer.addEventListener("finished", (e) => {
     const state = npcAnimations.get(eid);
-    if (!state || e.action !== state.hitAction) return;
+    if (!state || state.oneShot !== "hit" || e.action !== state.hitAction) return;
     state.oneShot = undefined;
     const target = state.moving ? state.walkAction : state.idleAction;
     const other = state.moving ? state.idleAction : state.walkAction;
+    target.stopFading();
+    other.stopFading();
     target.enabled = true;
     target.setEffectiveWeight(1);
     other.setEffectiveWeight(0);
@@ -99,6 +101,8 @@ export function createAnimatedNpcMesh(rig: HumanoidRig, eid: number): THREE.Obje
 export function triggerHitReaction(eid: number): void {
   const state = npcAnimations.get(eid);
   if (!state || state.oneShot === "death") return; // a corpse doesn't flinch
+  state.idleAction.stopFading();
+  state.walkAction.stopFading();
   state.idleAction.setEffectiveWeight(0);
   state.walkAction.setEffectiveWeight(0);
   state.hitAction.enabled = true;
@@ -118,7 +122,10 @@ export function triggerHitReaction(eid: number): void {
  */
 export function triggerDeathCollapse(eid: number): void {
   const state = npcAnimations.get(eid);
-  if (!state) return;
+  if (!state || state.oneShot === "death") return;
+  state.idleAction.stopFading();
+  state.walkAction.stopFading();
+  state.hitAction.stop();
   state.idleAction.setEffectiveWeight(0);
   state.walkAction.setEffectiveWeight(0);
   state.hitAction.setEffectiveWeight(0);

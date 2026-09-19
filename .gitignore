@@ -1,5 +1,9 @@
 # dependencies
 node_modules/
+node_modules
+
+# Reproducible character exports and offline render frames
+/public/characters/
 
 # build output
 dist/

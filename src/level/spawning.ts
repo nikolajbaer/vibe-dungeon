@@ -308,10 +308,10 @@ export function dropCarriedItem(world: World, physics: Physics, scene: THREE.Sce
 const NPC_INITIAL_WANDER_PAUSE = 2; // seconds before its first idle wander leg
 
 /** Total height (meters) of the humanoid rig every NPC archetype currently
- * shares — matches `HEAD_TOP_Y` in characters/humanoidRig.ts. Used to size
+ * shares — matches the human bind-pose crown in characters/humanoidBase.ts. Used to size
  * the physics capsule; an archetype with a genuinely different body would
  * want this on `NpcArchetypeDef` instead. */
-const HUMANOID_HEIGHT = 1.75;
+const HUMANOID_HEIGHT = 1.79;
 
 /**
  * Places every NPC spawn as a real `NPC` + `Position` + `Velocity` +

@@ -14,4 +14,5 @@ export default defineConfig({
   // Proper JSX transform for the Preact-based HUD (src/hud/), instead of
   // hand-rolling esbuild jsx config — see README Design Notes ("HUD" section).
   plugins: [preact()],
+  build: { rollupOptions: { input: { game: 'index.html', character: 'character.html' } } },
 });
