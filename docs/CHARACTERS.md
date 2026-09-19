@@ -21,6 +21,14 @@ Animation names deliberately retain the existing gameplay contract:
 | walk | 1.1-second in-place walk with torso counter-rotation |
 | hit | 0.75-second recoil and recovery; resumes locomotion |
 | death | 2.4-second collapse and settle; held permanently until corpse cleanup |
+| combatIdle | Three-second crouched guard with the off-hand protecting the chest |
+| attack | 1.7-second right-handed step-lunge, maximum extension around 0.62 s |
+
+Pass `weapon: 'shortSword'` to attach a shortened sword to `hand.R`.
+The character viewer includes the weapon and both combat clips. The stab
+returns to the crouched guard and has no root-motion translation. These new
+combat clips are currently an animation preview: the NPC damage timing and
+first-person player weapon behavior are not changed by this addition.
 
 Open `/character.html` to orbit the model, switch species/clips, show bones,
 or export an animated GLB. `npm run test:characters` validates all presets,

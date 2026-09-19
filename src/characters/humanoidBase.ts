@@ -1,7 +1,8 @@
 import * as THREE from 'three';
+import sword from '../assets/items/sword';
 
 export type HumanoidSpecies = 'human' | 'elf' | 'goblin' | 'dwarf';
-export interface HumanoidOptions { species?: HumanoidSpecies; skin?: number; tunic?: number; trousers?: number; }
+export interface HumanoidOptions { species?: HumanoidSpecies; skin?: number; tunic?: number; trousers?: number; weapon?: 'shortSword'; }
 const presets = {
   human: { scale: [1, 1, 1], ear: .04, skin: 0xc68d67 },
   elf: { scale: [.88, 1, .92], ear: .13, skin: 0xd4aa87 },
@@ -269,8 +270,56 @@ export function createHumanoidBase(options: HumanoidOptions = {}) {
     { t: 1.85, pose: { y: .12, z: -.22, joints: sprawled } },
     { t: 2.4, pose: { y: .12, z: -.22, joints: sprawled } },
   ]), true);
+  // A compact right-handed guard: both knees loaded, elbows close, off-hand
+  // protecting the ribs. Local hip motion returns to guard; gameplay owns travel.
+  const guard: Pose = { y: .73, joints: {
+    hips: [.07, -.14, 0], spine: [.10, -.07, 0], chest: [.18, -.14, 0], head: [-.25, .35, 0],
+    'upperLeg.L': [-.58, 0, .09], 'upperLeg.R': [-.68, 0, -.09],
+    'lowerLeg.L': [1.12, 0, 0], 'lowerLeg.R': [1.12, 0, 0],
+    'foot.L': [-.61, 0, 0], 'foot.R': [-.51, 0, 0],
+    'upperArm.R': [-.25, -.08, -.12], 'forearm.R': [-1.30, 0, 0], 'hand.R': [-.20, 0, 0],
+    'upperArm.L': [-.35, .08, .16], 'forearm.L': [-1.6, 0, 0], 'hand.L': [0, 0, -.12],
+  } };
+  const combatIdle = poseClip('combatIdle', 3, t => {
+    const breathe = Math.sin(t / 3 * Math.PI * 2);
+    return { ...guard, joints: { ...guard.joints,
+      chest: [.18 + .012 * breathe, -.14, 0], head: [-.25 - .012 * breathe, .35, 0],
+    } };
+  }, true);
+  const attack = poseClip('attack', 1.7, keyed([
+    { t: 0, pose: guard },
+    { t: .32, pose: { ...guard, y: .70, z: -.025, joints: { ...guard.joints,
+      hips: [.09, -.24, 0], spine: [.14, -.18, 0], chest: [.25, -.31, 0], head: [-.22, .58, 0],
+      'upperArm.R': [-.12, -.08, -.10], 'forearm.R': [-1.4, 0, 0],
+    } } },
+    { t: .62, pose: { ...guard, y: .59, z: .17, joints: { ...guard.joints,
+      hips: [.14, .20, 0], spine: [.19, .20, 0], chest: [.34, .44, 0], head: [-.16, -.78, 0],
+      // The right foot plants forward while the left leg stays loaded behind.
+      'upperLeg.R': [-1.28, 0, -.09], 'lowerLeg.R': [.78, 0, 0], 'foot.R': [.36, 0, 0],
+      'upperLeg.L': [.08, 0, .09], 'lowerLeg.L': [1.30, 0, 0], 'foot.L': [-1.48, 0, 0],
+      'upperArm.R': [-1.67, -.96, -.055], 'forearm.R': [-.10, 0, 0], 'hand.R': [-.80, -.60, .50],
+      'upperArm.L': [-.22, .08, .20], 'forearm.L': [-1.65, 0, 0],
+    } } },
+    { t: .82, pose: { ...guard, y: .62, z: .13, joints: { ...guard.joints,
+      hips: [.12, .14, 0], spine: [.16, .14, 0], chest: [.30, .31, 0], head: [-.18, -.58, 0],
+      'upperLeg.R': [-1.10, 0, -.09], 'lowerLeg.R': [.90, 0, 0], 'foot.R': [.10, 0, 0],
+      'upperLeg.L': [-.05, 0, .09], 'lowerLeg.L': [1.22, 0, 0], 'foot.L': [-1.28, 0, 0],
+      'upperArm.R': [-1.48, -.76, -.065], 'forearm.R': [-.30, 0, 0], 'hand.R': [-.65, -.45, .35],
+    } } },
+    // Pull the right foot and weapon back into the original crouched guard.
+    { t: 1.28, pose: guard },
+    { t: 1.7, pose: guard },
+  ]), true);
+  if (options.weapon === 'shortSword') {
+    const weapon = sword.createWorldMesh();
+    weapon.name = 'shortSword';
+    weapon.scale.set(.72, .72, .72);
+    weapon.rotation.x = Math.PI / 2;
+    weapon.position.set(0, -.065 * sy, .014 * sz);
+    bones[ids['hand.R']].add(weapon);
+  }
   // Existing NPC state machine uses idle/hit; workshop labels these loiter/damage.
-  const clips={idle,walk,hit,death};
+  const clips={idle,walk,hit,death,combatIdle,attack};
   mesh.animations=Object.values(clips);
   return {mesh,skeleton,clips};
 }
