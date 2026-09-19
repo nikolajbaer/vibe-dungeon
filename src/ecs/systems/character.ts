@@ -18,7 +18,10 @@ import { CHARACTER_GROUPS, GRAVITY_Y, capsuleCenterOffset, type Physics } from "
  * accumulate to zero on contact. A little constant push into the floor is
  * what keeps `computedGrounded()` reporting true while walking (and keeps
  * snap-to-ground engaged over small dips) instead of flickering. */
-const GROUNDED_STICK_SPEED = -2;
+// Snap-to-ground does most of the work. A large downward request is projected
+// against an uphill ramp by the character controller and steals horizontal
+// speed, so keep this just strong enough to stabilize the grounded flag.
+const GROUNDED_STICK_SPEED = -0.5;
 
 /** Fall speed is capped so a long drop can't build up enough speed to
  * tunnel through a floor in a single step. */

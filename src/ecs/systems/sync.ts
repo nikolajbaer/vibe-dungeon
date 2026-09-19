@@ -1,5 +1,5 @@
 import { query, type World } from "bitecs";
-import { Position, Rotation, Object3DRef, PhysicsRotation, PlayerControlled, RenderOffsetY } from "../components";
+import { Position, Rotation, Object3DRef, PhysicsRotation, RenderOffsetY } from "../components";
 
 /** Copies ECS transform data into the corresponding three.js Object3D
  * (an NPC's mesh, a world item, or the player's camera). Runs last, right
@@ -19,9 +19,9 @@ export function syncSystem(world: World): void {
     obj.position.set(Position.x[eid], Position.y[eid] + (RenderOffsetY[eid] ?? 0), Position.z[eid]);
   }
 
-  // Only the player entity currently has meaningful Rotation (yaw/pitch);
-  // walls and doors don't rotate.
-  for (const eid of query(world, [Rotation, Object3DRef, PlayerControlled])) {
+  // Players use yaw/pitch; humanoid NPCs use yaw to face their movement or
+  // combat target. Walls and doors do not carry Rotation.
+  for (const eid of query(world, [Rotation, Object3DRef])) {
     const obj = Object3DRef[eid];
     if (!obj) continue;
     obj.rotation.set(Rotation.pitch[eid], Rotation.yaw[eid], 0, "YXZ");

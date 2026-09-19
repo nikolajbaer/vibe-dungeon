@@ -106,6 +106,8 @@ try {
   const lootState = await debug("getContainerState");
   const lootedGem = lootState.contents.find((i) => i.itemTypeId === "gem");
   assert(!!lootedGem, "corpse contains the pre-seeded gem");
+  const lootedDagger = lootState.contents.find((i) => i.itemTypeId === "dagger");
+  assert(!!lootedDagger, "corpse contains the bandit's dagger");
   await debug("takeItemFromContainer", lootedGem.eid);
   await page.waitForTimeout(150);
   const gemAfterLoot = (await debug("getItemStates")).find((i) => i.eid === lootedGem.eid);
