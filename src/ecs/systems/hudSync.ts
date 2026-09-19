@@ -1,5 +1,5 @@
-import { query, type World } from "bitecs";
-import { Health, PlayerControlled } from "../components";
+import { hasComponent, query, type World } from "bitecs";
+import { Health, PlayerControlled, Practice } from "../components";
 import { hudStore } from "../../hud/store";
 
 /**
@@ -14,6 +14,11 @@ import { hudStore } from "../../hud/store";
 export function hudSync(world: World): void {
   for (const eid of query(world, [Health, PlayerControlled])) {
     hudStore.setHealth(Health.current[eid], Health.max[eid]);
+    const active = hasComponent(world, eid, Practice) && !!Practice.active[eid];
+    const opponent = Practice.opponentEid[eid];
+    hudStore.setPractice(active, Practice.points[eid], Practice.maxPoints[eid],
+      opponent !== undefined && hasComponent(world, opponent, Practice) ? Practice.points[opponent] : 0,
+      opponent !== undefined && hasComponent(world, opponent, Practice) ? Practice.maxPoints[opponent] : 0);
     break; // single player entity
   }
 }

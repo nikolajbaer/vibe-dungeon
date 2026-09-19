@@ -208,6 +208,15 @@ export const Combat = {
   agility: [] as number[],
 };
 
+/** Temporary non-lethal sparring score. While active, melee damage drains
+ * these points instead of Health and can never add Dead. */
+export const Practice = {
+  active: [] as number[],
+  points: [] as number[],
+  maxPoints: [] as number[],
+  opponentEid: [] as number[],
+};
+
 /** Tag: this entity's `Health.current` has reached 0 (see `tryMeleeAttack`
  * in combat.ts). Systems that treat entities as alive and interactable —
  * `npcSystem`'s wander/follow, `tryInteract`'s interactable list, and

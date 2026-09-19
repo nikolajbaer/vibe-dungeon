@@ -2,13 +2,14 @@ import * as THREE from "three";
 import Stats from "three/examples/jsm/libs/stats.module.js";
 import { addComponent, addEntity, createWorld, hasComponent } from "bitecs";
 import { query } from "bitecs";
-import { Position, Velocity, Rotation, CharacterBody, DynamicBody, PhysicsBody, PhysicsCollider, PhysicsRotation, RenderOffsetY, PlayerControlled, Object3DRef, Door, Dead, DeathSector, Health, Combat, NPC, Item, Carried, Readable, Container, Stackable } from "./ecs/components";
+import { Position, Velocity, Rotation, CharacterBody, DynamicBody, PhysicsBody, PhysicsCollider, PhysicsRotation, RenderOffsetY, PlayerControlled, Object3DRef, Door, Dead, DeathSector, Health, Combat, Practice, NPC, Item, Carried, Readable, Container, Stackable } from "./ecs/components";
 import { inputSystem } from "./ecs/systems/input";
 import { characterSystem, physicsSyncSystem, teleportCharacter } from "./ecs/systems/character";
 import { dynamicSyncSystem } from "./ecs/systems/dynamics";
 import { addCharacter, createPhysics, PHYSICS_DT } from "./physics/world";
 import { doorAnimationSystem, tryInteract } from "./ecs/systems/doors";
 import { combatSystem, tryMeleeAttack, tryParry, type AttackType } from "./ecs/systems/combat";
+import { practiceSystem, startPractice } from "./ecs/systems/practice";
 import { npcSystem, toggleNpcFollow } from "./ecs/systems/npc";
 import { getNpcAnimationDebugState, npcAnimationSystem } from "./ecs/systems/npcAnimation";
 import { corpseCleanupSystem, MIN_LINGER_SECONDS } from "./ecs/systems/corpseCleanup";
@@ -241,6 +242,19 @@ export function startGame(container: HTMLElement): void {
     toggleFollow(npcEid) {
       toggleNpcFollow(npcEid);
     },
+    startPractice(npcEid, agility) {
+      const woodenSword = Array.from(query(world, [Item, Carried])).find(eid =>
+        Carried.ownerEid[eid] === player && Item.itemTypeId[eid] === "wooden_sword");
+      if (woodenSword === undefined) {
+        hudStore.showMessage("Pick up the wooden sword first.");
+        return;
+      }
+      for (const eid of query(world, [Item, Carried])) {
+        if (Carried.ownerEid[eid] === player && Carried.slot[eid] === "hand-right" && eid !== woodenSword) unequipItem(world, eid);
+      }
+      if (!isHandSlot(Carried.slot[woodenSword])) equipItem(world, camera, woodenSword, "hand-right");
+      startPractice(world, npcEid, agility);
+    },
   };
   dialogueStore.bindActions(dialogueActions);
 
@@ -439,6 +453,12 @@ export function startGame(container: HTMLElement): void {
       parryWindow: Combat.parryWindow[player],
       parryRecovery: Combat.parryRecovery[player],
     }),
+    getPracticeState: () => ({
+      active: hasComponent(world, player, Practice) && !!Practice.active[player],
+      points: Practice.points[player] ?? 0,
+      maxPoints: Practice.maxPoints[player] ?? 0,
+      opponentEid: Practice.opponentEid[player],
+    }),
     // Item/inventory debug hooks (issue #39) for manual/automated smoke
     // testing — world item positions to walk to, and each item's current
     // carry/equip state and world-mesh visibility.
@@ -606,6 +626,15 @@ export function startGame(container: HTMLElement): void {
 
   const clock = new THREE.Clock();
   let accumulator = 0;
+  const resolvePractice = () => {
+    const result = practiceSystem(world);
+    if (!result) return;
+    const decisive = result.remainingFraction >= .5;
+    const node = result.playerWon
+      ? decisive ? "player-decisive" : "player-close"
+      : decisive ? "master-decisive" : "master-close";
+    dialogueStore.openAt(result.masterEid, "weapons-master", node);
+  };
   function frame() {
     requestAnimationFrame(frame);
     stats.begin();
@@ -660,6 +689,7 @@ export function startGame(container: HTMLElement): void {
         dynamicSyncSystem(world);
       }
       if (steps === MAX_PHYSICS_STEPS_PER_FRAME) accumulator = 0;
+      resolvePractice();
     }
     // Runs every frame regardless of `modalActive` — see its own doc
     // comment for why a death/hit one-shot has to keep playing through a
@@ -690,6 +720,7 @@ export function startGame(container: HTMLElement): void {
     else if (keyboard.consumeJustPressed("Digit3")) requestedAttack = "chop";
     if (requestedAttack && !isModalActive()) tryMeleeAttack(world, camera, requestedAttack);
     if ((keyboard.consumeJustPressed("KeyF") || touch.consumeParryRequest()) && !isModalActive()) tryParry(world);
+    resolvePractice();
     viewmodelSwingSystem(dt);
 
     // Belt-and-suspenders alongside the pause above: if the NPC a dialogue

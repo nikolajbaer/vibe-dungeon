@@ -37,6 +37,11 @@ class HudStore {
    * runs; the ECS write it triggers only takes effect starting next frame's
    * `setHealth` call). */
   playerDefeated = false;
+  practiceActive = false;
+  practicePoints = 0;
+  practiceMax = 0;
+  opponentPracticePoints = 0;
+  opponentPracticeMax = 0;
   /** A short-lived on-screen banner (e.g. "Door is locked."), or `undefined`
    * when none is showing — drives `Message.tsx`. Plain text, not a queue: a
    * second `showMessage` while one is already up just replaces it and resets
@@ -63,6 +68,14 @@ class HudStore {
     this.healthCurrent = current;
     this.healthMax = max;
     if (current <= 0) this.playerDefeated = true;
+  }
+
+  setPractice(active: boolean, points = 0, max = 0, opponentPoints = 0, opponentMax = 0): void {
+    this.practiceActive = active;
+    this.practicePoints = points;
+    this.practiceMax = max;
+    this.opponentPracticePoints = opponentPoints;
+    this.opponentPracticeMax = opponentMax;
   }
 
   /** Called from `DeathOverlay.tsx`'s respawn button. */

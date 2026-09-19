@@ -14,10 +14,12 @@ export interface DialogueActions {
    * active tree was opened for — the same follow/loiter toggle a docile
    * archetype without a `dialogueId` still runs directly on interact. */
   toggleFollow(npcEid: number): void;
+  startPractice(npcEid: number, agility: number): void;
 }
 
 const noopActions: DialogueActions = {
   toggleFollow: () => {},
+  startPractice: () => {},
 };
 
 class DialogueStore {
@@ -62,6 +64,14 @@ class DialogueStore {
     this.activeNpcEid = npcEid;
   }
 
+  openAt(npcEid: number, treeId: string, nodeId: string): void {
+    const tree = DIALOGUE_REGISTRY[treeId];
+    if (!tree?.nodes[nodeId]) return;
+    this.activeTreeId = treeId;
+    this.currentNodeId = nodeId;
+    this.activeNpcEid = npcEid;
+  }
+
   close(): void {
     this.activeTreeId = null;
     this.currentNodeId = null;
@@ -78,6 +88,9 @@ class DialogueStore {
 
     if (choice.effect === "toggleFollow" && this.activeNpcEid !== null) {
       this.actions.toggleFollow(this.activeNpcEid);
+    }
+    if (choice.effect === "startPractice" && this.activeNpcEid !== null) {
+      this.actions.startPractice(this.activeNpcEid, choice.practiceAgility ?? .35);
     }
 
     if (choice.next) {

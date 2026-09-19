@@ -55,7 +55,7 @@ export function createAnimatedNpcMesh(rig: HumanoidRig, eid: number): THREE.Obje
   const hitAction = mixer.clipAction(rig.clips.hit);
   const deathAction = mixer.clipAction(rig.clips.death);
   const combatIdleAction = mixer.clipAction(rig.clips.combatIdle);
-  const attackAction = mixer.clipAction(rig.clips.attack);
+  const attackAction = mixer.clipAction(rig.clips.weaponJab);
   const parryAction = mixer.clipAction(rig.clips.parry);
 
   idleAction.play();

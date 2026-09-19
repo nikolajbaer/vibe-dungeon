@@ -136,11 +136,13 @@ const trainingWing: RoomContent = {
     { id: "table", x: 40.0, z: -1.5 },
   ],
   npcs: [
+    { id: "weapons-master", x: 30.0, z: 5.7 },
     // Equipment room's quartermaster, wandering near the table, clear of
     // the door's swing arc (west wall, x~36-37).
     { id: "quartermaster", x: 38.0, z: -3.0 },
   ],
   items: [
+    { id: "wooden_sword", x: 32.0, z: 4.5, y: .7 },
     // Rusty key for the lockpick-nook's door, left out in the open in the
     // hub -- see `lockedDoors` above.
     { id: "rusty_key", x: 31.5, z: -1.0 },

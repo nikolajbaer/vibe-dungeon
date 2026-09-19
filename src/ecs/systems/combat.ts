@@ -1,6 +1,6 @@
 import * as THREE from "three";
 import { addComponent, hasComponent, query, type World } from "bitecs";
-import { Carried, Combat, Dead, Health, Item, Object3DRef, PlayerControlled } from "../components";
+import { Carried, Combat, Dead, Health, Item, Object3DRef, PlayerControlled, Practice } from "../components";
 import { ITEM_REGISTRY } from "../../assets/itemRegistry";
 import { isHandSlot, triggerViewmodelParry, triggerViewmodelSwing } from "./items";
 import { triggerDeathCollapse, triggerHitReaction, triggerParry } from "./npcAnimation";
@@ -106,6 +106,11 @@ export function applyMeleeDamage(world: World, targetEid: number, rawDamage: num
     ? Combat.parryMitigation[targetEid] || PARRY_MITIGATION[weaponClassFor(world, targetEid)]
     : 0;
   const damage = Math.max(1, Math.round(rawDamage * (1 - mitigation)));
+  if (hasComponent(world, targetEid, Practice) && Practice.active[targetEid]) {
+    Practice.points[targetEid] = Math.max(0, Practice.points[targetEid] - damage);
+    if (mitigation === 0) triggerHitReaction(targetEid);
+    return damage;
+  }
   Health.current[targetEid] = Math.max(0, Health.current[targetEid] - damage);
 
   if (Health.current[targetEid] <= 0) {
