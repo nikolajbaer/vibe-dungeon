@@ -8,7 +8,7 @@
     "build": "vite build",
     "preview": "vite preview",
     "test:layout": "node tests/layout-validation.mjs",
-    "test:characters": "node tests/humanoid-validation.mjs && node tests/npc-animation-validation.mjs && node tests/npc-facing-validation.mjs && node tests/attack-validation.mjs",
+    "test:characters": "node tests/humanoid-validation.mjs && node tests/npc-animation-validation.mjs && node tests/npc-facing-validation.mjs && node tests/attack-validation.mjs && node tests/combat-animation-validation.mjs",
     "test:integration": "node tests/integration/run.mjs"
   },
   "dependencies": {

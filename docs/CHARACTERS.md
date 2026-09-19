@@ -23,6 +23,9 @@ Animation names deliberately retain the existing gameplay contract:
 | death | 2.4-second collapse and settle; held permanently until corpse cleanup |
 | combatIdle | Three-second crouched guard with the off-hand protecting the chest |
 | attack | 1.7-second right-handed step-lunge, maximum extension around 0.62 s |
+| parry | 0.9-second one-handed deflection crossing the weapon in front of the face |
+| unarmedStrike | 1.25-second right cross from a high two-hand boxing guard |
+| chop | 1.45-second overhead diagonal strike for a top-heavy axe or mace |
 
 Pass `weapon: 'shortSword'` to attach a shortened sword to `hand.R`.
 Pass `weapon: 'dagger'` for the compact blade used by the bandit. The bandit
@@ -36,5 +39,6 @@ Open `/character.html` to orbit the model, switch species/clips, show bones,
 or export an animated GLB. `npm run test:characters` validates all presets,
 round-trips GLBs, and exercises real NPC animation state transitions.
 Exports and render data are regenerated under `public/characters/` (ignored).
-Optional offline GIFs: `python tests/render-humanoids.py` or append `--actions`;
+Optional offline GIFs: `python tests/render-humanoids.py` or append `--actions`,
+`--attack`, or `--combat`;
 this renderer requires NumPy, Pillow, and the DejaVu Sans system font.

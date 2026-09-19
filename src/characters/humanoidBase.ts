@@ -311,6 +311,79 @@ export function createHumanoidBase(options: HumanoidOptions = {}) {
     { t: 1.28, pose: guard },
     { t: 1.7, pose: guard },
   ]), true);
+  // Short, reactive weapon deflection: lift the right hand across the face,
+  // meet the blow outside the lead shoulder, then settle back into guard.
+  const parry = poseClip('parry', .9, keyed([
+    { t: 0, pose: guard },
+    { t: .16, pose: { ...guard, y: .70, joints: { ...guard.joints,
+      hips: [.09, -.20, 0], spine: [.12, -.24, 0], chest: [.22, -.35, -.05], head: [-.22, .50, .04],
+      'upperArm.R': [-.88, -.34, -.34], 'forearm.R': [-1.18, .08, .10], 'hand.R': [-.35, -.20, -.72],
+      'upperArm.L': [-.42, .10, .20], 'forearm.L': [-1.72, 0, 0],
+    } } },
+    { t: .30, pose: { ...guard, y: .68, z: .025, joints: { ...guard.joints,
+      hips: [.10, .10, 0], spine: [.14, .18, 0], chest: [.25, .40, .08], head: [-.20, -.58, -.06],
+      'upperArm.R': [-1.95, .06, -.76], 'forearm.R': [-.94, 0, 0], 'hand.R': [0, -.60, 1.49],
+      'upperArm.L': [-.38, .10, .22], 'forearm.L': [-1.70, 0, 0],
+    } } },
+    { t: .46, pose: { ...guard, y: .70, joints: { ...guard.joints,
+      chest: [.20, .12, .03], head: [-.23, -.10, 0],
+      'upperArm.R': [-.82, -.22, -.34], 'forearm.R': [-1.18, .05, .10], 'hand.R': [-.25, -.10, -.55],
+    } } },
+    { t: .72, pose: guard },
+    { t: .9, pose: guard },
+  ]), true);
+  // High boxing guard and a committed right cross. The shoulder/hip turn and
+  // small right-foot drive put the fist on an equal-height opponent's face.
+  const boxingGuard: Pose = { y: .78, joints: {
+    hips: [.06, -.10, 0], spine: [.10, -.06, 0], chest: [.16, -.10, 0], head: [-.18, .18, 0],
+    'upperLeg.L': [-.38, 0, .07], 'upperLeg.R': [-.48, 0, -.07],
+    'lowerLeg.L': [.78, 0, 0], 'lowerLeg.R': [.88, 0, 0],
+    'foot.L': [-.42, 0, 0], 'foot.R': [-.38, 0, 0],
+    'upperArm.R': [-1.80, 1.05, -.10], 'forearm.R': [-2.0, 0, 0], 'hand.R': [-.15, 0, -.12],
+    'upperArm.L': [-1.80, -1.05, .10], 'forearm.L': [-2.0, 0, 0], 'hand.L': [-.15, 0, .12],
+  } };
+  const unarmedStrike = poseClip('unarmedStrike', 1.25, keyed([
+    { t: 0, pose: boxingGuard },
+    { t: .24, pose: { ...boxingGuard, y: .76, z: -.02, joints: { ...boxingGuard.joints,
+      hips: [.08, -.28, 0], spine: [.13, -.24, 0], chest: [.22, -.34, 0], head: [-.20, .48, 0],
+      'upperArm.R': [-.62, -.18, -.15], 'forearm.R': [-2.02, 0, -.06],
+    } } },
+    { t: .48, pose: { ...boxingGuard, y: .70, z: .12, joints: { ...boxingGuard.joints,
+      hips: [.12, .30, 0], spine: [.18, .28, 0], chest: [.30, .55, 0], head: [-.16, -.72, 0],
+      'upperLeg.R': [-.88, 0, -.07], 'lowerLeg.R': [.68, 0, 0], 'foot.R': [.12, 0, 0],
+      'upperArm.R': [-2.79, -1.16, .95], 'forearm.R': [-.47, .51, -.49], 'hand.R': [-.14, -.08, .08],
+      'upperArm.L': [-1.88, -1.02, .16], 'forearm.L': [-2.05, 0, .08],
+    } } },
+    { t: .64, pose: { ...boxingGuard, y: .72, z: .08, joints: { ...boxingGuard.joints,
+      hips: [.10, .20, 0], spine: [.15, .18, 0], chest: [.25, .34, 0], head: [-.18, -.42, 0],
+      'upperLeg.R': [-.72, 0, -.07], 'lowerLeg.R': [.74, 0, 0],
+      'upperArm.R': [-2.40, -.90, .75], 'forearm.R': [-.80, .30, -.30],
+    } } },
+    { t: .98, pose: boxingGuard },
+    { t: 1.25, pose: boxingGuard },
+  ]), true);
+  // One-handed overhead diagonal power strike for a top-heavy axe or mace.
+  const chop = poseClip('chop', 1.45, keyed([
+    { t: 0, pose: guard },
+    { t: .38, pose: { ...guard, y: .74, z: -.04, joints: { ...guard.joints,
+      hips: [.05, -.30, 0], spine: [-.04, -.28, 0], chest: [-.12, -.46, -.06], head: [-.10, .58, .04],
+      'upperArm.R': [-2.42, -.32, -.30], 'forearm.R': [-.62, 0, .05], 'hand.R': [.12, 0, -.10],
+      'upperArm.L': [-.62, .12, .20], 'forearm.L': [-1.78, 0, 0],
+    } } },
+    { t: .58, pose: { ...guard, y: .70, z: .04, joints: { ...guard.joints,
+      hips: [.12, .18, 0], spine: [.24, .22, 0], chest: [.42, .44, .10], head: [-.22, -.58, -.08],
+      'upperLeg.R': [-.88, 0, -.09], 'lowerLeg.R': [.92, 0, 0],
+      'upperArm.R': [-.67, -1.22, -.44], 'forearm.R': [-1.13, 0, 0], 'hand.R': [-.76, -.42, 1.15],
+      'upperArm.L': [-.40, .10, .24], 'forearm.L': [-1.72, 0, 0],
+    } } },
+    { t: .78, pose: { ...guard, y: .68, z: .08, joints: { ...guard.joints,
+      hips: [.14, .26, 0], spine: [.28, .30, 0], chest: [.48, .56, .14], head: [-.25, -.72, -.10],
+      'upperLeg.R': [-.98, 0, -.09], 'lowerLeg.R': [.98, 0, 0],
+      'upperArm.R': [-.54, -1.12, -.38], 'forearm.R': [-1.18, 0, 0], 'hand.R': [-.82, -.38, 1.08],
+    } } },
+    { t: 1.12, pose: guard },
+    { t: 1.45, pose: guard },
+  ]), true);
   if (options.weapon) {
     const weapon = options.weapon === 'dagger' ? dagger.createWorldMesh() : sword.createWorldMesh();
     weapon.name = options.weapon;
@@ -320,7 +393,7 @@ export function createHumanoidBase(options: HumanoidOptions = {}) {
     bones[ids['hand.R']].add(weapon);
   }
   // Existing NPC state machine uses idle/hit; workshop labels these loiter/damage.
-  const clips={idle,walk,hit,death,combatIdle,attack};
+  const clips={idle,walk,hit,death,combatIdle,attack,parry,unarmedStrike,chop};
   mesh.animations=Object.values(clips);
   return {mesh,skeleton,clips};
 }
