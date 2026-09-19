@@ -22,14 +22,18 @@ try {
     const sy=species==='dwarf'?.77:1;
     assert(guardRight.y>1.35*sy&&guardLeft.y>1.35*sy,`${species}: both hands guard the face`);
     assert(punch.y>1.5*sy&&punch.y<1.8*sy,`${species}: right cross targets an equal-height face`);
+    const elbowAngle=bone('forearm.R').quaternion.angleTo(new THREE.Quaternion());
+    assert(elbowAngle<.05,`${species}: right elbow fully extends at impact`);
     assert(minY()>-.025,`${species}: punch keeps feet above floor`);
 
-    pose('parry',0);const parryStart=tip();pose('parry',.30);const parryContact=tip();
+    pose('parry',0);const parryStart=tip();pose('parry',.16);const parryBase=sword.getWorldPosition(new THREE.Vector3()),parryFlat=tip(),flatDirection=parryFlat.clone().sub(parryBase).normalize();pose('parry',.30);const parryContact=tip();
+    assert(Math.abs(flatDirection.y)<.06&&Math.abs(flatDirection.x)>.9,`${species}: parry establishes a horizontal blade first`);
     assert(parryContact.y>parryStart.y+.45*sy,`${species}: parry lifts the weapon across the face`);
     assert(parryContact.x>0,`${species}: parry crosses the center line`);
     assert(minY()>-.025,`${species}: parry keeps feet above floor`);
 
-    pose('chop',.38);const windup=tip();pose('chop',.58);const contact=tip();pose('chop',.78);const finish=tip();
+    pose('chop',.24);const windup=tip();pose('chop',.42);const chamberBase=sword.getWorldPosition(new THREE.Vector3()),chamberTip=tip(),chamberDirection=chamberTip.clone().sub(chamberBase).normalize();pose('chop',.64);const contact=tip();pose('chop',.82);const finish=tip();
+    assert(chamberDirection.z<-.85,`${species}: chop hinges the weapon backward in the chamber`);
     assert(windup.y>finish.y+.9*sy,`${species}: chop has a strong downward arc`);
     assert(contact.z>.55&&finish.y>.4*sy,`${species}: chop lands forward without striking the floor`);
     assert(minY()>-.025,`${species}: chop keeps feet above floor`);
