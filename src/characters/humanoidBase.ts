@@ -135,7 +135,8 @@ export function createHumanoidBase(options: HumanoidOptions = {}) {
       [.12,.057,.085,s*.105,.025,w(foot)],[.23,.058,.063,s*.105,0,w(knee,foot,.75)]],leather);
     loft([[1.59,.015,.021,s*.108,0,w('head')],[1.64,.023,.024,s*.12,0,w('head')],
       [preset.ear>.05?1.70:1.666,.007,.01,s*(preset.ear>.05?.113+preset.ear:.124),-.005,w('head')]],skin,6);
-    loft([[1.631,.022,.008,s*.047,.088,w('head')],[1.652,.022,.008,s*.047,.093,w('head')]],0x20272a,6);
+    loft([[1.631,.024,.009,s*.047,.088,w('head')],[1.652,.024,.009,s*.047,.093,w('head')]],0xf1eee5,6);
+    loft([[1.637,.008,.006,s*.047,.099,w('head')],[1.649,.008,.006,s*.047,.101,w('head')]],0x17191b,6);
     loft([[1.659,.03,.012,s*.047,.088,w('head')],[1.674,.029,.011,s*.047,.089,w('head')]],0x594235,6);
   }
   // A narrow belt provides a replaceable costume boundary.
@@ -158,24 +159,29 @@ export function createHumanoidBase(options: HumanoidOptions = {}) {
   const hairStyle=options.hair ?? 'none', hairColor=options.hairColor ?? 0x4b3024;
   if(hairStyle!=='none') {
     const cap=attach('head',new THREE.Mesh(new THREE.SphereGeometry(1,8,5,0,Math.PI*2,0,Math.PI*.58),accessoryMaterial(hairColor)),'hair');
-    cap.scale.set(.112*sx,.10*sy,.105*sz);
-    cap.position.set(0,.165*sy,-.006*sz);
+    cap.scale.set(.128*sx,.125*sy,.121*sz);
+    cap.position.set(0,.168*sy,-.009*sz);
     if(hairStyle==='long') {
-      const back=attach('head',new THREE.Mesh(new THREE.BoxGeometry(.19*sx,.28*sy,.055*sz),accessoryMaterial(hairColor)),'longHair');
-      back.position.set(0,.015*sy,-.095*sz);
+      const back=attach('head',new THREE.Mesh(new THREE.BoxGeometry(.225*sx,.30*sy,.072*sz),accessoryMaterial(hairColor)),'longHair');
+      back.position.set(0,.012*sy,-.105*sz);
     }
   }
   if(options.chainmail) {
-    const mail=attach('chest',new THREE.Mesh(new THREE.CylinderGeometry(.16*sx,.205*sx,.38*sy,8),accessoryMaterial(0x6f7478,.55,.72)),'chainmail');
-    mail.scale.z=.72*sz; mail.position.set(0,-.12*sy,0);
+    const mailMaterial=accessoryMaterial(0x6f7478,.55,.72);
+    const mail=attach('chest',new THREE.Mesh(new THREE.CylinderGeometry(.105*sx,.22*sx,.42*sy,8,2,true),mailMaterial),'chainmail');
+    mail.scale.z=.82*sz; mail.position.set(0,-.08*sy,0);
+    for(const [side,s] of [['L',1],['R',-1]] as const){
+      const shoulder=attach(`clavicle.${side}`,new THREE.Mesh(new THREE.SphereGeometry(1,8,5),mailMaterial),`chainmailShoulder.${side}`);
+      shoulder.scale.set(.135*sx,.065*sy,.10*sz);shoulder.position.set(s*.125*sx,.035*sy,0);
+    }
   }
   if(options.nasalHelmet) {
     const steel=accessoryMaterial(0x777d82,.65,.55);
-    const helm=attach('head',new THREE.Mesh(new THREE.ConeGeometry(.132*sx,.22*sy,8),steel),'nasalHelmet');
-    helm.scale.z=sz/sx;
-    helm.position.set(0,.235*sy,-.005*sz);
-    const guard=attach('head',new THREE.Mesh(new THREE.BoxGeometry(.025*sx,.18*sy,.026*sz),steel),'noseGuard');
-    guard.position.set(0,.075*sy,.108*sz);
+    const profile=[new THREE.Vector2(.15*sx,.10*sy),new THREE.Vector2(.148*sx,.15*sy),new THREE.Vector2(.132*sx,.21*sy),new THREE.Vector2(.095*sx,.27*sy),new THREE.Vector2(.035*sx,.32*sy),new THREE.Vector2(0,.335*sy)];
+    const helm=attach('head',new THREE.Mesh(new THREE.LatheGeometry(profile,10),steel),'nasalHelmet');
+    helm.scale.z=sz/sx;helm.position.z=-.005*sz;
+    const guard=attach('head',new THREE.Mesh(new THREE.BoxGeometry(.027*sx,.17*sy,.03*sz),steel),'noseGuard');
+    guard.position.set(0,.035*sy,.116*sz);
   }
   const duration=1.1, samples=32;
   const times=Array.from({length:samples+1},(_,i)=>i*duration/samples);

@@ -16,7 +16,7 @@ try {
     Velocity.x[eid]=0;Velocity.z[eid]=0;
     const mesh=archetype.createMesh(eid);meshes.push(mesh);
     assert(mesh.isSkinnedMesh);assert.equal(mesh.skeleton.bones.length,23);
-    assert.equal(mesh.geometry.index.count/3,1580);assert.equal(mesh.userData.eid,eid);
+    assert.equal(mesh.geometry.index.count/3,1628);assert.equal(mesh.userData.eid,eid);
     if(role==='bandit') assert(mesh.getObjectByName('dagger'),'bandit carries a dagger');
     else if(role==='weapons-master') assert(mesh.getObjectByName('woodenSword'),'weapons master carries a wooden sword');
     else if(role==='guard') {assert(mesh.getObjectByName('nasalHelmet'));assert(mesh.getObjectByName('noseGuard'));assert(mesh.getObjectByName('chainmail'));}
