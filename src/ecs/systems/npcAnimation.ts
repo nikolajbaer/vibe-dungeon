@@ -10,13 +10,14 @@ const CROSSFADE_DURATION = 0.2; // seconds
 
 /** Which one-shot clip, if any, is currently overriding locomotion/guard.
  * `attack` and `hit` hand control back when finished; `death` never clears. */
-type OneShot = "attack" | "parry" | "hit" | "death" | undefined;
+type OneShot = "draw" | "attack" | "parry" | "hit" | "death" | undefined;
 
 interface NpcAnimationState {
   mixer: THREE.AnimationMixer;
   idleAction: THREE.AnimationAction;
   walkAction: THREE.AnimationAction;
   combatIdleAction: THREE.AnimationAction;
+  drawAction: THREE.AnimationAction;
   attackAction: THREE.AnimationAction;
   parryAction: THREE.AnimationAction;
   hitAction: THREE.AnimationAction;
@@ -24,6 +25,8 @@ interface NpcAnimationState {
   moving: boolean; // which of idle/walk is currently the "target" state, for edge-detecting a transition
   guarding: boolean;
   oneShot: OneShot;
+  weapon: THREE.Object3D | undefined;
+  weaponRevealed: boolean;
 }
 
 /** Per-NPC animation state, keyed by eid — module-local side-table rather
@@ -55,6 +58,7 @@ export function createAnimatedNpcMesh(rig: HumanoidRig, eid: number): THREE.Obje
   const hitAction = mixer.clipAction(rig.clips.hit);
   const deathAction = mixer.clipAction(rig.clips.death);
   const combatIdleAction = mixer.clipAction(rig.clips.combatIdle);
+  const drawAction = mixer.clipAction(rig.clips.drawWeapon);
   const attackAction = mixer.clipAction(rig.clips.weaponJab);
   const parryAction = mixer.clipAction(rig.clips.parry);
 
@@ -72,11 +76,14 @@ export function createAnimatedNpcMesh(rig: HumanoidRig, eid: number): THREE.Obje
   // collapsed rather than snapping back to a stand.
   hitAction.setLoop(THREE.LoopOnce, 1);
   attackAction.setLoop(THREE.LoopOnce, 1);
+  drawAction.setLoop(THREE.LoopOnce, 1);
   parryAction.setLoop(THREE.LoopOnce, 1);
   deathAction.setLoop(THREE.LoopOnce, 1);
   deathAction.clampWhenFinished = true;
 
-  npcAnimations.set(eid, { mixer, idleAction, walkAction, combatIdleAction, attackAction, parryAction, hitAction, deathAction, moving: false, guarding: false, oneShot: undefined });
+  const weapon = clone.getObjectByName("shortSword") ?? clone.getObjectByName("dagger") ?? clone.getObjectByName("woodenSword");
+  if (weapon) weapon.visible = false;
+  npcAnimations.set(eid, { mixer, idleAction, walkAction, combatIdleAction, drawAction, attackAction, parryAction, hitAction, deathAction, moving: false, guarding: false, oneShot: undefined, weapon, weaponRevealed: false });
 
   // Once an attack or hit finishes, resume locomotion/guard at whatever
   // `moving` and `guarding` have become in
@@ -85,7 +92,7 @@ export function createAnimatedNpcMesh(rig: HumanoidRig, eid: number): THREE.Obje
   mixer.addEventListener("finished", (e) => {
     const state = npcAnimations.get(eid);
     if (!state || !state.oneShot || state.oneShot === "death") return;
-    if (e.action !== state.hitAction && e.action !== state.attackAction && e.action !== state.parryAction) return;
+    if (e.action !== state.drawAction && e.action !== state.hitAction && e.action !== state.attackAction && e.action !== state.parryAction) return;
     state.oneShot = undefined;
     const target = state.moving ? state.walkAction : state.guarding ? state.combatIdleAction : state.idleAction;
     const others = [state.idleAction, state.walkAction, state.combatIdleAction].filter(action => action !== target);
@@ -96,6 +103,22 @@ export function createAnimatedNpcMesh(rig: HumanoidRig, eid: number): THREE.Obje
   });
 
   return clone;
+}
+
+/** Draws a one-handed weapon from the opposite hip before combat begins. */
+export function triggerWeaponDraw(eid: number): boolean {
+  const state = npcAnimations.get(eid);
+  if (!state || !state.weapon) return true; // unarmed fighters need no prop draw
+  if (state.weaponRevealed || state.oneShot === "draw") return true;
+  if (state.oneShot) return false;
+  for (const action of [state.idleAction, state.walkAction, state.combatIdleAction]) {
+    action.stopFading(); action.setEffectiveWeight(0);
+  }
+  state.drawAction.enabled = true;
+  state.drawAction.setEffectiveWeight(1);
+  state.drawAction.reset().play();
+  state.oneShot = "draw";
+  return true;
 }
 
 /**
@@ -114,11 +137,13 @@ export function triggerHitReaction(eid: number): void {
   state.idleAction.stopFading();
   state.walkAction.stopFading();
   state.combatIdleAction.stopFading();
+  state.drawAction.stop();
   state.attackAction.stop();
   state.parryAction.stop();
   state.idleAction.setEffectiveWeight(0);
   state.walkAction.setEffectiveWeight(0);
   state.combatIdleAction.setEffectiveWeight(0);
+  state.drawAction.setEffectiveWeight(0);
   state.attackAction.setEffectiveWeight(0);
   state.parryAction.setEffectiveWeight(0);
   state.hitAction.enabled = true;
@@ -131,7 +156,7 @@ export function triggerHitReaction(eid: number): void {
 export function triggerParry(eid: number): void {
   const state = npcAnimations.get(eid);
   if (!state || state.oneShot === "death") return;
-  for (const action of [state.idleAction, state.walkAction, state.combatIdleAction, state.attackAction, state.hitAction]) {
+  for (const action of [state.idleAction, state.walkAction, state.combatIdleAction, state.drawAction, state.attackAction, state.hitAction]) {
     action.stopFading();
     action.stop();
     action.setEffectiveWeight(0);
@@ -172,12 +197,14 @@ export function triggerDeathCollapse(eid: number): void {
   state.walkAction.stopFading();
   state.combatIdleAction.stopFading();
   state.hitAction.stop();
+  state.drawAction.stop();
   state.attackAction.stop();
   state.parryAction.stop();
   state.idleAction.setEffectiveWeight(0);
   state.walkAction.setEffectiveWeight(0);
   state.combatIdleAction.setEffectiveWeight(0);
   state.hitAction.setEffectiveWeight(0);
+  state.drawAction.setEffectiveWeight(0);
   state.attackAction.setEffectiveWeight(0);
   state.parryAction.setEffectiveWeight(0);
   state.deathAction.enabled = true;
@@ -223,6 +250,11 @@ export function npcAnimationSystem(world: World, dt: number, paused: boolean): v
     const speed = Math.hypot(Velocity.x[eid], Velocity.z[eid]);
     const moving = speed > MOVING_EPSILON;
     const guarding = !moving && NPC.state[eid] === NpcState.ATTACKING;
+
+    if (state.oneShot === "draw" && state.weapon && !state.weaponRevealed && state.drawAction.time >= .2) {
+      state.weapon.visible = true;
+      state.weaponRevealed = true;
+    }
 
     // While a one-shot is overriding the base pose, keep tracking movement
     // and guard state so its finished handler resumes into the right action,
@@ -271,13 +303,14 @@ export function getNpcAnimationDebugState(eid: number):
       attackWeight: number;
       parryWeight: number;
       deathWeight: number;
+      weaponVisible: boolean;
       mixerTime: number;
       /** The death action's own clip time (seconds) — unlike `mixerTime`
        * (the mixer's global clock, which always keeps advancing), this is
        * what `clampWhenFinished` actually freezes once the clip ends, so
        * it's the right field to assert "frozen on the final frame" against. */
       deathClipTime: number;
-      activeClip: "idle" | "walk" | "combatIdle" | "attack" | "parry" | "hit" | "death";
+      activeClip: "idle" | "walk" | "combatIdle" | "draw" | "attack" | "parry" | "hit" | "death";
     }
   | undefined {
   const state = npcAnimations.get(eid);
@@ -290,6 +323,7 @@ export function getNpcAnimationDebugState(eid: number):
     attackWeight: state.attackAction.getEffectiveWeight(),
     parryWeight: state.parryAction.getEffectiveWeight(),
     deathWeight: state.deathAction.getEffectiveWeight(),
+    weaponVisible: state.weapon?.visible ?? false,
     mixerTime: state.mixer.time,
     deathClipTime: state.deathAction.time,
     activeClip: state.oneShot ?? (state.moving ? "walk" : state.guarding ? "combatIdle" : "idle"),

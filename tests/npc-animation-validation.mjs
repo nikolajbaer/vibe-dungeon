@@ -17,8 +17,8 @@ try {
     const mesh=archetype.createMesh(eid);meshes.push(mesh);
     assert(mesh.isSkinnedMesh);assert.equal(mesh.skeleton.bones.length,23);
     assert.equal(mesh.geometry.index.count/3,1628);assert.equal(mesh.userData.eid,eid);
-    if(role==='bandit') assert(mesh.getObjectByName('dagger'),'bandit carries a dagger');
-    else if(role==='weapons-master') assert(mesh.getObjectByName('woodenSword'),'weapons master carries a wooden sword');
+    if(role==='bandit') {assert(mesh.getObjectByName('dagger'),'bandit carries a dagger');assert.equal(mesh.getObjectByName('dagger').visible,false);}
+    else if(role==='weapons-master') {assert(mesh.getObjectByName('woodenSword'),'weapons master carries a wooden sword');assert.equal(mesh.getObjectByName('woodenSword').visible,false);}
     else if(role==='guard') {assert(mesh.getObjectByName('nasalHelmet'));assert(mesh.getObjectByName('noseGuard'));assert(mesh.getObjectByName('chainmail'));}
     else assert(!mesh.getObjectByName('dagger'),`${role} remains unarmed`);
     const tick=(seconds,paused=false)=>{for(let t=0;t<seconds;t+=1/60)animation.npcAnimationSystem(world,1/60,paused);};
@@ -30,6 +30,8 @@ try {
     assert.equal(state().idleWeight,0);
     Velocity.z[eid]=0;tick(.3);assert.equal(state().activeClip,'idle');
     if(role==='bandit') {
+      assert(animation.triggerWeaponDraw(eid));tick(.1);assert.equal(state().activeClip,'draw');assert.equal(state().weaponVisible,false);
+      tick(.2);assert.equal(state().weaponVisible,true);tick(.3);
       NPC.state[eid]=3;tick(.3);assert.equal(state().activeClip,'combatIdle');
       animation.triggerAttack(eid);tick(.2);assert.equal(state().activeClip,'attack');
       tick(1.7);assert.equal(state().activeClip,'combatIdle');

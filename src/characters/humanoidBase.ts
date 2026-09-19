@@ -325,6 +325,22 @@ export function createHumanoidBase(options: HumanoidOptions = {}) {
       chest: [.18 + .012 * breathe, -.14, 0], head: [-.25 - .012 * breathe, .35, 0],
     } };
   }, true);
+  // Right-handed draw from the left hip. The weapon itself is hidden until
+  // the hand reaches the scabbard and revealed by npcAnimationSystem, which
+  // avoids showing a sword glued to an empty hand during ordinary loitering.
+  const drawWeapon = poseClip('drawWeapon', .5, keyed([
+    { t: 0, pose: neutral },
+    { t: .16, pose: { y: .86, joints: {
+      hips: [.03, -.10, 0], spine: [.04, -.10, 0], chest: [.08, -.18, 0], head: [-.05, .20, 0],
+      'upperArm.R': [-.72, .52, -.48], 'forearm.R': [-1.48, 0, -.12], 'hand.R': [-.72, -.35, -.35],
+      'upperArm.L': [-.12, 0, .08], 'forearm.L': [-.28, 0, 0],
+    } } },
+    { t: .27, pose: { y: .82, joints: { ...guard.joints,
+      hips: [.05, -.04, 0], spine: [.08, .02, 0], chest: [.12, .12, 0], head: [-.12, -.15, 0],
+      'upperArm.R': [-1.25, -.42, -.24], 'forearm.R': [-.92, 0, 0], 'hand.R': [-.45, -.20, .10],
+    } } },
+    { t: .5, pose: guard },
+  ]), true);
   const attack = poseClip('attack', 1.7, keyed([
     { t: 0, pose: guard },
     { t: .32, pose: { ...guard, y: .70, z: -.025, joints: { ...guard.joints,
@@ -498,7 +514,7 @@ export function createHumanoidBase(options: HumanoidOptions = {}) {
   }
   // Existing NPC state machine uses idle/hit; workshop labels these loiter/damage.
   const canonicalClips={
-    idle,walk,hit,death,combatIdle,parry,unarmedParry,
+    idle,walk,hit,death,combatIdle,drawWeapon,parry,unarmedParry,
     weaponJab,weaponCross,weaponChop,
     unarmedJab,unarmedCross,unarmedChop,
   };
