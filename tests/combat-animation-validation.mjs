@@ -37,6 +37,15 @@ try {
     assert(windup.y>finish.y+.9*sy,`${species}: chop has a strong downward arc`);
     assert(contact.z>.55&&finish.y>.4*sy,`${species}: chop lands forward without striking the floor`);
     assert(minY()>-.025,`${species}: chop keeps feet above floor`);
+
+    pose('weaponCross',0);const weaponCrossStart=point('hand.R');pose('weaponCross',.42);const weaponCrossContact=point('hand.R');
+    assert(weaponCrossContact.z>weaponCrossStart.z+.15&&weaponCrossContact.x>weaponCrossStart.x+.3,`${species}: weapon cross cuts forward and across`);
+    pose('unarmedJab',0);const jabStart=point('hand.L');pose('unarmedJab',.18);const jabContact=point('hand.L');
+    assert(jabContact.z>jabStart.z+.18,`${species}: unarmed jab extends the lead hand`);
+    pose('unarmedChop',.30);const hammerHigh=point('hand.R');pose('unarmedChop',.58);const hammerLow=point('hand.R');
+    assert(hammerHigh.y>hammerLow.y+.3*sy,`${species}: unarmed chop drives downward`);
+    assert.equal(rig.clips.weaponJab.duration,1.7);
+    assert.equal(rig.clips.unarmedCross.duration,1.25);
     console.log(`${species}: face guard/right cross, crossing parry and overhead chop passed`);
   }
 

@@ -1,6 +1,6 @@
 import * as THREE from "three";
 import { addComponent, addEntity, removeComponent, type World } from "bitecs";
-import { Position, Velocity, Rotation, CharacterBody, DynamicBody, PhysicsBody, PhysicsCollider, PhysicsRotation, Object3DRef, Item, NPC, NpcState, Health, Readable, Container, Carried, Stackable } from "../ecs/components";
+import { Position, Velocity, Rotation, CharacterBody, DynamicBody, PhysicsBody, PhysicsCollider, PhysicsRotation, Object3DRef, Item, NPC, NpcState, Health, Combat, Readable, Container, Carried, Stackable } from "../ecs/components";
 import { ITEM_REGISTRY } from "../assets/itemRegistry";
 import type { ItemAssetDef } from "../assets/types";
 import { FURNITURE_REGISTRY } from "../assets/furnitureRegistry";
@@ -341,6 +341,7 @@ export function spawnNpcs(world: World, physics: Physics, scene: THREE.Scene, sp
     addComponent(world, eid, NPC);
     addComponent(world, eid, Object3DRef);
     addComponent(world, eid, Health);
+    addComponent(world, eid, Combat);
     const floorY = floorBaseline(spawn.floor ?? 0);
     Position.x[eid] = spawn.x;
     Position.y[eid] = floorY; // the humanoid rig's origin is at its feet
@@ -370,6 +371,10 @@ export function spawnNpcs(world: World, physics: Physics, scene: THREE.Scene, sp
     NPC.attackCooldownRemaining[eid] = 0;
     Health.current[eid] = archetype.health;
     Health.max[eid] = archetype.health;
+    Combat.attackRecovery[eid] = 0;
+    Combat.parryStartup[eid] = 0;
+    Combat.parryWindow[eid] = 0;
+    Combat.parryRecovery[eid] = 0;
 
     const mesh = archetype.createMesh(eid);
     scene.add(mesh);

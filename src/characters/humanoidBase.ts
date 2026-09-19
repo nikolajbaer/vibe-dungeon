@@ -389,6 +389,56 @@ export function createHumanoidBase(options: HumanoidOptions = {}) {
     { t: 1.12, pose: guard },
     { t: 1.45, pose: guard },
   ]), true);
+  // Fast lead-hand straight: a small shoulder pop with no committed step.
+  const unarmedJab = poseClip('unarmedJab', .5, keyed([
+    { t: 0, pose: boxingGuard },
+    { t: .18, pose: { ...boxingGuard, y: .76, z: .045, joints: { ...boxingGuard.joints,
+      hips: [.06, -.04, 0], chest: [.15, -.18, 0], head: [-.18, .22, 0],
+      'upperArm.L': [-2.68, .80, .50], 'forearm.L': [0, 0, 0], 'hand.L': [-.10, .06, -.06],
+    } } },
+    { t: .34, pose: boxingGuard },
+    { t: .5, pose: boxingGuard },
+  ]), true);
+  // Bare-hand power chop: a downward hammer-fist using the same weight
+  // transfer as the armed chop, but keeping the fist aligned with forearm.
+  const unarmedChop = poseClip('unarmedChop', 1, keyed([
+    { t: 0, pose: boxingGuard },
+    { t: .30, pose: { ...boxingGuard, y: .75, z: -.03, joints: { ...boxingGuard.joints,
+      hips: [.04, -.25, 0], spine: [-.05, -.22, 0], chest: [-.10, -.38, 0], head: [-.08, .45, 0],
+      'upperArm.R': [-2.45, -.25, -.25], 'forearm.R': [-.35, 0, 0], 'hand.R': [0, 0, 0],
+    } } },
+    { t: .58, pose: { ...boxingGuard, y: .69, z: .10, joints: { ...boxingGuard.joints,
+      hips: [.13, .20, 0], spine: [.24, .24, 0], chest: [.42, .45, .10], head: [-.22, -.58, 0],
+      'upperArm.R': [-.48, -1.02, -.36], 'forearm.R': [-.18, 0, 0], 'hand.R': [0, 0, 0],
+    } } },
+    { t: .82, pose: boxingGuard },
+    { t: 1, pose: boxingGuard },
+  ]), true);
+  // Horizontal one-handed cut, driven by hips and shoulders rather than a
+  // fencing thrust. This is the armed counterpart to the boxing cross.
+  const weaponCross = poseClip('weaponCross', .75, keyed([
+    { t: 0, pose: guard },
+    { t: .20, pose: { ...guard, y: .70, z: -.02, joints: { ...guard.joints,
+      hips: [.08, -.34, 0], spine: [.12, -.30, 0], chest: [.20, -.48, 0], head: [-.18, .58, 0],
+      'upperArm.R': [-.72, -.32, -.20], 'forearm.R': [-1.12, 0, 0], 'hand.R': [-.65, -.30, -.45],
+    } } },
+    { t: .42, pose: { ...guard, y: .66, z: .10, joints: { ...guard.joints,
+      hips: [.12, .34, 0], spine: [.18, .34, 0], chest: [.30, .66, 0], head: [-.16, -.80, 0],
+      'upperArm.R': [-1.12, -1.15, -.30], 'forearm.R': [-.35, 0, 0], 'hand.R': [-.42, -.30, .75],
+    } } },
+    { t: .60, pose: guard },
+    { t: .75, pose: guard },
+  ]), true);
+  const unarmedParry = poseClip('unarmedParry', .75, keyed([
+    { t: 0, pose: boxingGuard },
+    { t: .18, pose: { ...boxingGuard, y: .75, z: -.02, joints: { ...boxingGuard.joints,
+      spine: [-.10, -.12, 0], chest: [-.18, -.24, 0], head: [.08, .30, 0],
+      'upperArm.L': [-1.50, -.72, .35], 'forearm.L': [-1.28, 0, .15],
+      'upperArm.R': [-1.48, .72, -.35], 'forearm.R': [-1.28, 0, -.15],
+    } } },
+    { t: .42, pose: boxingGuard },
+    { t: .75, pose: boxingGuard },
+  ]), true);
   if (options.weapon) {
     const weapon = options.weapon === 'dagger' ? dagger.createWorldMesh() : sword.createWorldMesh();
     weapon.name = options.weapon;
@@ -398,7 +448,19 @@ export function createHumanoidBase(options: HumanoidOptions = {}) {
     bones[ids['hand.R']].add(weapon);
   }
   // Existing NPC state machine uses idle/hit; workshop labels these loiter/damage.
-  const clips={idle,walk,hit,death,combatIdle,attack,parry,unarmedStrike,chop};
+  const canonicalClips={
+    idle,walk,hit,death,combatIdle,parry,unarmedParry,
+    weaponJab: attack,weaponCross,weaponChop: chop,
+    unarmedJab,unarmedCross: unarmedStrike,unarmedChop,
+  };
+  // Non-enumerable aliases preserve older callers without exporting the
+  // same AnimationClip multiple times into GLB files.
+  const clips=canonicalClips as typeof canonicalClips & {attack:typeof attack;unarmedStrike:typeof unarmedStrike;chop:typeof chop};
+  Object.defineProperties(clips,{
+    attack:{value:attack,enumerable:false},
+    unarmedStrike:{value:unarmedStrike,enumerable:false},
+    chop:{value:chop,enumerable:false},
+  });
   mesh.animations=Object.values(clips);
   return {mesh,skeleton,clips};
 }

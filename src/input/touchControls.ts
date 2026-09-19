@@ -20,10 +20,10 @@ class TouchAttackButton {
   readonly el: HTMLDivElement;
   private requested = false;
 
-  constructor() {
+  constructor(label = "JAB", modifier = "") {
     this.el = document.createElement("div");
-    this.el.className = "touch-attack-btn";
-    this.el.textContent = "ATK";
+    this.el.className = `touch-attack-btn ${modifier}`.trim();
+    this.el.textContent = label;
 
     this.el.addEventListener(
       "touchstart",
@@ -58,6 +58,9 @@ export class TouchControls {
   readonly moveStick: TouchJoystick | null = null;
   readonly lookDrag: TouchLookDrag | null = null;
   private readonly attackButton: TouchAttackButton | null = null;
+  private readonly crossButton: TouchAttackButton | null = null;
+  private readonly chopButton: TouchAttackButton | null = null;
+  private readonly parryButton: TouchAttackButton | null = null;
 
   /** `gameSurface` is the three.js renderer's own canvas — see
    * `TouchLookDrag`'s doc comment for why look-drag/tap-interact only ever
@@ -70,6 +73,10 @@ export class TouchControls {
 
     this.attackButton = new TouchAttackButton();
     container.appendChild(this.attackButton.el);
+    this.crossButton = new TouchAttackButton("CROSS", "touch-cross-btn");
+    this.chopButton = new TouchAttackButton("CHOP", "touch-chop-btn");
+    this.parryButton = new TouchAttackButton("PARRY", "touch-parry-btn");
+    container.append(this.crossButton.el, this.chopButton.el, this.parryButton.el);
 
     this.lookDrag = new TouchLookDrag(gameSurface);
   }
@@ -84,5 +91,16 @@ export class TouchControls {
   /** True once for the tap that requested a melee attack. */
   consumeAttackRequest(): boolean {
     return this.attackButton?.consumeAttackRequest() ?? false;
+  }
+
+  consumeAttackType(): "jab" | "cross" | "chop" | null {
+    if (this.attackButton?.consumeAttackRequest()) return "jab";
+    if (this.crossButton?.consumeAttackRequest()) return "cross";
+    if (this.chopButton?.consumeAttackRequest()) return "chop";
+    return null;
+  }
+
+  consumeParryRequest(): boolean {
+    return this.parryButton?.consumeAttackRequest() ?? false;
   }
 }

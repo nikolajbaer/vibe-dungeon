@@ -2,13 +2,13 @@ import * as THREE from "three";
 import Stats from "three/examples/jsm/libs/stats.module.js";
 import { addComponent, addEntity, createWorld, hasComponent } from "bitecs";
 import { query } from "bitecs";
-import { Position, Velocity, Rotation, CharacterBody, DynamicBody, PhysicsBody, PhysicsCollider, PhysicsRotation, RenderOffsetY, PlayerControlled, Object3DRef, Door, Dead, DeathSector, Health, NPC, Item, Carried, Readable, Container, Stackable } from "./ecs/components";
+import { Position, Velocity, Rotation, CharacterBody, DynamicBody, PhysicsBody, PhysicsCollider, PhysicsRotation, RenderOffsetY, PlayerControlled, Object3DRef, Door, Dead, DeathSector, Health, Combat, NPC, Item, Carried, Readable, Container, Stackable } from "./ecs/components";
 import { inputSystem } from "./ecs/systems/input";
 import { characterSystem, physicsSyncSystem, teleportCharacter } from "./ecs/systems/character";
 import { dynamicSyncSystem } from "./ecs/systems/dynamics";
 import { addCharacter, createPhysics, PHYSICS_DT } from "./physics/world";
 import { doorAnimationSystem, tryInteract } from "./ecs/systems/doors";
-import { tryMeleeAttack } from "./ecs/systems/combat";
+import { combatSystem, tryMeleeAttack, tryParry, type AttackType } from "./ecs/systems/combat";
 import { npcSystem, toggleNpcFollow } from "./ecs/systems/npc";
 import { getNpcAnimationDebugState, npcAnimationSystem } from "./ecs/systems/npcAnimation";
 import { corpseCleanupSystem, MIN_LINGER_SECONDS } from "./ecs/systems/corpseCleanup";
@@ -149,6 +149,7 @@ export function startGame(container: HTMLElement): void {
   addComponent(world, player, PlayerControlled);
   addComponent(world, player, Object3DRef);
   addComponent(world, player, Health);
+  addComponent(world, player, Combat);
   // `Position` is the player's *feet* now, not the camera — see
   // `CharacterBody` in components.ts. The camera is offset back up to eye
   // height by `RenderOffsetY` at sync time, which also makes the player's
@@ -171,6 +172,10 @@ export function startGame(container: HTMLElement): void {
   Object3DRef[player] = camera;
   Health.current[player] = 100;
   Health.max[player] = 100;
+  Combat.attackRecovery[player] = 0;
+  Combat.parryStartup[player] = 0;
+  Combat.parryWindow[player] = 0;
+  Combat.parryRecovery[player] = 0;
 
   // NPCs (issue #36, extended into archetypes: docile villager + aggressive
   // bandit — src/assets/npcs/*.ts) are spawned generically by `buildLevel`
@@ -424,7 +429,14 @@ export function startGame(container: HTMLElement): void {
     // combat (issue #48) without needing to simulate real pointer-lock
     // clicks/touches — fires the exact same `tryMeleeAttack` the real
     // click/touch-button wiring below calls.
-    attack: () => tryMeleeAttack(world, camera),
+    attack: (attackType: AttackType = "jab") => tryMeleeAttack(world, camera, attackType),
+    parry: () => tryParry(world, player),
+    getCombatState: () => ({
+      attackRecovery: Combat.attackRecovery[player],
+      parryStartup: Combat.parryStartup[player],
+      parryWindow: Combat.parryWindow[player],
+      parryRecovery: Combat.parryRecovery[player],
+    }),
     // Item/inventory debug hooks (issue #39) for manual/automated smoke
     // testing — world item positions to walk to, and each item's current
     // carry/equip state and world-mesh visibility.
@@ -638,6 +650,7 @@ export function startGame(container: HTMLElement): void {
         accumulator -= PHYSICS_DT;
         steps++;
         npcSystem(world, PHYSICS_DT);
+        combatSystem(world, PHYSICS_DT);
         characterSystem(world, physics, PHYSICS_DT);
         doorAnimationSystem(world, PHYSICS_DT);
         physics.world.step();
@@ -665,9 +678,16 @@ export function startGame(container: HTMLElement): void {
     // different rays, not the same one in disguise.
     if (interactRequested && !isModalActive()) tryInteract(world, camera, touchInteractPoint ?? undefined);
 
-    const attackRequestedThisFrame = attackRequested || touch.consumeAttackRequest();
+    const touchAttackType = touch.consumeAttackType();
+    const attackRequestedThisFrame = attackRequested;
     attackRequested = false;
-    if (attackRequestedThisFrame && !isModalActive()) tryMeleeAttack(world, camera);
+    let requestedAttack: AttackType | undefined;
+    if (touchAttackType) requestedAttack = touchAttackType;
+    else if (attackRequestedThisFrame || keyboard.consumeJustPressed("Digit1")) requestedAttack = "jab";
+    else if (keyboard.consumeJustPressed("Digit2")) requestedAttack = "cross";
+    else if (keyboard.consumeJustPressed("Digit3")) requestedAttack = "chop";
+    if (requestedAttack && !isModalActive()) tryMeleeAttack(world, camera, requestedAttack);
+    if ((keyboard.consumeJustPressed("KeyF") || touch.consumeParryRequest()) && !isModalActive()) tryParry(world);
     viewmodelSwingSystem(dt);
 
     // Belt-and-suspenders alongside the pause above: if the NPC a dialogue

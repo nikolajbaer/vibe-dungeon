@@ -1,8 +1,9 @@
 import { hasComponent, query, type World } from "bitecs";
-import { Dead, Health, NPC, NpcState, Position, Rotation, Velocity, PlayerControlled } from "../components";
+import { Dead, NPC, NpcState, Position, Rotation, Velocity, PlayerControlled } from "../components";
 import { NPC_REGISTRY } from "../../assets/npcRegistry";
 import type { NpcArchetypeDef } from "../../assets/types";
 import { triggerAttack } from "./npcAnimation";
+import { applyMeleeDamage } from "./combat";
 
 const FOLLOW_SPEED = 2; // m/s — slower than the player's 3.2 so it doesn't ride the player's heels
 export const FOLLOW_STOP_DISTANCE = 2; // meters — target follow distance, directly behind is fine for v1
@@ -72,7 +73,7 @@ export function npcSystem(world: World, dt: number): void {
 
     const archetype = NPC_REGISTRY[NPC.archetypeId[eid]];
     if (archetype?.behavior === "aggressive") {
-      updateAggressive(eid, playerEid, archetype, dt);
+      updateAggressive(world, eid, playerEid, archetype, dt);
       continue;
     }
 
@@ -131,7 +132,7 @@ function giveUpAndLoiter(eid: number): void {
  * for why (an unleashed chase could otherwise cross the whole reachable
  * map once doors are open).
  */
-function updateAggressive(eid: number, playerEid: number | undefined, archetype: NpcArchetypeDef, dt: number): void {
+function updateAggressive(world: World, eid: number, playerEid: number | undefined, archetype: NpcArchetypeDef, dt: number): void {
   if (playerEid === undefined) {
     wander(eid, dt);
     return;
@@ -177,7 +178,7 @@ function updateAggressive(eid: number, playerEid: number | undefined, archetype:
   NPC.attackCooldownRemaining[eid] -= dt;
   if (NPC.attackCooldownRemaining[eid] <= 0) {
     triggerAttack(eid);
-    Health.current[playerEid] = Math.max(0, Health.current[playerEid] - (archetype.attackDamage ?? 0));
+    applyMeleeDamage(world, playerEid, archetype.attackDamage ?? 0);
     NPC.attackCooldownRemaining[eid] = archetype.attackCooldown ?? 1;
   }
 }

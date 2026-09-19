@@ -31,7 +31,7 @@ try {
     const bytes=await new GLTFExporter().parseAsync(rig.mesh,{binary:true,animations:Object.values(rig.clips)});
     await writeFile(new URL(`humanoid-${species}.glb`,out),Buffer.from(bytes));
     const imported=await new GLTFLoader().parseAsync(bytes,'');
-    assert.equal(imported.animations.length,9);
+    assert.equal(imported.animations.length,13);
     let importedSkin;imported.scene.traverse(o=>{if(o.isSkinnedMesh)importedSkin=o;});assert.equal(importedSkin.skeleton.bones.length,23);
     const mixer=new THREE.AnimationMixer(rig.mesh);mixer.clipAction(rig.clips.walk).play();
     const frames=[];
