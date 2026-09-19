@@ -176,6 +176,8 @@ export function startGame(container: HTMLElement): void {
   Combat.parryStartup[player] = 0;
   Combat.parryWindow[player] = 0;
   Combat.parryRecovery[player] = 0;
+  Combat.parryMitigation[player] = 0;
+  Combat.agility[player] = 0;
 
   // NPCs (issue #36, extended into archetypes: docile villager + aggressive
   // bandit — src/assets/npcs/*.ts) are spawned generically by `buildLevel`

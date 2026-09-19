@@ -203,6 +203,9 @@ export const Combat = {
   parryStartup: [] as number[],
   parryWindow: [] as number[],
   parryRecovery: [] as number[],
+  parryMitigation: [] as number[],
+  /** Reactive NPC parry chance per detected incoming melee attack (0..1). */
+  agility: [] as number[],
 };
 
 /** Tag: this entity's `Health.current` has reached 0 (see `tryMeleeAttack`

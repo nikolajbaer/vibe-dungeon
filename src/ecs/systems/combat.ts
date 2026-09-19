@@ -3,7 +3,7 @@ import { addComponent, hasComponent, query, type World } from "bitecs";
 import { Carried, Combat, Dead, Health, Item, Object3DRef, PlayerControlled } from "../components";
 import { ITEM_REGISTRY } from "../../assets/itemRegistry";
 import { isHandSlot, triggerViewmodelParry, triggerViewmodelSwing } from "./items";
-import { triggerDeathCollapse, triggerHitReaction } from "./npcAnimation";
+import { triggerDeathCollapse, triggerHitReaction, triggerParry } from "./npcAnimation";
 
 export type AttackType = "jab" | "cross" | "chop";
 export type WeaponClass = "unarmed" | "dagger" | "oneHanded";
@@ -82,15 +82,28 @@ export function tryParry(world: World, defenderEid?: number): boolean {
   Combat.parryWindow[eid] = 0;
   Combat.parryRecovery[eid] = PARRY_RECOVERY;
   const weapon = getEquippedWeapon(world, eid);
+  Combat.parryMitigation[eid] = PARRY_MITIGATION[weapon?.weaponClass ?? "unarmed"];
   if (weapon) triggerViewmodelParry(weapon.itemEid, PARRY_RECOVERY);
+  triggerParry(eid);
   return true;
 }
 
 /** Applies one resolved hit and returns the actual post-parry damage. */
 export function applyMeleeDamage(world: World, targetEid: number, rawDamage: number): number {
   if (!hasComponent(world, targetEid, Health) || hasComponent(world, targetEid, Dead)) return 0;
+  if (hasComponent(world, targetEid, Combat)
+      && Combat.parryRecovery[targetEid] <= 0
+      && Combat.agility[targetEid] > 0
+      && Math.random() < Combat.agility[targetEid]) {
+    // NPCs detect the incoming wind-up, so their successful reactive parry
+    // enters the active window before this strike resolves.
+    Combat.parryStartup[targetEid] = 0;
+    Combat.parryWindow[targetEid] = PARRY_WINDOW;
+    Combat.parryRecovery[targetEid] = PARRY_RECOVERY;
+    triggerParry(targetEid);
+  }
   const mitigation = hasComponent(world, targetEid, Combat) && Combat.parryWindow[targetEid] > 0
-    ? PARRY_MITIGATION[weaponClassFor(world, targetEid)]
+    ? Combat.parryMitigation[targetEid] || PARRY_MITIGATION[weaponClassFor(world, targetEid)]
     : 0;
   const damage = Math.max(1, Math.round(rawDamage * (1 - mitigation)));
   Health.current[targetEid] = Math.max(0, Health.current[targetEid] - damage);
@@ -98,7 +111,7 @@ export function applyMeleeDamage(world: World, targetEid: number, rawDamage: num
   if (Health.current[targetEid] <= 0) {
     addComponent(world, targetEid, Dead);
     triggerDeathCollapse(targetEid);
-  } else {
+  } else if (mitigation === 0) {
     triggerHitReaction(targetEid);
   }
   return damage;

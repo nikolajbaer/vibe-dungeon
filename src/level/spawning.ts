@@ -8,6 +8,7 @@ import { NPC_REGISTRY } from "../assets/npcRegistry";
 import type { PropPlacement, ItemSpawn, NpcSpawn, ReadablePlacement, ContentsEntry } from "./placementTypes";
 import { floorBaseline } from "./tiles";
 import { addCharacter, addDynamicBox, addStaticBox, type BoxShape, type Physics } from "../physics/world";
+import { PARRY_MITIGATION } from "../ecs/systems/combat";
 
 // Generic spawners for the asset-authoring system: turn plain `PropPlacement`/
 // `ItemSpawn` data (src/level/rooms/*.ts) into real ECS entities + three.js
@@ -375,6 +376,8 @@ export function spawnNpcs(world: World, physics: Physics, scene: THREE.Scene, sp
     Combat.parryStartup[eid] = 0;
     Combat.parryWindow[eid] = 0;
     Combat.parryRecovery[eid] = 0;
+    Combat.parryMitigation[eid] = PARRY_MITIGATION[archetype.parryWeaponClass ?? "unarmed"];
+    Combat.agility[eid] = archetype.agility ?? 0;
 
     const mesh = archetype.createMesh(eid);
     scene.add(mesh);

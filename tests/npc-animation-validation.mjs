@@ -31,6 +31,8 @@ try {
       NPC.state[eid]=3;tick(.3);assert.equal(state().activeClip,'combatIdle');
       animation.triggerAttack(eid);tick(.2);assert.equal(state().activeClip,'attack');
       tick(1.7);assert.equal(state().activeClip,'combatIdle');
+      animation.triggerParry(eid);tick(.2);assert.equal(state().activeClip,'parry');
+      tick(.9);assert.equal(state().activeClip,'combatIdle');
       NPC.state[eid]=0;tick(.3);assert.equal(state().activeClip,'idle');
     }
     animation.triggerHitReaction(eid);tick(.1);animation.triggerDeathCollapse(eid);tick(3,true);
