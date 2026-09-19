@@ -1,4 +1,4 @@
-import { getSharedHumanoidRig, tintClonedMesh } from "../../characters/humanoidRig";
+import { getBanditHumanoidRig, tintClonedMesh } from "../../characters/humanoidRig";
 import { createAnimatedNpcMesh } from "../../ecs/systems/npcAnimation";
 import type { NpcArchetypeDef } from "../types";
 
@@ -28,7 +28,7 @@ const bandit: NpcArchetypeDef = {
   chaseSpeed: 2.5,
   leashRange: 10,
   createMesh: (eid) => {
-    const mesh = createAnimatedNpcMesh(getSharedHumanoidRig(), eid);
+    const mesh = createAnimatedNpcMesh(getBanditHumanoidRig(), eid);
     tintClonedMesh(mesh, 0xcc4433);
     return mesh;
   },
