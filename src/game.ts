@@ -134,7 +134,10 @@ export function startGame(container: HTMLElement): void {
   // bug this time) — torch-adjacent walls stay dramatically brighter by
   // comparison either way, so the mood/contrast holds at both settings.
   // Doubled again (1.3->2.6, 0.8->1.6) per further "still too dark" feedback.
-  scene.add(new THREE.AmbientLight(0x3a4a6b, 2.6));
+  // Lift the always-present fill by 50% (2.6 -> 3.9). Torches and the held
+  // lantern still provide the warm local contrast; this just makes the
+  // unlit stretches of the dungeon easier to read.
+  scene.add(new THREE.AmbientLight(0x3a4a6b, 3.9));
   const skyFill = new THREE.HemisphereLight(0x3a4a6b, 0x241f1a, 1.6);
   scene.add(skyFill);
 
