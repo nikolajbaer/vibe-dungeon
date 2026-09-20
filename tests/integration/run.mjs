@@ -110,6 +110,7 @@ function runSpec(file, timeoutMs) {
 // sort after all of these, alphabetically among themselves.
 const SPEC_ORDER = [
   "item-icons.spec.mjs",
+  "first-person-arms.spec.mjs",
   "level-viewer.spec.mjs",
   "item-door-regression.spec.mjs",
   "rigid-bodies.spec.mjs",
