@@ -33,7 +33,8 @@ const POMMEL_RADIUS = 0.032;
 const CROSSGUARD_LENGTH = 0.22; // full width, perpendicular to the blade
 const CROSSGUARD_HEIGHT = 0.035; // thickness along the blade axis
 const CROSSGUARD_DEPTH = 0.045; // front-to-back thickness
-const BLADE_LENGTH = 0.66;
+const BLADE_BODY_LENGTH = 0.68;
+const BLADE_TIP_LENGTH = 0.16;
 const BLADE_WIDTH_BASE = 0.05; // apothem-ish radius at the guard end (diamond cross-section)
 const BLADE_WIDTH_TIP = 0.004; // near-point radius at the tip
 const BLADE_FLATTEN = 0.35; // scales the blade's Z (front-back) thickness down relative to its X width
@@ -64,27 +65,37 @@ function gripMaterial(): THREE.MeshStandardMaterial {
  * geometry group per input so a `[metal, grip]` materials array renders
  * correctly.
  */
-function createSwordMesh(): THREE.Mesh {
+export interface SwordMeshOptions {
+  crossguardLength?: number;
+  bluntTip?: boolean;
+}
+
+export function createSwordMesh(options: SwordMeshOptions = {}): THREE.Mesh {
   // Pommel: a small sphere cap at the very end of the grip.
   const pommel = new THREE.SphereGeometry(POMMEL_RADIUS, 8, 6);
   pommel.translate(0, -GRIP_LENGTH / 2 - POMMEL_RADIUS * 0.5, 0);
 
   // Crossguard: a short, wide, flattened box perpendicular to the blade,
   // sitting right above the grip.
-  const crossguard = new THREE.BoxGeometry(CROSSGUARD_LENGTH, CROSSGUARD_HEIGHT, CROSSGUARD_DEPTH);
+  const crossguard = new THREE.BoxGeometry(options.crossguardLength ?? CROSSGUARD_LENGTH, CROSSGUARD_HEIGHT, CROSSGUARD_DEPTH);
   const crossguardY = GRIP_LENGTH / 2 + CROSSGUARD_HEIGHT / 2;
   crossguard.translate(0, crossguardY, 0);
 
-  // Blade: a tapered cylinder (radiusBottom wide at the guard, radiusTop
-  // near a point at the tip). Four radial segments give a low-poly diamond
-  // cross-section that, once flattened on Z, reads as a blade with a
-  // central ridge rather than a round rod.
-  const blade = new THREE.CylinderGeometry(BLADE_WIDTH_TIP, BLADE_WIDTH_BASE, BLADE_LENGTH, 4);
-  blade.scale(1, 1, BLADE_FLATTEN);
+  // Keep the blade parallel-sided through most of its length, then taper
+  // only near the end. This reads as a sword rather than an oversized
+  // triangular dagger, particularly at inventory-icon scale.
   const bladeBaseY = crossguardY + CROSSGUARD_HEIGHT / 2;
-  blade.translate(0, bladeBaseY + BLADE_LENGTH / 2, 0);
+  const bladeBody = new THREE.BoxGeometry(BLADE_WIDTH_BASE * 2, BLADE_BODY_LENGTH, BLADE_WIDTH_BASE * 2 * BLADE_FLATTEN);
+  bladeBody.translate(0, bladeBaseY + BLADE_BODY_LENGTH / 2, 0);
 
-  const metalGeo = mergeGeometries([pommel, crossguard, blade], false);
+  // Wooden practice swords terminate in a broad flat end. Steel blades use
+  // the same low-poly four-sided transition but close to a proper point.
+  const endWidth = options.bluntTip ? BLADE_WIDTH_BASE * .62 : BLADE_WIDTH_TIP;
+  const bladeTip = new THREE.CylinderGeometry(endWidth, BLADE_WIDTH_BASE, BLADE_TIP_LENGTH, 4);
+  bladeTip.scale(1, 1, BLADE_FLATTEN);
+  bladeTip.translate(0, bladeBaseY + BLADE_BODY_LENGTH + BLADE_TIP_LENGTH / 2, 0);
+
+  const metalGeo = mergeGeometries([pommel, crossguard, bladeBody, bladeTip], false);
   if (!metalGeo) throw new Error("sword: failed to merge metal-part geometries");
 
   // Grip: a plain cylinder, hand-width, spanning [-GRIP_LENGTH/2, GRIP_LENGTH/2]
