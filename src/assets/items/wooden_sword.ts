@@ -1,9 +1,9 @@
 import * as THREE from "three";
 import type { ItemAssetDef } from "../types";
-import sword from "./sword";
+import { createSwordMesh } from "./sword";
 
 function createWoodenSword(): THREE.Mesh {
-  const mesh = sword.createWorldMesh() as THREE.Mesh;
+  const mesh = createSwordMesh({ bluntTip: true });
   mesh.name = "wooden_sword";
   const materials = Array.isArray(mesh.material) ? mesh.material : [mesh.material];
   mesh.material = materials.map((material, i) => {
