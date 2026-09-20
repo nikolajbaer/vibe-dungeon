@@ -39,7 +39,7 @@ import { mountContainer } from "./container/mount";
 import { containerSync } from "./container/sync";
 import { containerStore, type ContainerActions } from "./container/store";
 import { generateItemIcons } from "./assets/itemIcons";
-import { mountOpponentConfigurator } from "./combatTest/mount";
+import { mountOpponentConfigurator, openOpponentConfigurator } from "./combatTest/mount";
 import type { OpponentConfig, OpponentWeapon } from "./combatTest/OpponentConfigurator";
 
 const EYE_HEIGHT = 1.6; // camera height above the player's feet
@@ -621,6 +621,7 @@ export function startGame(container: HTMLElement, options: StartGameOptions = {}
   let combatConfigOpen = false;
   let activeTestOpponent: number | undefined;
   let testOpponentDeathTime = 0;
+  let wasOnTestMat = false;
   const removeTestOpponent = (eid: number) => {
     Object3DRef[eid]?.removeFromParent();
     PhysicsBody[eid]?.setEnabled(false);
@@ -769,6 +770,9 @@ export function startGame(container: HTMLElement, options: StartGameOptions = {}
       resolvePractice();
     }
     if (gameMode === "combat-test") {
+      const onTestMat = Math.abs(Position.x[player]) <= 9 && Math.abs(Position.z[player]) <= 9;
+      if (onTestMat && !wasOnTestMat) openOpponentConfigurator();
+      wasOnTestMat = onTestMat;
       // Combat test defeats are non-terminal: stop the opponent, restore the
       // player immediately, and leave the opponent available for inspection.
       if (Health.current[player] <= 0 || hasComponent(world, player, Dead)) {
