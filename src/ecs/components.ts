@@ -206,6 +206,11 @@ export const Health = {
   max: [] as number[],
 };
 
+/** Optional per-owner override for the normal inventory weight ceiling. */
+export const CarryCapacity = {
+  maxWeight: [] as number[],
+};
+
 /** Per-entity melee timing. Attack recovery prevents input-spam; parry has
  * a short anticipation before its active window, followed by recovery. */
 export const Combat = {

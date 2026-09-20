@@ -1,6 +1,6 @@
 import * as THREE from "three";
 import { addComponent, addEntity, hasComponent, query, type World } from "bitecs";
-import { Carried, Container, Item, Object3DRef, PhysicsBody, Stackable, Viewmodel, type CarriedSlot } from "../components";
+import { Carried, CarryCapacity, Container, Item, Object3DRef, PhysicsBody, Stackable, Viewmodel, type CarriedSlot } from "../components";
 import { ITEM_REGISTRY } from "../../assets/itemRegistry";
 
 export type HandSlot = "hand-left" | "hand-right";
@@ -92,7 +92,7 @@ export function carriedWeight(world: World, ownerEid: number): number {
  * *inside* a container doesn't compound (moot today anyway, since a
  * container can't hold another container). */
 export function maxCarryWeight(world: World, ownerEid: number): number {
-  let total = BASE_CARRY_WEIGHT;
+  let total = hasComponent(world, ownerEid, CarryCapacity) ? CarryCapacity.maxWeight[ownerEid] : BASE_CARRY_WEIGHT;
   for (const eid of query(world, [Item, Carried, Container])) {
     if (Carried.ownerEid[eid] !== ownerEid) continue;
     total += ITEM_REGISTRY[Item.itemTypeId[eid]]?.carryCapacityBonus ?? 0;

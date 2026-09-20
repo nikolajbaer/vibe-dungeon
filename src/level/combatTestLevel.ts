@@ -4,6 +4,7 @@ import { addStaticBox, type Physics } from "../physics/world";
 import { spawnItems, spawnProps } from "./spawning";
 import type { Level } from "./level";
 import sword from "../assets/items/sword";
+import { ceilingMaterial, floorMaterial, wallMaterial } from "./materials";
 
 const ROOM_HALF = 15;
 const WALL_HEIGHT = 7;
@@ -79,18 +80,19 @@ function addBox(
 
 /** A deliberately isolated 30m square room for repeatable combat tuning. */
 export function buildCombatTestLevel(world: World, physics: Physics, scene: THREE.Scene): Level {
-  const stone = new THREE.MeshStandardMaterial({ color: 0x69655f, roughness: 0.9 });
-  const darkStone = new THREE.MeshStandardMaterial({ color: 0x403e3b, roughness: 0.95 });
+  const stone = floorMaterial();
+  const texturedWall = wallMaterial();
+  const ceiling = ceilingMaterial();
   const sand = new THREE.MeshStandardMaterial({ color: 0xb99a62, roughness: 1 });
   const wood = new THREE.MeshStandardMaterial({ color: 0x76502d, roughness: 0.88 });
 
   addBox(physics, scene, new THREE.Vector3(30, 0.2, 30), new THREE.Vector3(0, -0.1, 0), stone);
   addBox(physics, scene, new THREE.Vector3(18, 0.2, 18), new THREE.Vector3(0, 0.1, 0), sand);
-  addBox(physics, scene, new THREE.Vector3(30, 0.25, 30), new THREE.Vector3(0, WALL_HEIGHT, 0), darkStone);
-  addBox(physics, scene, new THREE.Vector3(0.3, WALL_HEIGHT, 30), new THREE.Vector3(-ROOM_HALF, WALL_HEIGHT / 2, 0), darkStone);
-  addBox(physics, scene, new THREE.Vector3(0.3, WALL_HEIGHT, 30), new THREE.Vector3(ROOM_HALF, WALL_HEIGHT / 2, 0), darkStone);
-  addBox(physics, scene, new THREE.Vector3(30, WALL_HEIGHT, 0.3), new THREE.Vector3(0, WALL_HEIGHT / 2, -ROOM_HALF), darkStone);
-  addBox(physics, scene, new THREE.Vector3(30, WALL_HEIGHT, 0.3), new THREE.Vector3(0, WALL_HEIGHT / 2, ROOM_HALF), darkStone);
+  addBox(physics, scene, new THREE.Vector3(30, 0.25, 30), new THREE.Vector3(0, WALL_HEIGHT, 0), ceiling);
+  addBox(physics, scene, new THREE.Vector3(0.3, WALL_HEIGHT, 30), new THREE.Vector3(-ROOM_HALF, WALL_HEIGHT / 2, 0), texturedWall);
+  addBox(physics, scene, new THREE.Vector3(0.3, WALL_HEIGHT, 30), new THREE.Vector3(ROOM_HALF, WALL_HEIGHT / 2, 0), texturedWall);
+  addBox(physics, scene, new THREE.Vector3(30, WALL_HEIGHT, 0.3), new THREE.Vector3(0, WALL_HEIGHT / 2, -ROOM_HALF), texturedWall);
+  addBox(physics, scene, new THREE.Vector3(30, WALL_HEIGHT, 0.3), new THREE.Vector3(0, WALL_HEIGHT / 2, ROOM_HALF), texturedWall);
 
   // Two torches per wall, 15m apart, plus one centered heraldic display.
   for (const offset of [-7.5, 7.5]) {
