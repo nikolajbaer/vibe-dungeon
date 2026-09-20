@@ -1,5 +1,5 @@
 import { useEffect, useState } from "preact/hooks";
-import { exitGameFullscreen, isGameFullscreen } from "./fullscreen";
+import { exitGameFullscreen, isGameFullscreen, requestGameFullscreen } from "./fullscreen";
 
 export function InGameMenu() {
   const [open, setOpen] = useState(false);
@@ -15,8 +15,13 @@ export function InGameMenu() {
     };
   }, []);
 
-  const leaveFullscreen = () => {
-    exitGameFullscreen();
+  const toggleFullscreen = () => {
+    if (fullscreen) {
+      exitGameFullscreen();
+    } else {
+      const game = document.getElementById("app");
+      if (game) requestGameFullscreen(game);
+    }
     setOpen(false);
   };
 
@@ -40,11 +45,10 @@ export function InGameMenu() {
           <button
             type="button"
             class="game-menu-action"
-            data-testid="game-menu-exit-fullscreen"
-            disabled={!fullscreen}
-            onClick={leaveFullscreen}
+            data-testid="game-menu-fullscreen"
+            onClick={toggleFullscreen}
           >
-            {fullscreen ? "Exit fullscreen" : "Not fullscreen"}
+            {fullscreen ? "Exit fullscreen" : "Enter fullscreen"}
           </button>
           <button
             type="button"
