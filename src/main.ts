@@ -23,4 +23,11 @@ function showMenu(): void {
 // points are then free to be synchronous, as they were before physics
 // existed. `.then` rather than top-level await: tsconfig targets ES2020,
 // which predates it.
-initPhysics().then(showMenu);
+initPhysics().then(() => {
+  if (sessionStorage.getItem("vibe-dungeon-restart") === "1") {
+    sessionStorage.removeItem("vibe-dungeon-restart");
+    startGame(container);
+  } else {
+    showMenu();
+  }
+});

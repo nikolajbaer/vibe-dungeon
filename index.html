@@ -259,7 +259,8 @@
         background: rgba(255, 255, 255, 0.22);
       }
       .game-menu-panel {
-        width: 170px;
+        width: 210px;
+        max-height: calc(100dvh - 70px - env(safe-area-inset-top) - env(safe-area-inset-bottom));
         display: flex;
         flex-direction: column;
         gap: 7px;
@@ -268,6 +269,8 @@
         border: 1px solid rgba(255, 255, 255, 0.3);
         border-radius: 10px;
         pointer-events: auto;
+        overflow-y: auto;
+        overscroll-behavior: contain;
       }
       .game-menu-action {
         width: 100%;
@@ -278,6 +281,37 @@
       }
       .game-menu-restart {
         border-color: rgba(255, 170, 120, 0.55);
+      }
+      .game-debug-panel {
+        display: flex;
+        flex-direction: column;
+        gap: 9px;
+        padding: 9px;
+        background: rgba(255, 255, 255, 0.06);
+        border: 1px solid rgba(255, 255, 255, 0.18);
+        border-radius: 7px;
+      }
+      .game-debug-control {
+        display: flex;
+        flex-direction: column;
+        gap: 4px;
+        color: rgba(255, 255, 255, 0.8);
+        font-size: 11px;
+      }
+      .game-debug-control span {
+        display: flex;
+        justify-content: space-between;
+        gap: 10px;
+      }
+      .game-debug-control output {
+        color: #ffcc44;
+        font-variant-numeric: tabular-nums;
+      }
+      .game-debug-control input[type="range"] {
+        width: 100%;
+        margin: 0;
+        accent-color: #d8a744;
+        pointer-events: auto;
       }
       .inv-paperdoll,
       .inv-list {

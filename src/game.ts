@@ -3,7 +3,7 @@ import Stats from "three/examples/jsm/libs/stats.module.js";
 import { addComponent, addEntity, createWorld, hasComponent } from "bitecs";
 import { query } from "bitecs";
 import { Position, Velocity, Rotation, CharacterBody, DynamicBody, PhysicsBody, PhysicsCollider, PhysicsRotation, RenderOffsetY, PlayerControlled, Object3DRef, Door, Dead, DeathSector, Health, Combat, Practice, NPC, Item, Carried, Readable, Container, Stackable } from "./ecs/components";
-import { inputSystem } from "./ecs/systems/input";
+import { getPlayerMoveSpeed, inputSystem, setPlayerMoveSpeed } from "./ecs/systems/input";
 import { characterSystem, physicsSyncSystem, teleportCharacter } from "./ecs/systems/character";
 import { dynamicSyncSystem } from "./ecs/systems/dynamics";
 import { addCharacter, createPhysics, PHYSICS_DT } from "./physics/world";
@@ -138,10 +138,11 @@ export function startGame(container: HTMLElement): void {
   // bug this time) — torch-adjacent walls stay dramatically brighter by
   // comparison either way, so the mood/contrast holds at both settings.
   // Doubled again (1.3->2.6, 0.8->1.6) per further "still too dark" feedback.
-  // Lift the always-present fill by 50% (2.6 -> 3.9). Torches and the held
-  // lantern still provide the warm local contrast; this just makes the
-  // unlit stretches of the dungeon easier to read.
-  scene.add(new THREE.AmbientLight(0x3a4a6b, 3.9));
+  // The always-present fill is now 5.8 after another readability pass.
+  // Torches and the held lantern still provide warm local contrast, while
+  // the in-game debug slider can tune this live over a practical 0–12 range.
+  const ambientLight = new THREE.AmbientLight(0x3a4a6b, 5.8);
+  scene.add(ambientLight);
   const skyFill = new THREE.HemisphereLight(0x3a4a6b, 0x241f1a, 1.6);
   scene.add(skyFill);
 
@@ -607,7 +608,27 @@ export function startGame(container: HTMLElement): void {
   mountDialogue(container);
   mountNotice(container);
   mountContainer(container);
-  mountInGameMenu(container);
+  mountInGameMenu(container, {
+    initialFov: camera.fov,
+    initialAmbient: ambientLight.intensity,
+    initialWalkSpeed: getPlayerMoveSpeed(),
+    onFovChange(value) {
+      camera.fov = value;
+      camera.updateProjectionMatrix();
+    },
+    onAmbientChange(value) {
+      ambientLight.intensity = value;
+    },
+    onWalkSpeedChange: setPlayerMoveSpeed,
+    onRestart() {
+      sessionStorage.setItem("vibe-dungeon-restart", "1");
+      window.location.reload();
+    },
+    onMainMenu() {
+      sessionStorage.removeItem("vibe-dungeon-restart");
+      window.location.reload();
+    },
+  });
 
   // Desktop melee attack trigger (issue #48): left-click, but only once
   // pointer lock is already engaged — `PointerLook`'s own click handler
