@@ -68,6 +68,7 @@ function gripMaterial(): THREE.MeshStandardMaterial {
 export interface SwordMeshOptions {
   crossguardLength?: number;
   bluntTip?: boolean;
+  triangularBlade?: boolean;
 }
 
 export function createSwordMesh(options: SwordMeshOptions = {}): THREE.Mesh {
@@ -85,17 +86,27 @@ export function createSwordMesh(options: SwordMeshOptions = {}): THREE.Mesh {
   // only near the end. This reads as a sword rather than an oversized
   // triangular dagger, particularly at inventory-icon scale.
   const bladeBaseY = crossguardY + CROSSGUARD_HEIGHT / 2;
-  const bladeBody = new THREE.BoxGeometry(BLADE_WIDTH_BASE * 2, BLADE_BODY_LENGTH, BLADE_WIDTH_BASE * 2 * BLADE_FLATTEN);
-  bladeBody.translate(0, bladeBaseY + BLADE_BODY_LENGTH / 2, 0);
+  const totalBladeLength = BLADE_BODY_LENGTH + BLADE_TIP_LENGTH;
+  const bladeParts: THREE.BufferGeometry[] = [];
+  if (options.triangularBlade) {
+    const blade = new THREE.CylinderGeometry(BLADE_WIDTH_TIP, BLADE_WIDTH_BASE, totalBladeLength, 4);
+    blade.scale(1, 1, BLADE_FLATTEN);
+    blade.translate(0, bladeBaseY + totalBladeLength / 2, 0);
+    bladeParts.push(blade);
+  } else {
+    const bodyLength = options.bluntTip ? totalBladeLength : BLADE_BODY_LENGTH;
+    const bladeBody = new THREE.BoxGeometry(BLADE_WIDTH_BASE * 2, bodyLength, BLADE_WIDTH_BASE * 2 * BLADE_FLATTEN);
+    bladeBody.translate(0, bladeBaseY + bodyLength / 2, 0);
+    bladeParts.push(bladeBody);
+    if (!options.bluntTip) {
+      const bladeTip = new THREE.CylinderGeometry(BLADE_WIDTH_TIP, BLADE_WIDTH_BASE, BLADE_TIP_LENGTH, 4);
+      bladeTip.scale(1, 1, BLADE_FLATTEN);
+      bladeTip.translate(0, bladeBaseY + BLADE_BODY_LENGTH + BLADE_TIP_LENGTH / 2, 0);
+      bladeParts.push(bladeTip);
+    }
+  }
 
-  // Wooden practice swords terminate in a broad flat end. Steel blades use
-  // the same low-poly four-sided transition but close to a proper point.
-  const endWidth = options.bluntTip ? BLADE_WIDTH_BASE * .62 : BLADE_WIDTH_TIP;
-  const bladeTip = new THREE.CylinderGeometry(endWidth, BLADE_WIDTH_BASE, BLADE_TIP_LENGTH, 4);
-  bladeTip.scale(1, 1, BLADE_FLATTEN);
-  bladeTip.translate(0, bladeBaseY + BLADE_BODY_LENGTH + BLADE_TIP_LENGTH / 2, 0);
-
-  const metalGeo = mergeGeometries([pommel, crossguard, bladeBody, bladeTip], false);
+  const metalGeo = mergeGeometries([pommel, crossguard, ...bladeParts], false);
   if (!metalGeo) throw new Error("sword: failed to merge metal-part geometries");
 
   // Grip: a plain cylinder, hand-width, spanning [-GRIP_LENGTH/2, GRIP_LENGTH/2]

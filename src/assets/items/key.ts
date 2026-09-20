@@ -10,11 +10,11 @@ import type { ItemAssetDef } from "../types";
 
 const RING_RADIUS = 0.09;
 const RING_TUBE = 0.018;
-const SHAFT_LENGTH = 0.16;
-const SHAFT_RADIUS = 0.016;
-const BIT_WIDTH = 0.09;
-const BIT_HEIGHT = 0.05;
-const BIT_DEPTH = 0.02;
+const SHAFT_LENGTH = 0.21;
+const SHAFT_RADIUS = 0.019;
+const BIT_WIDTH = 0.115;
+const BIT_HEIGHT = 0.065;
+const BIT_DEPTH = 0.026;
 
 let keyMat: THREE.MeshStandardMaterial | undefined;
 

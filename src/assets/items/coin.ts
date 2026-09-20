@@ -20,19 +20,16 @@ function coinMaterial(): THREE.MeshStandardMaterial {
 
 function createCoinPileMesh(): THREE.Group {
   const group = new THREE.Group();
-  // A small scattered heap -- a few coins lying at slight angles, not a
-  // neat vertical stack, so it reads as "spilled pile" rather than "poker
-  // chip."
-  const offsets: Array<[number, number, number, number]> = [
-    [0, 0, 0, 0],
-    [0.03, COIN_THICKNESS, 0.01, 0.4],
-    [-0.025, COIN_THICKNESS * 2, -0.015, -0.3],
-    [0.01, COIN_THICKNESS * 3, -0.03, 0.9],
+  // A loose but stable stack: every coin lies flat, with small lateral
+  // offsets that keep the individual layers readable at icon scale.
+  const offsets: Array<[number, number, number]> = [
+    [0, 0, 0],
+    [0.014, COIN_THICKNESS, 0.006],
+    [-0.008, COIN_THICKNESS * 2, -0.009],
+    [0.009, COIN_THICKNESS * 3, -0.004],
   ];
-  for (const [x, y, z, tilt] of offsets) {
+  for (const [x, y, z] of offsets) {
     const coin = new THREE.Mesh(new THREE.CylinderGeometry(COIN_RADIUS, COIN_RADIUS, COIN_THICKNESS, 12), coinMaterial());
-    coin.rotation.x = Math.PI / 2 + tilt * 0.15;
-    coin.rotation.z = tilt;
     coin.position.set(x, y + COIN_THICKNESS / 2, z);
     group.add(coin);
   }

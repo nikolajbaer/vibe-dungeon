@@ -109,6 +109,7 @@ function runSpec(file, timeoutMs) {
 // before anything else gets a turn. Unlisted specs (a new one added later)
 // sort after all of these, alphabetically among themselves.
 const SPEC_ORDER = [
+  "item-icons.spec.mjs",
   "level-viewer.spec.mjs",
   "item-door-regression.spec.mjs",
   "rigid-bodies.spec.mjs",

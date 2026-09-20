@@ -2,6 +2,7 @@ import { inventoryStore } from "./store";
 import { useObserved } from "./useObserved";
 import { noticeStore } from "../notice/store";
 import { containerStore } from "../container/store";
+import { ItemIcon } from "./ItemIcon";
 
 /** Highlight for the item currently awaiting a paper-doll tap (issue #47)
  * — a warm border/background distinct from the default slot styling
@@ -13,8 +14,8 @@ const SELECTED_STYLE = {
 };
 
 /**
- * Inventory list: every carried item with `slot: "inventory"`, as its
- * Unicode icon. Tapping an equippable item (`slot: "hand"` item types)
+ * Inventory list: every carried item with `slot: "inventory"`, using its
+ * startup-rendered mesh icon (with Unicode fallback). Tapping an equippable item (`slot: "hand"` item types)
  * calls `inventoryStore.tapItem`, which either equips it immediately (one
  * hand open — today's behavior) or marks it selected and waits for a
  * paper-doll hand-slot tap (both hands open — see `PaperDoll.tsx`);
@@ -69,7 +70,7 @@ export function InventoryList() {
               else if (item.equippable) inventoryStore.tapItem(item.eid);
             }}
           >
-            <span class="inv-list-item-icon">{item.icon}</span>
+            <ItemIcon class="inv-list-item-icon" itemTypeId={item.itemTypeId} fallback={item.icon} />
             {item.count !== undefined && <span class="inv-list-item-count">{item.count}</span>}
           </button>
         );

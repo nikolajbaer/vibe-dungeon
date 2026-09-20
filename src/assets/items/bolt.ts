@@ -22,9 +22,9 @@ export function createBoltMesh(): THREE.Group {
   tip.rotation.x = Math.PI / 2;
   tip.position.z = .275;
   group.add(tip);
-  for (const x of [-.035, .035]) {
-    const fletching = new THREE.Mesh(new THREE.BoxGeometry(.008, .065, .10), shaft.material);
-    fletching.position.set(x, 0, -.18);
+  for (const y of [-.035, .035]) {
+    const fletching = new THREE.Mesh(new THREE.BoxGeometry(.065, .008, .10), shaft.material);
+    fletching.position.set(0, y, -.18);
     group.add(fletching);
   }
   group.traverse(obj => { if (obj instanceof THREE.Mesh) obj.castShadow = true; });
