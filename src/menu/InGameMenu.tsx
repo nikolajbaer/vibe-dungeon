@@ -1,9 +1,24 @@
 import { useEffect, useState } from "preact/hooks";
 import { exitGameFullscreen, isGameFullscreen, requestGameFullscreen } from "./fullscreen";
 
-export function InGameMenu() {
+export interface InGameMenuProps {
+  initialFov: number;
+  initialAmbient: number;
+  initialWalkSpeed: number;
+  onFovChange(value: number): void;
+  onAmbientChange(value: number): void;
+  onWalkSpeedChange(value: number): void;
+  onRestart(): void;
+  onMainMenu(): void;
+}
+
+export function InGameMenu(props: InGameMenuProps) {
   const [open, setOpen] = useState(false);
+  const [debugOpen, setDebugOpen] = useState(false);
   const [fullscreen, setFullscreen] = useState(isGameFullscreen());
+  const [fov, setFov] = useState(props.initialFov);
+  const [ambient, setAmbient] = useState(props.initialAmbient);
+  const [walkSpeed, setWalkSpeed] = useState(props.initialWalkSpeed);
 
   useEffect(() => {
     const update = () => setFullscreen(isGameFullscreen());
@@ -33,7 +48,10 @@ export function InGameMenu() {
         data-testid="game-menu-toggle"
         aria-expanded={open}
         aria-controls="game-menu-panel"
-        onClick={() => setOpen(!open)}
+        onClick={() => {
+          setOpen(!open);
+          if (open) setDebugOpen(false);
+        }}
       >
         ☰ Menu
       </button>
@@ -45,18 +63,85 @@ export function InGameMenu() {
           <button
             type="button"
             class="game-menu-action"
+            data-testid="game-menu-debug"
+            aria-expanded={debugOpen}
+            onClick={() => setDebugOpen(!debugOpen)}
+          >
+            Debug settings
+          </button>
+          {debugOpen && (
+            <div class="game-debug-panel" data-testid="game-debug-panel">
+              <label class="game-debug-control">
+                <span>FOV <output>{fov.toFixed(0)}°</output></span>
+                <input
+                  type="range"
+                  min="45"
+                  max="90"
+                  step="1"
+                  value={fov}
+                  data-testid="debug-fov"
+                  onInput={(event) => {
+                    const value = Number(event.currentTarget.value);
+                    setFov(value);
+                    props.onFovChange(value);
+                  }}
+                />
+              </label>
+              <label class="game-debug-control">
+                <span>Ambient <output>{ambient.toFixed(1)}</output></span>
+                <input
+                  type="range"
+                  min="0"
+                  max="12"
+                  step="0.1"
+                  value={ambient}
+                  data-testid="debug-ambient"
+                  onInput={(event) => {
+                    const value = Number(event.currentTarget.value);
+                    setAmbient(value);
+                    props.onAmbientChange(value);
+                  }}
+                />
+              </label>
+              <label class="game-debug-control">
+                <span>Walk speed <output>{walkSpeed.toFixed(1)} m/s</output></span>
+                <input
+                  type="range"
+                  min="1"
+                  max="6"
+                  step="0.1"
+                  value={walkSpeed}
+                  data-testid="debug-walk-speed"
+                  onInput={(event) => {
+                    const value = Number(event.currentTarget.value);
+                    setWalkSpeed(value);
+                    props.onWalkSpeedChange(value);
+                  }}
+                />
+              </label>
+            </div>
+          )}
+          <button
+            type="button"
+            class="game-menu-action"
             data-testid="game-menu-fullscreen"
             onClick={toggleFullscreen}
           >
             {fullscreen ? "Exit fullscreen" : "Enter fullscreen"}
           </button>
+          <button type="button" class="game-menu-action" data-testid="game-menu-save" disabled>
+            Save (coming soon)
+          </button>
           <button
             type="button"
             class="game-menu-action game-menu-restart"
             data-testid="game-menu-restart"
-            onClick={() => window.location.reload()}
+            onClick={props.onRestart}
           >
             Restart game
+          </button>
+          <button type="button" class="game-menu-action" data-testid="game-menu-main" onClick={props.onMainMenu}>
+            Main menu
           </button>
         </div>
       )}

@@ -6,7 +6,8 @@ import type { PointerLook } from "../../input/pointerLook";
 import type { TouchJoystick } from "../../input/touchJoystick";
 import type { TouchLookDrag } from "../../input/touchLookDrag";
 
-const MOVE_SPEED = 3.2; // meters/second
+const DEFAULT_MOVE_SPEED = 3.2; // meters/second
+let moveSpeed = DEFAULT_MOVE_SPEED;
 const MAX_PITCH = Math.PI / 2 - 0.05;
 
 export interface InputSources {
@@ -20,6 +21,14 @@ const euler = new THREE.Euler(0, 0, 0, "YXZ");
 const forward = new THREE.Vector3();
 const right = new THREE.Vector3();
 const moveVec = new THREE.Vector3();
+
+export function getPlayerMoveSpeed(): number {
+  return moveSpeed;
+}
+
+export function setPlayerMoveSpeed(value: number): void {
+  moveSpeed = Math.max(1, Math.min(6, value));
+}
 
 /** Reads keyboard/mouse/touch input and writes the player's desired
  * Velocity (world-space, relative to current facing) and updated
@@ -68,7 +77,7 @@ export function inputSystem(world: World, _dt: number, input: InputSources): voi
     moveVec.set(0, 0, 0).addScaledVector(forward, mz).addScaledVector(right, mx);
     if (moveVec.lengthSq() > 1) moveVec.normalize();
 
-    Velocity.x[eid] = moveVec.x * MOVE_SPEED;
-    Velocity.z[eid] = moveVec.z * MOVE_SPEED;
+    Velocity.x[eid] = moveVec.x * moveSpeed;
+    Velocity.z[eid] = moveVec.z * moveSpeed;
   }
 }
