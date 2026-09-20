@@ -2,7 +2,7 @@ import * as THREE from "three";
 import Stats from "three/examples/jsm/libs/stats.module.js";
 import { addComponent, addEntity, createWorld, hasComponent, removeComponent } from "bitecs";
 import { query } from "bitecs";
-import { Position, Velocity, Rotation, CharacterBody, DynamicBody, PhysicsBody, PhysicsCollider, PhysicsRotation, RenderOffsetY, PlayerControlled, Object3DRef, Door, Dead, DeathSector, Health, Combat, Practice, NPC, NpcState, Item, Carried, Readable, Container, Stackable } from "./ecs/components";
+import { Position, Velocity, Rotation, CharacterBody, DynamicBody, PhysicsBody, PhysicsCollider, PhysicsRotation, RenderOffsetY, PlayerControlled, Object3DRef, Door, Dead, DeathSector, Health, CarryCapacity, Combat, Practice, NPC, NpcState, Item, Carried, Readable, Container, Stackable } from "./ecs/components";
 import { getPlayerMoveSpeed, inputSystem, setPlayerMoveSpeed } from "./ecs/systems/input";
 import { characterSystem, physicsSyncSystem, teleportCharacter } from "./ecs/systems/character";
 import { dynamicSyncSystem } from "./ecs/systems/dynamics";
@@ -14,7 +14,7 @@ import { practiceSystem, startPractice } from "./ecs/systems/practice";
 import { npcSystem, toggleNpcFollow } from "./ecs/systems/npc";
 import { getNpcAnimationDebugState, npcAnimationSystem } from "./ecs/systems/npcAnimation";
 import { corpseCleanupSystem, MIN_LINGER_SECONDS } from "./ecs/systems/corpseCleanup";
-import { equipItem, equipToOpenHandSlot, giveItem, isHandSlot, unequipItem, viewmodelSwingSystem, wouldExceedCarryWeight, wouldExceedInventorySlots } from "./ecs/systems/items";
+import { BASE_CARRY_WEIGHT, equipItem, equipToOpenHandSlot, giveItem, isHandSlot, unequipItem, viewmodelSwingSystem, wouldExceedCarryWeight, wouldExceedInventorySlots } from "./ecs/systems/items";
 import { syncSystem } from "./ecs/systems/sync";
 import { hudSync } from "./ecs/systems/hudSync";
 import { buildLevel } from "./level/level";
@@ -170,6 +170,7 @@ export function startGame(container: HTMLElement, options: StartGameOptions = {}
   addComponent(world, player, PlayerControlled);
   addComponent(world, player, Object3DRef);
   addComponent(world, player, Health);
+  addComponent(world, player, CarryCapacity);
   addComponent(world, player, Combat);
   // `Position` is the player's *feet* now, not the camera — see
   // `CharacterBody` in components.ts. The camera is offset back up to eye
@@ -193,6 +194,7 @@ export function startGame(container: HTMLElement, options: StartGameOptions = {}
   Object3DRef[player] = camera;
   Health.current[player] = 100;
   Health.max[player] = 100;
+  CarryCapacity.maxWeight[player] = gameMode === "combat-test" ? 100 : BASE_CARRY_WEIGHT;
   Combat.attackRecovery[player] = 0;
   Combat.parryStartup[player] = 0;
   Combat.parryWindow[player] = 0;
@@ -621,7 +623,7 @@ export function startGame(container: HTMLElement, options: StartGameOptions = {}
   let combatConfigOpen = false;
   let activeTestOpponent: number | undefined;
   let testOpponentDeathTime = 0;
-  let wasOnTestMat = false;
+  let testMatTriggerArmed = true;
   const removeTestOpponent = (eid: number) => {
     Object3DRef[eid]?.removeFromParent();
     PhysicsBody[eid]?.setEnabled(false);
@@ -771,8 +773,14 @@ export function startGame(container: HTMLElement, options: StartGameOptions = {}
     }
     if (gameMode === "combat-test") {
       const onTestMat = Math.abs(Position.x[player]) <= 9 && Math.abs(Position.z[player]) <= 9;
-      if (onTestMat && !wasOnTestMat) openOpponentConfigurator();
-      wasOnTestMat = onTestMat;
+      if (onTestMat && testMatTriggerArmed) {
+        testMatTriggerArmed = false;
+        openOpponentConfigurator();
+      }
+      // Hysteresis prevents cancelling near the lip from immediately
+      // retriggering due to tiny character-controller position changes.
+      const clearedTestMat = Math.abs(Position.x[player]) >= 9.5 || Math.abs(Position.z[player]) >= 9.5;
+      if (clearedTestMat) testMatTriggerArmed = true;
       // Combat test defeats are non-terminal: stop the opponent, restore the
       // player immediately, and leave the opponent available for inspection.
       if (Health.current[player] <= 0 || hasComponent(world, player, Dead)) {

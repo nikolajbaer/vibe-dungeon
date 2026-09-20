@@ -1,13 +1,24 @@
 import assert from "node:assert/strict";
 import * as THREE from "three";
 import { createServer } from "vite";
-import { createWorld, query } from "bitecs";
+import { addComponent, addEntity, createWorld, query } from "bitecs";
 
 const server = await createServer({ server: { middlewareMode: true }, appType: "custom" });
 try {
+  globalThis.document = {
+    createElement: () => ({
+      width: 0,
+      height: 0,
+      getContext: () => ({
+        createImageData: (width, height) => ({ data: new Uint8ClampedArray(width * height * 4) }),
+        putImageData: () => {},
+      }),
+    }),
+  };
   const physicsModule = await server.ssrLoadModule("/src/physics/world.ts");
   const { buildCombatTestLevel } = await server.ssrLoadModule("/src/level/combatTestLevel.ts");
-  const { Item, Container, Carried, Stackable } = await server.ssrLoadModule("/src/ecs/components.ts");
+  const { Item, Container, Carried, CarryCapacity, Stackable } = await server.ssrLoadModule("/src/ecs/components.ts");
+  const { maxCarryWeight } = await server.ssrLoadModule("/src/ecs/systems/items.ts");
   await physicsModule.initPhysics();
   const world = createWorld();
   const physics = physicsModule.createPhysics();
@@ -25,6 +36,10 @@ try {
   assert(bolts !== undefined && Stackable.count[bolts] === 50, "projectile barrel contains 50 bolts");
   assert.equal(scene.children.filter((object) => object.userData.combatTestTorch).length, 8, "two torches are spaced along each wall");
   assert.equal(scene.children.filter((object) => object.userData.combatTestWallDecoration).length, 4, "each wall has a centered sword-and-shield display");
+  const player = addEntity(world);
+  addComponent(world, player, CarryCapacity);
+  CarryCapacity.maxWeight[player] = 100;
+  assert.equal(maxCarryWeight(world, player), 100, "combat-test player can carry 100kg");
   console.log("30m combat room, raised floor, wall dressing, weapon table and projectile barrel passed");
 } finally {
   await server.close();
