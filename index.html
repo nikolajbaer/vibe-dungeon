@@ -52,6 +52,7 @@
         touch-action: none;
         user-select: none;
         -webkit-user-select: none;
+        z-index: 30;
       }
       .touch-attack-btn:active {
         background: rgba(217, 67, 63, 0.5);
@@ -199,17 +200,85 @@
         position: fixed;
         inset: 0;
         pointer-events: none;
+        /* Reserve the attack control's full 90px diameter, its 20px bottom
+           offset, and a 16px breathing gap. The inventory can scroll within
+           the remaining height but can never cover the attack hit target. */
+        padding-bottom: calc(126px + env(safe-area-inset-bottom));
+        box-sizing: border-box;
+        z-index: 20;
       }
       #inventory-root {
         position: fixed;
         right: max(12px, env(safe-area-inset-right));
         top: max(12px, env(safe-area-inset-top));
+        bottom: calc(126px + env(safe-area-inset-bottom));
         width: clamp(150px, 34vw, 220px);
         display: flex;
         flex-direction: column;
         gap: 8px;
         font: 12px/1.3 system-ui, sans-serif;
         color: #eee;
+        max-height: calc(100dvh - 150px - env(safe-area-inset-top) - env(safe-area-inset-bottom));
+        overflow-y: auto;
+        overscroll-behavior: contain;
+        scrollbar-width: thin;
+      }
+      #game-menu-overlay {
+        position: fixed;
+        inset: 0;
+        pointer-events: none;
+        z-index: 40;
+      }
+      .game-menu-root {
+        position: fixed;
+        left: 50%;
+        top: calc(10px + env(safe-area-inset-top));
+        transform: translateX(-50%);
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 7px;
+        pointer-events: none;
+        font: 600 13px/1.2 system-ui, sans-serif;
+      }
+      .game-menu-toggle,
+      .game-menu-action {
+        min-height: 38px;
+        padding: 9px 15px;
+        color: #fff;
+        background: rgba(8, 8, 12, 0.72);
+        border: 1px solid rgba(255, 255, 255, 0.35);
+        border-radius: 8px;
+        font: inherit;
+        white-space: nowrap;
+        cursor: pointer;
+        pointer-events: auto;
+        touch-action: manipulation;
+      }
+      .game-menu-toggle:active,
+      .game-menu-action:not(:disabled):active {
+        background: rgba(255, 255, 255, 0.22);
+      }
+      .game-menu-panel {
+        width: 170px;
+        display: flex;
+        flex-direction: column;
+        gap: 7px;
+        padding: 9px;
+        background: rgba(8, 8, 12, 0.88);
+        border: 1px solid rgba(255, 255, 255, 0.3);
+        border-radius: 10px;
+        pointer-events: auto;
+      }
+      .game-menu-action {
+        width: 100%;
+      }
+      .game-menu-action:disabled {
+        opacity: 0.45;
+        cursor: default;
+      }
+      .game-menu-restart {
+        border-color: rgba(255, 170, 120, 0.55);
       }
       .inv-paperdoll,
       .inv-list {

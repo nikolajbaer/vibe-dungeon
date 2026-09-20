@@ -1,5 +1,6 @@
 import { render } from "preact";
 import { MainMenu } from "./MainMenu";
+import { requestGameFullscreen } from "./fullscreen";
 
 /**
  * Mounts the main menu into its own dedicated overlay DOM node — the same
@@ -23,6 +24,9 @@ export function mountMainMenu(container: HTMLElement, onPlay: () => void, onView
     el.remove();
   };
   const handlePlay = () => {
+    // Keep this synchronous and first in the click handler: browsers only
+    // grant fullscreen while the original user activation is still live.
+    requestGameFullscreen(container);
     dismiss();
     onPlay();
   };
