@@ -211,17 +211,16 @@
         position: fixed;
         right: max(12px, env(safe-area-inset-right));
         top: max(12px, env(safe-area-inset-top));
-        bottom: calc(126px + env(safe-area-inset-bottom));
         width: clamp(150px, 34vw, 220px);
         display: flex;
         flex-direction: column;
         gap: 8px;
         font: 12px/1.3 system-ui, sans-serif;
         color: #eee;
-        max-height: calc(100dvh - 150px - env(safe-area-inset-top) - env(safe-area-inset-bottom));
-        overflow-y: auto;
-        overscroll-behavior: contain;
-        scrollbar-width: thin;
+        /* The inventory has a fixed maximum of six loose slots, so compact
+           its cells at phone sizes rather than clipping or scrolling the
+           panel inside the attack-button reservation below. */
+        height: max-content;
       }
       #game-menu-overlay {
         position: fixed;
@@ -392,6 +391,64 @@
         border-style: dashed;
         border-color: #ff6b6b;
       }
+      @media (max-width: 600px), (max-height: 700px) {
+        #inventory-root {
+          width: clamp(112px, 30vw, 150px);
+          gap: 4px;
+          font-size: 10px;
+        }
+        .inv-paperdoll,
+        .inv-list {
+          gap: 3px;
+          padding: 4px;
+          border-radius: 6px;
+        }
+        .inv-slot,
+        .inv-list-item {
+          gap: 1px;
+          padding: 2px 1px;
+          border-radius: 4px;
+        }
+        .inv-item-icon-image {
+          width: 27px;
+          height: 27px;
+        }
+        .inv-slot-icon,
+        .inv-list-item-icon {
+          font-size: 17px;
+        }
+        .inv-slot-label {
+          font-size: 8px;
+        }
+        .inv-weight {
+          padding: 2px 4px;
+        }
+        .inv-drop-zone {
+          padding: 5px;
+        }
+      }
+      @media (max-height: 450px) {
+        #inventory-root {
+          width: 90px;
+          gap: 3px;
+          font-size: 9px;
+        }
+        .inv-paperdoll,
+        .inv-list {
+          gap: 2px;
+          padding: 3px;
+        }
+        .inv-item-icon-image {
+          width: 21px;
+          height: 21px;
+        }
+        .inv-slot-label {
+          display: none;
+        }
+        .inv-drop-zone {
+          padding: 3px;
+        }
+      }
       /* Dialogue panel: its own fixed overlay (#dialogue-overlay, see
          src/dialogue/mount.tsx), same "own container, own pointer-events"
          split as #inventory-overlay above. */
@@ -399,6 +456,7 @@
         position: fixed;
         inset: 0;
         pointer-events: none;
+        z-index: 50;
       }
       .dialogue-root {
         position: fixed;
@@ -451,6 +509,7 @@
         position: fixed;
         inset: 0;
         pointer-events: none;
+        z-index: 50;
       }
       .notice-root {
         position: fixed;
@@ -523,6 +582,7 @@
         position: fixed;
         inset: 0;
         pointer-events: none;
+        z-index: 50;
       }
       .container-root {
         position: fixed;
@@ -588,6 +648,7 @@
         left: 50%;
         top: 50%;
         transform: translate(-50%, -50%);
+        z-index: 1;
         display: flex;
         flex-direction: column;
         align-items: center;

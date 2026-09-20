@@ -71,7 +71,10 @@ export function startGame(container: HTMLElement): void {
   const scene = new THREE.Scene();
   scene.background = new THREE.Color(0x11131a);
 
-  const camera = new THREE.PerspectiveCamera(70, window.innerWidth / window.innerHeight, 0.05, 100);
+  // A narrower vertical FOV reduces the stretched/fisheye look at the outer
+  // edges of wide phone screens. (90 degrees would be wider than the old 70
+  // and therefore exaggerate that distortion rather than reduce it.)
+  const camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.05, 100);
   camera.rotation.order = "YXZ";
   scene.add(camera);
 
