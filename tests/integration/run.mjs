@@ -114,6 +114,7 @@ const SPEC_ORDER = [
   "item-door-regression.spec.mjs",
   "rigid-bodies.spec.mjs",
   "touch-dialogue.spec.mjs",
+  "mobile-layout.spec.mjs",
   "npc-dialogue.spec.mjs",
   "stairwell-wall-gaps.spec.mjs",
   "bandit-combat.spec.mjs",

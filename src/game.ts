@@ -27,6 +27,7 @@ import { TouchControls, isTouchDevice } from "./input/touchControls";
 import { mountHud } from "./hud/mount";
 import { hudStore, type HudActions } from "./hud/store";
 import { mountInventory } from "./inventory/mount";
+import { mountInGameMenu } from "./menu/gameMount";
 import { inventorySync } from "./inventory/sync";
 import { inventoryStore, type InventoryActions } from "./inventory/store";
 import { mountDialogue } from "./dialogue/mount";
@@ -603,6 +604,7 @@ export function startGame(container: HTMLElement): void {
   mountDialogue(container);
   mountNotice(container);
   mountContainer(container);
+  mountInGameMenu(container);
 
   // Desktop melee attack trigger (issue #48): left-click, but only once
   // pointer lock is already engaged — `PointerLook`'s own click handler

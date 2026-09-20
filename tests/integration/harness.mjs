@@ -40,7 +40,7 @@ export function assert(cond, msg) {
  * spec needs; the spec owns closing `browser` when it's done (or lets it be
  * killed by the runner's timeout on failure).
  */
-export async function launchGame({ viewport = { width: 1000, height: 700 }, touch = false } = {}) {
+export async function launchGame({ viewport = { width: 1000, height: 700 }, touch = false, initScript } = {}) {
   const browser = await chromium.launch({ ...(CHROMIUM_PATH ? { executablePath: CHROMIUM_PATH } : {}), args: LAUNCH_ARGS });
   const context = touch
     ? await browser.newContext({ viewport, hasTouch: true, isMobile: true })
@@ -48,6 +48,7 @@ export async function launchGame({ viewport = { width: 1000, height: 700 }, touc
   const page = await context.newPage();
   page.setDefaultTimeout(ACTION_TIMEOUT_MS);
   page.on("pageerror", (err) => console.log("PAGE ERROR:", err.message));
+  if (initScript) await page.addInitScript(initScript);
 
   await page.goto(BASE_URL);
   await page.waitForSelector('[data-testid="menu-play"]');
