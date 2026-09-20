@@ -1,5 +1,4 @@
 import * as THREE from "three";
-import { attachFirstPersonWeapon, detachFirstPersonWeapon, isFirstPersonWeapon, playFirstPersonAttack } from "./firstPersonArms";
 import { addComponent, addEntity, hasComponent, query, type World } from "bitecs";
 import { Carried, Container, Item, Object3DRef, PhysicsBody, Stackable, Viewmodel, type CarriedSlot } from "../components";
 import { ITEM_REGISTRY } from "../../assets/itemRegistry";
@@ -353,15 +352,13 @@ function makeRenderOnTop(mesh: THREE.Object3D): void {
   mesh.traverse((obj) => {
     if (!(obj instanceof THREE.Mesh)) return;
     obj.renderOrder = 999;
-    const wasArray = Array.isArray(obj.material);
-    const materials: THREE.Material[] = wasArray ? obj.material : [obj.material];
-    const clones = materials.map((m) => {
+    const materials = Array.isArray(obj.material) ? obj.material : [obj.material];
+    obj.material = materials.map((m) => {
       const clone = m.clone();
       clone.depthTest = false;
       clone.depthWrite = false;
       return clone;
     });
-    obj.material = wasArray ? clones : clones[0];
   });
 }
 
@@ -382,17 +379,8 @@ export function equipItem(world: World, camera: THREE.Camera, itemEid: number, s
 
   Carried.slot[itemEid] = slot;
 
-  // Melee weapons live in the hand bone of the camera-mounted arm rig, so
-  // they inherit the exact humanoid combat clips. Ranged weapons retain
-  // their purpose-built camera transform/reload motion.
-  const meleeViewmodel = itemType.meleeDamage !== undefined && !itemType.rangedWeapon;
-  const mesh = meleeViewmodel ? itemType.createWorldMesh() : itemType.createViewmodelMesh?.();
+  const mesh = itemType.createViewmodelMesh?.();
   if (mesh) {
-    if (meleeViewmodel) {
-      attachFirstPersonWeapon(itemEid, slot, mesh, itemType.id === "dagger");
-      Viewmodel[itemEid] = mesh;
-      return;
-    }
     const custom = itemType.viewmodelTransform;
     const { pos, rot } = custom
       ? { pos: custom.position, rot: custom.rotation }
@@ -434,7 +422,6 @@ export function unequipItem(world: World, itemEid: number): void {
 
   const mesh = Viewmodel[itemEid];
   if (mesh) {
-    detachFirstPersonWeapon(itemEid);
     mesh.removeFromParent();
     Viewmodel[itemEid] = undefined;
   }
@@ -463,20 +450,12 @@ const activeSwings: SwingState[] = [];
  * `viewmodelSwingSystem` if the item turns out not to have a viewmodel
  * (unarmed) or gets unequipped mid-swing. */
 export function triggerViewmodelSwing(itemEid: number, attackType: import("./combat").AttackType = "jab", duration = SWING_DURATION): void {
-  if (isFirstPersonWeapon(itemEid)) {
-    playFirstPersonAttack(attackType, true);
-    return;
-  }
   const existing = activeSwings.find((s) => s.itemEid === itemEid);
   if (existing) Object.assign(existing, { elapsed: 0, attackType, duration });
   else activeSwings.push({ itemEid, elapsed: 0, attackType, duration });
 }
 
 export function triggerViewmodelParry(itemEid: number, duration: number): void {
-  if (isFirstPersonWeapon(itemEid)) {
-    playFirstPersonAttack("parry", true);
-    return;
-  }
   const existing = activeSwings.find((s) => s.itemEid === itemEid);
   if (existing) Object.assign(existing, { elapsed: 0, attackType: "parry" as const, duration });
   else activeSwings.push({ itemEid, elapsed: 0, attackType: "parry", duration });
