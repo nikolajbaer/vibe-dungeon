@@ -23,7 +23,9 @@ try {
   const [barrel] = query(world, [Container]);
   const bolts = query(world, [Item, Carried, Stackable]).find((eid) => Carried.ownerEid[eid] === barrel && Item.itemTypeId[eid] === "bolt");
   assert(bolts !== undefined && Stackable.count[bolts] === 50, "projectile barrel contains 50 bolts");
-  console.log("30m combat room, raised floor, weapon table and projectile barrel passed");
+  assert.equal(scene.children.filter((object) => object.userData.combatTestTorch).length, 8, "two torches are spaced along each wall");
+  assert.equal(scene.children.filter((object) => object.userData.combatTestWallDecoration).length, 4, "each wall has a centered sword-and-shield display");
+  console.log("30m combat room, raised floor, wall dressing, weapon table and projectile barrel passed");
 } finally {
   await server.close();
 }

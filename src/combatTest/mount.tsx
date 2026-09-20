@@ -1,5 +1,9 @@
 import { render } from "preact";
-import { OpponentConfigurator, type OpponentConfig } from "./OpponentConfigurator";
+import { OPEN_OPPONENT_CONFIG_EVENT, OpponentConfigurator, type OpponentConfig } from "./OpponentConfigurator";
+
+export function openOpponentConfigurator(): void {
+  window.dispatchEvent(new Event(OPEN_OPPONENT_CONFIG_EVENT));
+}
 
 export function mountOpponentConfigurator(
   container: HTMLElement,
@@ -9,6 +13,5 @@ export function mountOpponentConfigurator(
   const el = document.createElement("div");
   el.id = "opponent-config-overlay";
   container.appendChild(el);
-  onOpenChange(true);
   render(<OpponentConfigurator onSpawn={onSpawn} onOpenChange={onOpenChange} />, el);
 }
