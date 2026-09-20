@@ -320,6 +320,7 @@ function addDoorLeaf(
 
   const leafWidth = Math.max(hx * 2, hz * 2);
   const mesh = new THREE.Mesh(createArchedDoorLeafGeometry(leafWidth, WALL_THICKNESS * 2, hingeSign), doorMaterial(!!requiredItemTypeId));
+  mesh.userData.surfaceMaterial = "wood";
   if (hz > hx) mesh.rotation.y = -Math.PI / 2;
   mesh.position.set(offsetX, 0, offsetZ);
   group.add(mesh);

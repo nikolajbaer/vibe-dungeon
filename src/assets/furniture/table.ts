@@ -29,6 +29,7 @@ const TABLE_LEG_INSET = 0.09; // legs pulled in this far from each edge
 /** A flat box top on four thin box legs, roughly waist-height (0.75m). */
 function createTableMesh(): THREE.Group {
   const group = new THREE.Group();
+  group.userData.surfaceMaterial = "wood";
   const mat = woodMaterial();
 
   const legHeight = TABLE_HEIGHT - TABLE_TOP_THICKNESS;

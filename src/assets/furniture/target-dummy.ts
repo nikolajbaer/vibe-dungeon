@@ -43,6 +43,7 @@ function sackMaterial(): THREE.MeshStandardMaterial {
  * cylinders/spheres. */
 function createTargetDummyMesh(): THREE.Group {
   const group = new THREE.Group();
+  group.userData.surfaceMaterial = "wood";
   const wood = woodMaterial();
 
   const base = new THREE.Mesh(new THREE.CylinderGeometry(BASE_RADIUS, BASE_RADIUS * 1.05, BASE_HEIGHT, 16), wood);

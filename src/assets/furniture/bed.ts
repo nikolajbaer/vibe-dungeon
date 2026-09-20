@@ -43,6 +43,7 @@ function blanketMaterial(): THREE.MeshStandardMaterial {
  * blanket accent (foot end, +z). */
 function createBedMesh(): THREE.Group {
   const group = new THREE.Group();
+  group.userData.surfaceMaterial = "wood";
   const wood = woodMaterial();
 
   const frame = new THREE.Mesh(new THREE.BoxGeometry(BED_WIDTH, FRAME_THICKNESS, BED_LENGTH), wood);

@@ -57,6 +57,15 @@ export interface ItemAssetDef {
    * so a non-weapon `slot: "hand"` item (the lantern, a future torch or
    * shield) doesn't accidentally zero out an otherwise-unarmed attack. */
   meleeDamage?: number;
+  /** Optional ranged-weapon tuning. Ammo is another stackable item type;
+   * firing consumes one unit and the weapon cannot fire again until reload. */
+  rangedWeapon?: {
+    ammoItemTypeId: string;
+    damage: number;
+    reloadSeconds: number;
+    projectileSpeed: number;
+    maxRange: number;
+  };
   /** Builds this item's in-world pickup mesh. Call once per usage site —
    * every mesh factory in this repo is cheap enough not to need caching/
    * sharing across instances (each caller may want to scale or reposition
@@ -76,6 +85,8 @@ export interface ItemAssetDef {
    * lit item is lit; the light turns on and off exactly when its group is
    * added to/removed from the camera. */
   createViewmodelMesh?(): THREE.Object3D;
+  /** Overrides the generic sword-like first-person pose. */
+  viewmodelTransform?: { position: THREE.Vector3Tuple; rotation: THREE.EulerTuple };
   /** Mass (kg) of this item's simulated world body. Every world item is a
    * dynamic rigid body — it falls, lands, and skitters when kicked — and
    * this is the only knob an asset needs to feel right, since the collider

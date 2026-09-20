@@ -34,6 +34,7 @@ function chestMetalMaterial(): THREE.MeshStandardMaterial {
  * running over the lid seam for a "iron-bound chest" silhouette. */
 function createChestMesh(): THREE.Group {
   const group = new THREE.Group();
+  group.userData.surfaceMaterial = "wood";
   const wood = woodMaterial();
 
   const body = new THREE.Mesh(new THREE.BoxGeometry(CHEST_WIDTH, CHEST_BODY_HEIGHT, CHEST_DEPTH), wood);

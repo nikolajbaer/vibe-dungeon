@@ -38,6 +38,7 @@ function bookMaterial(color: number): THREE.MeshStandardMaterial {
  * as a shelf of books at a glance without modeling individual spines. */
 function createBookshelfMesh(): THREE.Group {
   const group = new THREE.Group();
+  group.userData.surfaceMaterial = "wood";
   const wood = woodMaterial();
 
   const sideGeo = new THREE.BoxGeometry(SHELF_BOARD_THICKNESS, SHELF_HEIGHT, SHELF_DEPTH);

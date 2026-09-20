@@ -381,7 +381,10 @@ export function equipItem(world: World, camera: THREE.Camera, itemEid: number, s
 
   const mesh = itemType.createViewmodelMesh?.();
   if (mesh) {
-    const { pos, rot } = VIEWMODEL_OFFSET[slot];
+    const custom = itemType.viewmodelTransform;
+    const { pos, rot } = custom
+      ? { pos: custom.position, rot: custom.rotation }
+      : VIEWMODEL_OFFSET[slot];
     mesh.position.set(...pos);
     mesh.rotation.set(...rot);
     makeRenderOnTop(mesh);

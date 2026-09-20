@@ -81,7 +81,7 @@ const ITEM_PICKUP_RADIUS = 0.35;
  * `Object3DRef`, so hiding it on pickup (`pickUpItem` in
  * `ecs/systems/items.ts`) still hides both.
  */
-function withPickupHitbox(mesh: THREE.Object3D, eid: number): THREE.Group {
+export function withPickupHitbox(mesh: THREE.Object3D, eid: number): THREE.Group {
   mesh.userData.eid = eid;
   const hitbox = new THREE.Mesh(new THREE.SphereGeometry(ITEM_PICKUP_RADIUS, 8, 6));
   hitbox.visible = false;
@@ -144,7 +144,7 @@ function addPropCollider(physics: Physics, x: number, z: number, hx: number, hy:
  * `itemTypeId` set) — everything else (`Position`/`Object3DRef`/
  * `DynamicBody`/`PhysicsBody`/`PhysicsRotation`) is added here.
  */
-function buildItemWorldBody(world: World, physics: Physics, scene: THREE.Scene, eid: number, def: ItemAssetDef, x: number, y: number, z: number): void {
+export function buildItemWorldBody(world: World, physics: Physics, scene: THREE.Scene, eid: number, def: ItemAssetDef, x: number, y: number, z: number): void {
   addComponent(world, eid, Position);
   addComponent(world, eid, Object3DRef);
   addComponent(world, eid, DynamicBody);

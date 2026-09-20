@@ -14,6 +14,7 @@ const BARREL_CAP_HEIGHT = 0.15;
  */
 function createBarrelMesh(): THREE.Group {
   const group = new THREE.Group();
+  group.userData.surfaceMaterial = "wood";
   const mat = woodMaterial();
 
   const bulgeHeight = BARREL_HEIGHT - 2 * BARREL_CAP_HEIGHT;
