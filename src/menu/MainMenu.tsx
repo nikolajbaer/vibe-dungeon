@@ -10,7 +10,7 @@
  * placeholder for the level editor tracked in issue #14, rather than a
  * silently inert button.
  */
-export function MainMenu({ onPlay, onViewTiles }: { onPlay: () => void; onViewTiles: () => void }) {
+export function MainMenu({ onPlay, onCombatTest, onViewTiles }: { onPlay: () => void; onCombatTest: () => void; onViewTiles: () => void }) {
   return (
     <div class="menu-root" data-testid="menu-root">
       <div class="menu-panel">
@@ -23,6 +23,9 @@ export function MainMenu({ onPlay, onViewTiles }: { onPlay: () => void; onViewTi
             onClick={onPlay}
           >
             Play
+          </button>
+          <button type="button" class="menu-btn" data-testid="menu-combat-test" onClick={onCombatTest}>
+            Combat Test
           </button>
           <button
             type="button"

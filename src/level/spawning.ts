@@ -327,7 +327,8 @@ const HUMANOID_HEIGHT = 1.79;
  * if a spawn references an unknown archetype id, an unknown item id in
  * `contents`, or a `contents` entry that's itself a container.
  */
-export function spawnNpcs(world: World, physics: Physics, scene: THREE.Scene, spawns: NpcSpawn[]): void {
+export function spawnNpcs(world: World, physics: Physics, scene: THREE.Scene, spawns: NpcSpawn[]): number[] {
+  const spawned: number[] = [];
   for (const spawn of spawns) {
     const archetype = NPC_REGISTRY[spawn.id];
     if (!archetype) throw new Error(`spawnNpcs: unknown NPC archetype id "${spawn.id}"`);
@@ -373,6 +374,8 @@ export function spawnNpcs(world: World, physics: Physics, scene: THREE.Scene, sp
     NPC.drawRemaining[eid] = 0;
     NPC.provocationHits[eid] = 0;
     NPC.provoked[eid] = 0;
+    NPC.moveSpeed[eid] = 0;
+    NPC.testStyle[eid] = undefined;
     Health.current[eid] = archetype.health;
     Health.max[eid] = archetype.health;
     Combat.attackRecovery[eid] = 0;
@@ -393,7 +396,9 @@ export function spawnNpcs(world: World, physics: Physics, scene: THREE.Scene, sp
     for (const entry of spawn.contents ?? []) {
       spawnContentsItem(world, `spawnNpcs: "${spawn.id}"`, eid, entry, false);
     }
+    spawned.push(eid);
   }
+  return spawned;
 }
 
 /**

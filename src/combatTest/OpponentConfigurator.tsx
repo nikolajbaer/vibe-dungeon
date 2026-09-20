@@ -1,0 +1,74 @@
+import { useState } from "preact/hooks";
+
+export type OpponentStyle = "aggressive" | "defensive" | "passive";
+export type OpponentWeapon = "unarmed" | "dagger" | "sword" | "wooden_sword";
+
+export interface OpponentConfig {
+  health: number;
+  speed: number;
+  weapon: OpponentWeapon;
+  style: OpponentStyle;
+}
+
+export function OpponentConfigurator({ onSpawn, onOpenChange }: { onSpawn(config: OpponentConfig): void; onOpenChange(open: boolean): void }) {
+  const [open, setOpen] = useState(true);
+  const [health, setHealth] = useState(60);
+  const [speed, setSpeed] = useState(2.5);
+  const [weapon, setWeapon] = useState<OpponentWeapon>("sword");
+  const [style, setStyle] = useState<OpponentStyle>("aggressive");
+
+  return (
+    <div class="opponent-config-root">
+      {!open && (
+        <button type="button" class="opponent-config-open" data-testid="opponent-config-open" onClick={() => { setOpen(true); onOpenChange(true); }}>
+          Configure opponent
+        </button>
+      )}
+      {open && (
+        <div class="opponent-config-backdrop">
+          <form
+            class="opponent-config-panel"
+            data-testid="opponent-config-panel"
+            onSubmit={(event) => {
+              event.preventDefault();
+              onSpawn({ health, speed, weapon, style });
+              setOpen(false);
+              onOpenChange(false);
+            }}
+          >
+            <h2>Configure opponent</h2>
+            <label class="opponent-config-field">
+              <span>Health <output>{health}</output></span>
+              <input type="range" min="10" max="200" step="5" value={health} onInput={(e) => setHealth(Number(e.currentTarget.value))} />
+            </label>
+            <label class="opponent-config-field">
+              <span>Speed <output>{speed.toFixed(1)} m/s</output></span>
+              <input type="range" min="0.5" max="5" step="0.1" value={speed} onInput={(e) => setSpeed(Number(e.currentTarget.value))} />
+            </label>
+            <label class="opponent-config-field">
+              <span>Weapon</span>
+              <select value={weapon} onChange={(e) => setWeapon(e.currentTarget.value as OpponentWeapon)}>
+                <option value="unarmed">Unarmed</option>
+                <option value="dagger">Dagger</option>
+                <option value="sword">Sword</option>
+                <option value="wooden_sword">Wooden sword</option>
+              </select>
+            </label>
+            <label class="opponent-config-field">
+              <span>Style</span>
+              <select value={style} onChange={(e) => setStyle(e.currentTarget.value as OpponentStyle)}>
+                <option value="aggressive">Aggressive</option>
+                <option value="defensive">Defensive</option>
+                <option value="passive">Passive</option>
+              </select>
+            </label>
+            <div class="opponent-config-actions">
+              <button type="button" onClick={() => { setOpen(false); onOpenChange(false); }}>Cancel</button>
+              <button type="submit" data-testid="opponent-config-spawn">Spawn</button>
+            </div>
+          </form>
+        </div>
+      )}
+    </div>
+  );
+}

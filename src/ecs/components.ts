@@ -191,6 +191,10 @@ export const NPC = {
   provocationHits: [] as number[],
   /** Set after the second friendly-fire hit; uses the aggressive state path. */
   provoked: [] as number[],
+  /** Per-instance chase speed override used by configurable test opponents. */
+  moveSpeed: [] as number[],
+  /** Empty for ordinary NPCs; controls combat-room behavior when present. */
+  testStyle: [] as ("aggressive" | "defensive" | "passive" | undefined)[],
 };
 
 /** Hit points. Added ahead of real combat (#16) so the HUD health bar (#23)
