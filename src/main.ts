@@ -15,7 +15,12 @@ import { initPhysics } from "./physics/world";
 const container = document.getElementById("app")!;
 
 function showMenu(): void {
-  mountMainMenu(container, () => startGame(container), () => startLevelViewer(container, showMenu));
+  mountMainMenu(
+    container,
+    () => startGame(container),
+    () => startGame(container, { mode: "combat-test" }),
+    () => startLevelViewer(container, showMenu),
+  );
 }
 
 // Rapier is WASM and has to finish loading before either mode can build a
@@ -26,7 +31,9 @@ function showMenu(): void {
 initPhysics().then(() => {
   if (sessionStorage.getItem("vibe-dungeon-restart") === "1") {
     sessionStorage.removeItem("vibe-dungeon-restart");
-    startGame(container);
+    const mode = sessionStorage.getItem("vibe-dungeon-restart-mode") === "combat-test" ? "combat-test" : "dungeon";
+    sessionStorage.removeItem("vibe-dungeon-restart-mode");
+    startGame(container, { mode });
   } else {
     showMenu();
   }

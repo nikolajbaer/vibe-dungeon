@@ -14,7 +14,7 @@ import { requestGameFullscreen } from "./fullscreen";
  * (unmounted and removed from the DOM), so the caller can safely start the
  * chosen mode right away.
  */
-export function mountMainMenu(container: HTMLElement, onPlay: () => void, onViewTiles: () => void): void {
+export function mountMainMenu(container: HTMLElement, onPlay: () => void, onCombatTest: () => void, onViewTiles: () => void): void {
   const el = document.createElement("div");
   el.id = "menu-overlay";
   container.appendChild(el);
@@ -34,6 +34,11 @@ export function mountMainMenu(container: HTMLElement, onPlay: () => void, onView
     dismiss();
     onViewTiles();
   };
+  const handleCombatTest = () => {
+    requestGameFullscreen(container);
+    dismiss();
+    onCombatTest();
+  };
 
-  render(<MainMenu onPlay={handlePlay} onViewTiles={handleViewTiles} />, el);
+  render(<MainMenu onPlay={handlePlay} onCombatTest={handleCombatTest} onViewTiles={handleViewTiles} />, el);
 }

@@ -1,8 +1,8 @@
 import * as THREE from "three";
 import Stats from "three/examples/jsm/libs/stats.module.js";
-import { addComponent, addEntity, createWorld, hasComponent } from "bitecs";
+import { addComponent, addEntity, createWorld, hasComponent, removeComponent } from "bitecs";
 import { query } from "bitecs";
-import { Position, Velocity, Rotation, CharacterBody, DynamicBody, PhysicsBody, PhysicsCollider, PhysicsRotation, RenderOffsetY, PlayerControlled, Object3DRef, Door, Dead, DeathSector, Health, Combat, Practice, NPC, Item, Carried, Readable, Container, Stackable } from "./ecs/components";
+import { Position, Velocity, Rotation, CharacterBody, DynamicBody, PhysicsBody, PhysicsCollider, PhysicsRotation, RenderOffsetY, PlayerControlled, Object3DRef, Door, Dead, DeathSector, Health, Combat, Practice, NPC, NpcState, Item, Carried, Readable, Container, Stackable } from "./ecs/components";
 import { getPlayerMoveSpeed, inputSystem, setPlayerMoveSpeed } from "./ecs/systems/input";
 import { characterSystem, physicsSyncSystem, teleportCharacter } from "./ecs/systems/character";
 import { dynamicSyncSystem } from "./ecs/systems/dynamics";
@@ -18,7 +18,8 @@ import { equipItem, equipToOpenHandSlot, giveItem, isHandSlot, unequipItem, view
 import { syncSystem } from "./ecs/systems/sync";
 import { hudSync } from "./ecs/systems/hudSync";
 import { buildLevel } from "./level/level";
-import { dropCarriedItem } from "./level/spawning";
+import { dropCarriedItem, spawnNpcs } from "./level/spawning";
+import { buildCombatTestLevel } from "./level/combatTestLevel";
 import { floorForY } from "./level/tiles";
 import { ALL_ITEM_SPAWNS } from "./level/rooms";
 import { Keyboard } from "./input/keyboard";
@@ -38,6 +39,8 @@ import { mountContainer } from "./container/mount";
 import { containerSync } from "./container/sync";
 import { containerStore, type ContainerActions } from "./container/store";
 import { generateItemIcons } from "./assets/itemIcons";
+import { mountOpponentConfigurator } from "./combatTest/mount";
+import type { OpponentConfig, OpponentWeapon } from "./combatTest/OpponentConfigurator";
 
 const EYE_HEIGHT = 1.6; // camera height above the player's feet
 // How far in front of the player (meters) and how far above their feet a
@@ -67,7 +70,12 @@ const NPC_STATE_NAMES = ["LOITERING", "FOLLOWING", "CHASING", "ATTACKING"];
  * core game loop (input -> npc -> npc-animation -> movement -> collision ->
  * interact -> sync-to-render -> hud/inventory-sync -> render). This replaces
  * the hello-world "rotate a cube" loop from the scaffold. */
-export function startGame(container: HTMLElement): void {
+export interface StartGameOptions {
+  mode?: "dungeon" | "combat-test";
+}
+
+export function startGame(container: HTMLElement, options: StartGameOptions = {}): void {
+  const gameMode = options.mode ?? "dungeon";
   const scene = new THREE.Scene();
   scene.background = new THREE.Color(0x11131a);
 
@@ -138,17 +146,19 @@ export function startGame(container: HTMLElement): void {
   // bug this time) — torch-adjacent walls stay dramatically brighter by
   // comparison either way, so the mood/contrast holds at both settings.
   // Doubled again (1.3->2.6, 0.8->1.6) per further "still too dark" feedback.
-  // The always-present fill is now 5.8 after another readability pass.
+  // The always-present fill is now 8 after another readability pass.
   // Torches and the held lantern still provide warm local contrast, while
   // the in-game debug slider can tune this live over a practical 0–12 range.
-  const ambientLight = new THREE.AmbientLight(0x3a4a6b, 5.8);
+  const ambientLight = new THREE.AmbientLight(0x3a4a6b, 8);
   scene.add(ambientLight);
   const skyFill = new THREE.HemisphereLight(0x3a4a6b, 0x241f1a, 1.6);
   scene.add(skyFill);
 
   const world = createWorld();
   const physics = createPhysics();
-  const level = buildLevel(world, physics, scene);
+  const level = gameMode === "combat-test"
+    ? buildCombatTestLevel(world, physics, scene)
+    : buildLevel(world, physics, scene);
 
   const player = addEntity(world);
   addComponent(world, player, Position);
@@ -608,6 +618,39 @@ export function startGame(container: HTMLElement): void {
   mountDialogue(container);
   mountNotice(container);
   mountContainer(container);
+  let combatConfigOpen = false;
+  let activeTestOpponent: number | undefined;
+  let testOpponentDeathTime = 0;
+  const removeTestOpponent = (eid: number) => {
+    Object3DRef[eid]?.removeFromParent();
+    PhysicsBody[eid]?.setEnabled(false);
+    DeathSector.sectorId[eid] = undefined;
+    NPC.testStyle[eid] = undefined;
+    if (hasComponent(world, eid, NPC)) removeComponent(world, eid, NPC);
+    if (activeTestOpponent === eid) activeTestOpponent = undefined;
+  };
+  const spawnTestOpponent = (config: OpponentConfig) => {
+    if (activeTestOpponent !== undefined) removeTestOpponent(activeTestOpponent);
+    const archetypeForWeapon: Record<OpponentWeapon, string> = {
+      unarmed: "villager",
+      dagger: "bandit",
+      sword: "guard",
+      wooden_sword: "weapons-master",
+    };
+    const [eid] = spawnNpcs(world, physics, scene, [{ id: archetypeForWeapon[config.weapon], x: 0, z: -2 }]);
+    activeTestOpponent = eid;
+    testOpponentDeathTime = 0;
+    Health.current[eid] = config.health;
+    Health.max[eid] = config.health;
+    NPC.moveSpeed[eid] = config.speed;
+    NPC.testStyle[eid] = config.style;
+    NPC.provocationHits[eid] = config.style === "defensive" ? 1 : 0;
+    NPC.provoked[eid] = config.style === "aggressive" ? 1 : 0;
+    Combat.agility[eid] = config.style === "defensive" ? 0.7 : config.style === "aggressive" ? 0.2 : 0;
+  };
+  if (gameMode === "combat-test") {
+    mountOpponentConfigurator(container, spawnTestOpponent, (open) => { combatConfigOpen = open; });
+  }
   mountInGameMenu(container, {
     initialFov: camera.fov,
     initialAmbient: ambientLight.intensity,
@@ -622,6 +665,7 @@ export function startGame(container: HTMLElement): void {
     onWalkSpeedChange: setPlayerMoveSpeed,
     onRestart() {
       sessionStorage.setItem("vibe-dungeon-restart", "1");
+      sessionStorage.setItem("vibe-dungeon-restart-mode", gameMode);
       window.location.reload();
     },
     onMainMenu() {
@@ -684,7 +728,7 @@ export function startGame(container: HTMLElement): void {
     // "not open yet" value (this was the actual villager-killing bug: a tap
     // that opened dialogue and a same-frame attack both used one value
     // computed before the dialogue existed).
-    const isModalActive = () => dialogueStore.isOpen || noticeStore.isOpen || containerStore.isOpen || hudStore.playerDefeated;
+    const isModalActive = () => dialogueStore.isOpen || noticeStore.isOpen || containerStore.isOpen || hudStore.playerDefeated || combatConfigOpen;
 
     const modalActive = isModalActive();
     if (modalActive) {
@@ -723,6 +767,25 @@ export function startGame(container: HTMLElement): void {
       }
       if (steps === MAX_PHYSICS_STEPS_PER_FRAME) accumulator = 0;
       resolvePractice();
+    }
+    if (gameMode === "combat-test") {
+      // Combat test defeats are non-terminal: stop the opponent, restore the
+      // player immediately, and leave the opponent available for inspection.
+      if (Health.current[player] <= 0 || hasComponent(world, player, Dead)) {
+        Health.current[player] = Health.max[player];
+        if (hasComponent(world, player, Dead)) removeComponent(world, player, Dead);
+        if (activeTestOpponent !== undefined && hasComponent(world, activeTestOpponent, NPC)) {
+          NPC.testStyle[activeTestOpponent] = "passive";
+          NPC.provoked[activeTestOpponent] = 0;
+          NPC.state[activeTestOpponent] = NpcState.LOITERING;
+          Velocity.x[activeTestOpponent] = 0;
+          Velocity.z[activeTestOpponent] = 0;
+        }
+      }
+      if (activeTestOpponent !== undefined && hasComponent(world, activeTestOpponent, Dead)) {
+        testOpponentDeathTime += dt;
+        if (testOpponentDeathTime >= 5) removeTestOpponent(activeTestOpponent);
+      }
     }
     // Runs every frame regardless of `modalActive` — see its own doc
     // comment for why a death/hit one-shot has to keep playing through a

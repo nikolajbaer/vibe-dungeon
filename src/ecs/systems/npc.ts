@@ -72,6 +72,25 @@ export function npcSystem(world: World, dt: number): void {
     }
 
     const archetype = NPC_REGISTRY[NPC.archetypeId[eid]];
+    const testStyle = NPC.testStyle[eid];
+    if (testStyle === "passive") {
+      Velocity.x[eid] = 0;
+      Velocity.z[eid] = 0;
+      NPC.state[eid] = NpcState.LOITERING;
+      continue;
+    }
+    if (testStyle === "aggressive") {
+      updateAggressive(world, eid, playerEid, archetype, dt, true);
+      continue;
+    }
+    if (testStyle === "defensive") {
+      if (NPC.provoked[eid]) updateAggressive(world, eid, playerEid, archetype, dt, true);
+      else {
+        Velocity.x[eid] = 0;
+        Velocity.z[eid] = 0;
+      }
+      continue;
+    }
     const sparring = hasComponent(world, eid, Practice) && !!Practice.active[eid];
     if (archetype?.behavior === "aggressive" || sparring || !!NPC.provoked[eid]) {
       updateAggressive(world, eid, playerEid, archetype, dt, sparring);
@@ -174,7 +193,7 @@ function updateAggressive(world: World, eid: number, playerEid: number | undefin
 
   if (distToPlayer > attackRange) {
     NPC.state[eid] = NpcState.CHASING;
-    seekPlayer(eid, playerEid, archetype.chaseSpeed ?? FOLLOW_SPEED, attackRange);
+    seekPlayer(eid, playerEid, NPC.moveSpeed[eid] || archetype.chaseSpeed || FOLLOW_SPEED, attackRange);
     return;
   }
 
