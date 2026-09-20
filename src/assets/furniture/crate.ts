@@ -22,6 +22,7 @@ export const CRATE_HEIGHT = CRATE_SIZE;
  * top face (so it doesn't read as a bare cube next to stone walls). */
 function createCrateMesh(): THREE.Group {
   const group = new THREE.Group();
+  group.userData.surfaceMaterial = "wood";
   const mat = crateMaterial();
 
   const body = new THREE.Mesh(new THREE.BoxGeometry(CRATE_SIZE, CRATE_SIZE, CRATE_SIZE), mat);

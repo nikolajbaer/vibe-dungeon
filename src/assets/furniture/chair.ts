@@ -13,6 +13,7 @@ const CHAIR_LEG_SIZE = 0.05;
  * `PropPlacement.rotation`) to face it toward a table. */
 function createChairMesh(): THREE.Group {
   const group = new THREE.Group();
+  group.userData.surfaceMaterial = "wood";
   const mat = woodMaterial();
 
   const legHeight = CHAIR_SEAT_HEIGHT - CHAIR_SEAT_THICKNESS;

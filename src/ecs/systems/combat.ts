@@ -60,6 +60,17 @@ function weaponClassFor(world: World, eid: number): WeaponClass {
   return getEquippedWeapon(world, eid)?.weaponClass ?? "unarmed";
 }
 
+function recordFriendlyFire(world: World, targetEid: number, attackerEid?: number): void {
+  if (attackerEid === undefined || !hasComponent(world, attackerEid, PlayerControlled)
+      || !hasComponent(world, targetEid, NPC) || NPC.provoked[targetEid] !== 0) return;
+  NPC.provocationHits[targetEid] = (NPC.provocationHits[targetEid] || 0) + 1;
+  if (NPC.provocationHits[targetEid] >= 2) {
+    NPC.provoked[targetEid] = 1;
+    NPC.state[targetEid] = NpcState.CHASING;
+    NPC.drawRemaining[targetEid] = .5;
+  }
+}
+
 /** Advances attack recovery and the startup/active/recovery phases of parry. */
 export function combatSystem(world: World, dt: number): void {
   for (const eid of query(world, [Combat])) {
@@ -115,20 +126,33 @@ export function applyMeleeDamage(world: World, targetEid: number, rawDamage: num
 
   // Friendly NPCs tolerate one accidental strike. A second real hit makes
   // them defend themselves using the same chase/attack path as hostiles.
-  if (attackerEid !== undefined && hasComponent(world, attackerEid, PlayerControlled)
-      && hasComponent(world, targetEid, NPC) && NPC.provoked[targetEid] === 0) {
-    NPC.provocationHits[targetEid] = (NPC.provocationHits[targetEid] || 0) + 1;
-    if (NPC.provocationHits[targetEid] >= 2) {
-      NPC.provoked[targetEid] = 1;
-      NPC.state[targetEid] = NpcState.CHASING;
-      NPC.drawRemaining[targetEid] = .5;
-    }
-  }
+  recordFriendlyFire(world, targetEid, attackerEid);
 
   if (Health.current[targetEid] <= 0) {
     addComponent(world, targetEid, Dead);
     triggerDeathCollapse(targetEid);
   } else if (mitigation === 0) {
+    triggerHitReaction(targetEid);
+  }
+  return damage;
+}
+
+/** Projectile damage bypasses melee parry detection but shares death/hit
+ * reactions and practice-health semantics with hand-to-hand attacks. */
+export function applyRangedDamage(world: World, targetEid: number, rawDamage: number, attackerEid?: number): number {
+  if (!hasComponent(world, targetEid, Health) || hasComponent(world, targetEid, Dead)) return 0;
+  const damage = Math.max(1, Math.round(rawDamage));
+  if (hasComponent(world, targetEid, Practice) && Practice.active[targetEid]) {
+    Practice.points[targetEid] = Math.max(0, Practice.points[targetEid] - damage);
+    triggerHitReaction(targetEid);
+    return damage;
+  }
+  Health.current[targetEid] = Math.max(0, Health.current[targetEid] - damage);
+  recordFriendlyFire(world, targetEid, attackerEid);
+  if (Health.current[targetEid] <= 0) {
+    addComponent(world, targetEid, Dead);
+    triggerDeathCollapse(targetEid);
+  } else {
     triggerHitReaction(targetEid);
   }
   return damage;

@@ -3,7 +3,7 @@ import type { RoomContent } from "../placementTypes";
 // The training wing (training wing task): a short sequence of new rooms
 // branching off `side-chamber.ts`'s room, east into open space (nothing
 // else occupies x>18 anywhere in the level yet) — a melee training room, a
-// ranged training room (dressed for a mechanic that doesn't exist yet), an
+// ranged training room with recoverable crossbow bolts, an
 // equipment display room, and a small locked "lockpicking" alcove, all
 // fanning out from one central hub.
 //
@@ -125,8 +125,8 @@ const trainingWing: RoomContent = {
     { id: "target-dummy", x: 29.0, z: 8.0 },
     { id: "target-dummy", x: 31.0, z: 7.0 },
 
-    // --- Ranged training room: crates standing in for target bales (no
-    // real ranged mechanic exists yet -- see the readable below), clear of
+    // --- Ranged training room: wooden crates make useful bolt-sticking
+    // targets, clear of
     // the door (north wall, z~-9) by keeping these toward the south wall. ---
     { id: "crate", x: 32.0, z: -10.5, rotation: 0.1 },
     { id: "crate", x: 34.0, z: -11.0, rotation: -0.2 },
@@ -144,6 +144,8 @@ const trainingWing: RoomContent = {
   ],
   items: [
     { id: "wooden_sword", x: 32.0, z: 4.5, y: .7 },
+    { id: "crossbow", x: 33.0, z: -9.8, y: .75 },
+    { id: "bolt", x: 33.45, z: -9.8, y: .75, count: 12 },
     // Rusty key for the lockpick-nook's door, left out in the open in the
     // hub -- see `lockedDoors` above.
     { id: "rusty_key", x: 31.5, z: -1.0 },
@@ -183,9 +185,9 @@ const trainingWing: RoomContent = {
       x: 35.7,
       z: -8.0,
       rotation: -Math.PI / 2, // east wall of ranged-room
-      title: "Ranged Training -- Coming Soon",
+      title: "Ranged Training",
       pages: [
-        "The targets are up, but there's nothing yet to shoot with.\n\nBows and arrows aren't ready -- check back another day.",
+        "Take the crossbow and bolts. Fired bolts can be recovered; those that strike wood remain embedded until collected.",
       ],
     },
   ],

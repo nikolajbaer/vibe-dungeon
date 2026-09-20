@@ -9,6 +9,7 @@ import { dynamicSyncSystem } from "./ecs/systems/dynamics";
 import { addCharacter, createPhysics, PHYSICS_DT } from "./physics/world";
 import { doorAnimationSystem, tryInteract } from "./ecs/systems/doors";
 import { combatSystem, tryMeleeAttack, tryParry, type AttackType } from "./ecs/systems/combat";
+import { getRangedCombatDebugState, rangedCombatSystem, tryFireRanged } from "./ecs/systems/rangedCombat";
 import { practiceSystem, startPractice } from "./ecs/systems/practice";
 import { npcSystem, toggleNpcFollow } from "./ecs/systems/npc";
 import { getNpcAnimationDebugState, npcAnimationSystem } from "./ecs/systems/npcAnimation";
@@ -453,6 +454,7 @@ export function startGame(container: HTMLElement): void {
       parryWindow: Combat.parryWindow[player],
       parryRecovery: Combat.parryRecovery[player],
     }),
+    getRangedCombatState: () => getRangedCombatDebugState(),
     getPracticeState: () => ({
       active: hasComponent(world, player, Practice) && !!Practice.active[player],
       points: Practice.points[player] ?? 0,
@@ -718,10 +720,14 @@ export function startGame(container: HTMLElement): void {
     else if (attackRequestedThisFrame || keyboard.consumeJustPressed("Digit1")) requestedAttack = "jab";
     else if (keyboard.consumeJustPressed("Digit2")) requestedAttack = "cross";
     else if (keyboard.consumeJustPressed("Digit3")) requestedAttack = "chop";
-    if (requestedAttack && !isModalActive()) tryMeleeAttack(world, camera, requestedAttack);
+    if (requestedAttack && !isModalActive()) {
+      const rangedResult = tryFireRanged(world, camera, scene);
+      if (rangedResult === "not-ranged") tryMeleeAttack(world, camera, requestedAttack);
+    }
     if ((keyboard.consumeJustPressed("KeyF") || touch.consumeParryRequest()) && !isModalActive()) tryParry(world);
     resolvePractice();
     viewmodelSwingSystem(dt);
+    if (!isModalActive()) rangedCombatSystem(world, physics, scene, dt);
 
     // Belt-and-suspenders alongside the pause above: if the NPC a dialogue
     // is open for ends up Dead by any other means, drop the dialogue rather

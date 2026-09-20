@@ -806,7 +806,7 @@ rather than assuming proximity alone finishes the encounter.
 ## Worked example: the training wing (branching off an already-branched room)
 
 The training wing (training wing task) adds four small rooms — melee,
-ranged (dressed for a mechanic that doesn't exist yet), equipment, and a
+ranged, equipment, and a
 locked "lockpicking" alcove — fanning out from one hub, branching east off
 `side-chamber.ts`'s room. See `rooms/training-wing.ts` for the full
 authored layout and cell-by-cell reasoning; this section covers the
@@ -861,11 +861,11 @@ above — the lockpicking nook's door needed addressing from its neighbor's
 cell/side, not its own, and that's now documented there rather than
 repeated here.
 
-**Deliberately out of scope, dressed but not functional:** the ranged
-training room has no real ranged-combat mechanic (none exists in this
-codebase yet) — it's crates standing in for target bales and a poster
-that says so outright, rather than a half-built mechanic. The equipment
-room has no buy/sell/trade system (also not implemented anywhere) — its
+**Functional ranged practice:** the ranged room now seeds a crossbow and a
+stack of recoverable bolts. Its wooden crates are real practice targets:
+bolts embed in wood, remain interactable, and merge back into the player's
+commodity-ammo stack when collected. The equipment room still has no
+buy/sell/trade system (also not implemented anywhere) — its
 quartermaster NPC (a second docile archetype, `quartermaster.ts`, same
 template as `villager.ts`) says plainly that trading isn't set up, and its
 display gear is just free-standing world items like any other pickup. The
