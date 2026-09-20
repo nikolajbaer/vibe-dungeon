@@ -353,12 +353,43 @@ function makeRenderOnTop(mesh: THREE.Object3D): void {
     if (!(obj instanceof THREE.Mesh)) return;
     obj.renderOrder = 999;
     const materials = Array.isArray(obj.material) ? obj.material : [obj.material];
-    obj.material = materials.map((m) => {
-      const clone = m.clone();
-      clone.depthTest = false;
-      clone.depthWrite = false;
-      return clone;
+    const viewmodelMaterials = materials.map((material) => {
+      // FPS items need a stable presentation independent of the dungeon's
+      // lighting. In particular, a lantern is parented beside the other held
+      // item and its PointLight used to blow out that weapon at close range.
+      // MeshBasicMaterial retains each authored part's colour/texture but
+      // deliberately ignores every scene light. This acts as the viewmodel's
+      // own persistent fill without changing the in-world copy's materials.
+      const source = material as THREE.Material & {
+        color?: THREE.Color;
+        map?: THREE.Texture | null;
+        emissive?: THREE.Color;
+        emissiveIntensity?: number;
+        alphaTest?: number;
+        vertexColors?: boolean;
+      };
+      const color = source.color?.clone() ?? new THREE.Color(0xffffff);
+      if (source.emissive) {
+        color.add(source.emissive.clone().multiplyScalar(source.emissiveIntensity ?? 1));
+      }
+      const stable = new THREE.MeshBasicMaterial({
+        color,
+        map: source.map ?? null,
+        side: material.side,
+        transparent: material.transparent,
+        opacity: material.opacity,
+        alphaTest: source.alphaTest ?? 0,
+        vertexColors: source.vertexColors ?? false,
+        fog: false,
+        toneMapped: false,
+      });
+      stable.depthTest = false;
+      stable.depthWrite = false;
+      return stable;
     });
+    // Preserve the original material shape. Assigning an array to geometry
+    // without material groups makes three.js draw nothing.
+    obj.material = Array.isArray(obj.material) ? viewmodelMaterials : viewmodelMaterials[0];
   });
 }
 
