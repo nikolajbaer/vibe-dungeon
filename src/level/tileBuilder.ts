@@ -28,7 +28,10 @@ import { addKinematicBox, addStaticBox, type Physics } from "../physics/world";
 // tile-generated walls above/below them, rather than hardcoding a second
 // copy of this that could silently drift out of sync.
 export const WALL_THICKNESS = 0.15; // half-thickness of a wall/door slab, meters
-const DOOR_HEIGHT = 2.2;
+const DOOR_SPRING_HEIGHT = 1.72;
+const DOOR_HEIGHT = 2.35; // apex of the arch
+const DOOR_ARCH_RISE = DOOR_HEIGHT - DOOR_SPRING_HEIGHT;
+const DOOR_FRAME_WIDTH = 0.16;
 
 /**
  * Adds a wall box spanning [cx-hx,cx+hx] x [cz-hz,cz+hz], from `baseY` up to
@@ -53,9 +56,113 @@ function addWall(physics: Physics, scene: THREE.Scene, cx: number, cz: number, h
   // from one.
   mesh.castShadow = true;
   mesh.receiveShadow = true;
+  mesh.userData.wallRun = true;
   scene.add(mesh);
 
   addStaticBox(physics, cx, centerY, cz, hx, height / 2, hz);
+}
+
+/** Low-poly arched leaf. `hingeSign` also identifies which half of the
+ * doorway this is, so the outer edge meets the spring and the inner edge
+ * rises to the shared apex. */
+export function createArchedDoorLeafGeometry(width: number, depth: number, hingeSign: number): THREE.ExtrudeGeometry {
+  const radius = width;
+  const centerY = DOOR_HEIGHT / 2;
+  const shape = new THREE.Shape();
+  shape.moveTo(-width / 2, -centerY);
+  shape.lineTo(width / 2, -centerY);
+  const samples = 6;
+  for (let i = 0; i <= samples; i++) {
+    const fromOuter = i / samples;
+    const u = hingeSign > 0 ? -radius * fromOuter : radius * (1 - fromOuter);
+    const localX = hingeSign > 0 ? u + radius / 2 : u - radius / 2;
+    const y = DOOR_SPRING_HEIGHT + DOOR_ARCH_RISE * Math.sqrt(Math.max(0, 1 - (u * u) / (radius * radius))) - centerY;
+    shape.lineTo(localX, y);
+  }
+  shape.closePath();
+  const geometry = new THREE.ExtrudeGeometry(shape, { depth, bevelEnabled: false, steps: 1, curveSegments: 2 });
+  geometry.translate(0, 0, -depth / 2);
+  geometry.computeVertexNormals();
+  return geometry;
+}
+
+function addDoorFrame(scene: THREE.Scene, orientation: "x" | "z", planeCoord: number, rangeStart: number, rangeEnd: number, floorBase: number): void {
+  const center = (rangeStart + rangeEnd) / 2;
+  const radius = (rangeEnd - rangeStart) / 2;
+  const depth = WALL_THICKNESS * 2 + .08;
+  const group = new THREE.Group();
+  group.name = "stoneDoorFrame";
+  group.userData.doorFrame = true;
+  group.position.set(orientation === "x" ? planeCoord : center, floorBase, orientation === "x" ? center : planeCoord);
+  if (orientation === "x") group.rotation.y = Math.PI / 2;
+
+  for (const x of [-radius - DOOR_FRAME_WIDTH / 2, radius + DOOR_FRAME_WIDTH / 2]) {
+    const jamb = new THREE.Mesh(new THREE.BoxGeometry(DOOR_FRAME_WIDTH, DOOR_SPRING_HEIGHT, depth), wallMaterial());
+    jamb.position.set(x, DOOR_SPRING_HEIGHT / 2, 0);
+    jamb.castShadow = jamb.receiveShadow = true;
+    group.add(jamb);
+  }
+  const archRadius = radius + DOOR_FRAME_WIDTH / 2;
+  const archPoints = Array.from({ length: 13 }, (_, i) => {
+    const u = -archRadius + i / 12 * archRadius * 2;
+    return new THREE.Vector3(u, DOOR_SPRING_HEIGHT + DOOR_ARCH_RISE * Math.sqrt(Math.max(0, 1 - (u * u) / (archRadius * archRadius))), 0);
+  });
+  const arch = new THREE.Mesh(
+    new THREE.TubeGeometry(new THREE.CatmullRomCurve3(archPoints), 20, DOOR_FRAME_WIDTH / 2, 4, false),
+    wallMaterial(),
+  );
+  arch.castShadow = arch.receiveShadow = true;
+  group.add(arch);
+  scene.add(group);
+}
+
+/** Stone infill between the curved opening and the rectangular wall above. */
+function addArchSpandrels(physics: Physics, scene: THREE.Scene, orientation: "x" | "z", planeCoord: number, rangeStart: number, rangeEnd: number, wallHeight: number, floorBase: number): void {
+  const radius = (rangeEnd - rangeStart) / 2;
+  const center = (rangeStart + rangeEnd) / 2;
+  const depth = WALL_THICKNESS * 2;
+  const shapeFor = (side: -1 | 1) => {
+    const shape = new THREE.Shape();
+    const outer = side * radius;
+    shape.moveTo(outer, DOOR_SPRING_HEIGHT);
+    shape.lineTo(outer, DOOR_HEIGHT);
+    shape.lineTo(0, DOOR_HEIGHT);
+    for (let i = 0; i <= 6; i++) {
+      const u = side * radius * (i / 6);
+      shape.lineTo(u, DOOR_SPRING_HEIGHT + DOOR_ARCH_RISE * Math.sqrt(Math.max(0, 1 - (u * u) / (radius * radius))));
+    }
+    shape.closePath();
+    return shape;
+  };
+  const geometry = new THREE.ExtrudeGeometry([shapeFor(-1), shapeFor(1)], { depth, bevelEnabled: false, steps: 1, curveSegments: 2 });
+  geometry.translate(0, 0, -depth / 2);
+  if (orientation === "x") geometry.rotateY(Math.PI / 2);
+  const mesh = new THREE.Mesh(geometry, wallMaterial());
+  mesh.name = "archedDoorSpandrel";
+  mesh.position.set(orientation === "x" ? planeCoord : center, floorBase, orientation === "x" ? center : planeCoord);
+  mesh.castShadow = mesh.receiveShadow = true;
+  scene.add(mesh);
+
+  // Approximate the curved underside with narrow columns. A single box from
+  // spring to apex would invisibly turn the arch back into a low rectangular
+  // doorway for the character controller.
+  const columns = 8;
+  const columnWidth = radius * 2 / columns;
+  for (let i = 0; i < columns; i++) {
+    const u = -radius + (i + .5) * columnWidth;
+    const curveY = DOOR_SPRING_HEIGHT + DOOR_ARCH_RISE * Math.sqrt(Math.max(0, 1 - (u * u) / (radius * radius)));
+    const columnHeight = DOOR_HEIGHT - curveY;
+    if (columnHeight <= 0) continue;
+    const along = center + u;
+    const y = floorBase + curveY + columnHeight / 2;
+    if (orientation === "x") addStaticBox(physics, planeCoord, y, along, WALL_THICKNESS, columnHeight / 2, columnWidth / 2);
+    else addStaticBox(physics, along, y, planeCoord, columnWidth / 2, columnHeight / 2, WALL_THICKNESS);
+  }
+  const headerHeight = wallHeight - DOOR_HEIGHT;
+  if (headerHeight > 0) {
+    if (orientation === "x") addWall(physics, scene, planeCoord, center, WALL_THICKNESS, radius, headerHeight, floorBase + DOOR_HEIGHT);
+    else addWall(physics, scene, center, planeCoord, radius, WALL_THICKNESS, headerHeight, floorBase + DOOR_HEIGHT);
+  }
 }
 
 const SLAB_HALF_THICKNESS = 0.1;
@@ -211,7 +318,9 @@ function addDoorLeaf(
   group.position.set(hingeX, closedY, hingeZ);
   scene.add(group);
 
-  const mesh = new THREE.Mesh(new THREE.BoxGeometry(hx * 2, DOOR_HEIGHT, hz * 2), doorMaterial(!!requiredItemTypeId));
+  const leafWidth = Math.max(hx * 2, hz * 2);
+  const mesh = new THREE.Mesh(createArchedDoorLeafGeometry(leafWidth, WALL_THICKNESS * 2, hingeSign), doorMaterial(!!requiredItemTypeId));
+  if (hz > hx) mesh.rotation.y = -Math.PI / 2;
   mesh.position.set(offsetX, 0, offsetZ);
   group.add(mesh);
 
@@ -268,17 +377,8 @@ function addDoorPair(world: World, physics: Physics, scene: THREE.Scene, orienta
   }
   Door.pairId[eidA] = eidA;
   Door.pairId[eidB] = eidA;
-
-  const headerHeight = wallHeight - DOOR_HEIGHT;
-  if (headerHeight > 0) {
-    const cRange = (rangeStart + rangeEnd) / 2;
-    const hRange = (rangeEnd - rangeStart) / 2;
-    if (orientation === "x") {
-      addWall(physics, scene, planeCoord, cRange, WALL_THICKNESS, hRange, headerHeight, floorBase + DOOR_HEIGHT);
-    } else {
-      addWall(physics, scene, cRange, planeCoord, hRange, WALL_THICKNESS, headerHeight, floorBase + DOOR_HEIGHT);
-    }
-  }
+  addArchSpandrels(physics, scene, orientation, planeCoord, rangeStart, rangeEnd, wallHeight, floorBase);
+  addDoorFrame(scene, orientation, planeCoord, rangeStart, rangeEnd, floorBase);
 }
 
 interface InstanceBounds {
@@ -378,6 +478,29 @@ function cornerKey(cellX: number, cellZ: number): string {
  */
 const TORCHES_PER_ROOM = 2;
 
+export function mergeCollinearWallSegments(segments: Segment[]): Array<{ seg: Segment; start: number; end: number }> {
+  const grouped = new Map<string, Segment[]>();
+  for (const seg of segments) {
+    const key = `${seg.orientation}:${seg.planeCell}:${seg.floor}:${seg.wallHeight}`;
+    const list = grouped.get(key);
+    if (list) list.push(seg); else grouped.set(key, [seg]);
+  }
+  const runs: Array<{ seg: Segment; start: number; end: number }> = [];
+  for (const list of grouped.values()) {
+    list.sort((a, b) => a.rangeStartCell - b.rangeStartCell);
+    let previous: { seg: Segment; start: number; end: number } | undefined;
+    for (const seg of list) {
+      if (previous?.end === seg.rangeStartCell) {
+        previous.end++;
+      } else {
+        previous = { seg, start: seg.rangeStartCell, end: seg.rangeStartCell + 1 };
+        runs.push(previous);
+      }
+    }
+  }
+  return runs;
+}
+
 function pickTorchSegments(segments: Segment[]): Set<Segment> {
   const byInstance = new Map<string, Segment[]>();
   for (const seg of segments) {
@@ -414,35 +537,39 @@ function emitWalls(physics: Physics, scene: THREE.Scene, segments: Segment[]): v
 
   const torchSegments = pickTorchSegments(segments);
 
-  for (const seg of segments) {
-    let rangeStart = seg.rangeStartCell * UNIT;
-    let rangeEnd = (seg.rangeStartCell + 1) * UNIT;
-    const planeCoord = seg.planeCell * UNIT;
-    // Torch position uses the segment's original (pre-extension) midpoint so
-    // corner mitering never nudges it visibly off-center on its wall face.
-    const along = (seg.rangeStartCell + 0.5) * UNIT;
+  // Collapse adjacent collinear unit segments into one continuous box.
+  // Besides reducing draw calls/colliders, this removes the coincident end
+  // caps that used to shimmer as z-fighting seams down otherwise-flat walls.
+  const runs = mergeCollinearWallSegments(segments);
 
+  for (const { seg, start, end } of runs) {
+    let rangeStart = start * UNIT;
+    let rangeEnd = end * UNIT;
+    const planeCoord = seg.planeCell * UNIT;
     const floorBase = floorBaseline(seg.floor);
 
     if (seg.orientation === "x") {
-      if (zWallCorners.has(cornerKey(seg.planeCell, seg.rangeStartCell))) rangeStart -= WALL_THICKNESS;
-      if (zWallCorners.has(cornerKey(seg.planeCell, seg.rangeStartCell + 1))) rangeEnd += WALL_THICKNESS;
+      if (zWallCorners.has(cornerKey(seg.planeCell, start))) rangeStart -= WALL_THICKNESS;
+      if (zWallCorners.has(cornerKey(seg.planeCell, end))) rangeEnd += WALL_THICKNESS;
       const cz = (rangeStart + rangeEnd) / 2;
       const hz = (rangeEnd - rangeStart) / 2;
       addWall(physics, scene, planeCoord, cz, WALL_THICKNESS, hz, seg.wallHeight, floorBase);
-      if (torchSegments.has(seg)) {
-        addTorch(scene, planeCoord + seg.interiorSign * WALL_THICKNESS, along, seg.wallHeight, "x", seg.interiorSign, floorBase);
-      }
     } else {
-      if (xWallCorners.has(cornerKey(seg.rangeStartCell, seg.planeCell))) rangeStart -= WALL_THICKNESS;
-      if (xWallCorners.has(cornerKey(seg.rangeStartCell + 1, seg.planeCell))) rangeEnd += WALL_THICKNESS;
+      if (xWallCorners.has(cornerKey(start, seg.planeCell))) rangeStart -= WALL_THICKNESS;
+      if (xWallCorners.has(cornerKey(end, seg.planeCell))) rangeEnd += WALL_THICKNESS;
       const cx = (rangeStart + rangeEnd) / 2;
       const hx = (rangeEnd - rangeStart) / 2;
       addWall(physics, scene, cx, planeCoord, hx, WALL_THICKNESS, seg.wallHeight, floorBase);
-      if (torchSegments.has(seg)) {
-        addTorch(scene, along, planeCoord + seg.interiorSign * WALL_THICKNESS, seg.wallHeight, "z", seg.interiorSign, floorBase);
-      }
     }
+  }
+
+  // Torch ownership remains tied to the original authored room segments,
+  // even though their underlying stone is now emitted as longer runs.
+  for (const seg of torchSegments) {
+    const along = (seg.rangeStartCell + .5) * UNIT;
+    const floorBase = floorBaseline(seg.floor);
+    if (seg.orientation === "x") addTorch(scene, seg.planeCell * UNIT + seg.interiorSign * WALL_THICKNESS, along, seg.wallHeight, "x", seg.interiorSign, floorBase);
+    else addTorch(scene, along, seg.planeCell * UNIT + seg.interiorSign * WALL_THICKNESS, seg.wallHeight, "z", seg.interiorSign, floorBase);
   }
 }
 
