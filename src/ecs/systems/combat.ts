@@ -3,6 +3,7 @@ import { addComponent, hasComponent, query, type World } from "bitecs";
 import { Carried, Combat, Dead, Health, Item, NPC, NpcState, Object3DRef, PlayerControlled, Practice } from "../components";
 import { ITEM_REGISTRY } from "../../assets/itemRegistry";
 import { isHandSlot, triggerViewmodelParry, triggerViewmodelSwing } from "./items";
+import { playFirstPersonAttack } from "./firstPersonArms";
 import { triggerDeathCollapse, triggerHitReaction, triggerParry } from "./npcAnimation";
 
 export type AttackType = "jab" | "cross" | "chop";
@@ -95,6 +96,7 @@ export function tryParry(world: World, defenderEid?: number): boolean {
   const weapon = getEquippedWeapon(world, eid);
   Combat.parryMitigation[eid] = PARRY_MITIGATION[weapon?.weaponClass ?? "unarmed"];
   if (weapon) triggerViewmodelParry(weapon.itemEid, PARRY_RECOVERY);
+  else playFirstPersonAttack("parry", false);
   triggerParry(eid);
   return true;
 }
@@ -168,6 +170,7 @@ export function tryMeleeAttack(world: World, camera: THREE.Camera, attackType: A
   const weapon = getEquippedWeapon(world, attackerEid);
   Combat.attackRecovery[attackerEid] = profile.recovery;
   if (weapon) triggerViewmodelSwing(weapon.itemEid, attackType, profile.recovery);
+  else playFirstPersonAttack(attackType, false);
 
   const targets: THREE.Object3D[] = [];
   for (const eid of query(world, [Health, Object3DRef])) {

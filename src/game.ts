@@ -37,6 +37,7 @@ import { mountContainer } from "./container/mount";
 import { containerSync } from "./container/sync";
 import { containerStore, type ContainerActions } from "./container/store";
 import { generateItemIcons } from "./assets/itemIcons";
+import { firstPersonArmsSystem, getFirstPersonArmsDebugState, initFirstPersonArms } from "./ecs/systems/firstPersonArms";
 
 const EYE_HEIGHT = 1.6; // camera height above the player's feet
 // How far in front of the player (meters) and how far above their feet a
@@ -73,6 +74,7 @@ export function startGame(container: HTMLElement): void {
   const camera = new THREE.PerspectiveCamera(70, window.innerWidth / window.innerHeight, 0.05, 100);
   camera.rotation.order = "YXZ";
   scene.add(camera);
+  initFirstPersonArms(camera);
 
   const renderer = new THREE.WebGLRenderer({ antialias: true });
   renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
@@ -493,6 +495,7 @@ export function startGame(container: HTMLElement): void {
     // (see equipItem in ecs/systems/items.ts), so its child count doubles
     // as "how many viewmodels are currently shown".
     getViewmodelCount: () => camera.children.length,
+    getFirstPersonArmsState: () => getFirstPersonArmsDebugState(),
     // Every current viewmodel's camera-relative transform plus its
     // renderOrder -- for automated (Playwright) testing of attack
     // animations (e.g. confirming a weapon's rotation stays fixed through a
@@ -729,6 +732,7 @@ export function startGame(container: HTMLElement): void {
     if ((keyboard.consumeJustPressed("KeyF") || touch.consumeParryRequest()) && !isModalActive()) tryParry(world);
     resolvePractice();
     viewmodelSwingSystem(dt);
+    firstPersonArmsSystem(dt);
     if (!isModalActive()) rangedCombatSystem(world, physics, scene, dt);
 
     // Belt-and-suspenders alongside the pause above: if the NPC a dialogue
