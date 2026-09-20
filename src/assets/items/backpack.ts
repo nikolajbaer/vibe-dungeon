@@ -32,6 +32,11 @@ function strapMaterial(): THREE.MeshStandardMaterial {
   return (strapMat ??= new THREE.MeshStandardMaterial({ color: 0x3f2a1a, roughness: 0.85, metalness: 0 }));
 }
 
+let buckleMat: THREE.MeshStandardMaterial | undefined;
+function buckleMaterial(): THREE.MeshStandardMaterial {
+  return (buckleMat ??= new THREE.MeshStandardMaterial({ color: 0xb69245, roughness: .42, metalness: .65 }));
+}
+
 function createBackpackMesh(): THREE.Group {
   const group = new THREE.Group();
 
@@ -43,13 +48,36 @@ function createBackpackMesh(): THREE.Group {
   flap.position.set(0, BAG_HEIGHT - FLAP_HEIGHT / 2 + 0.02, 0);
   group.add(flap);
 
-  const strapCurve = new THREE.CatmullRomCurve3([
-    new THREE.Vector3(-BAG_WIDTH / 2, BAG_HEIGHT * 0.9, 0),
-    new THREE.Vector3(-BAG_WIDTH / 2 - 0.03, BAG_HEIGHT * 0.5, 0),
-    new THREE.Vector3(-BAG_WIDTH / 2, BAG_HEIGHT * 0.1, 0),
-  ]);
-  const strap = new THREE.Mesh(new THREE.TubeGeometry(strapCurve, 12, STRAP_RADIUS, 6, false), strapMaterial());
-  group.add(strap);
+  // Two thick bowed shoulder straps. Their curves sit just proud of the
+  // bag so the elliptical silhouettes remain visible from a 3/4 view.
+  for (const side of [-1, 1]) {
+    const x = side * BAG_WIDTH * .28;
+    const strapCurve = new THREE.CatmullRomCurve3([
+      new THREE.Vector3(x, BAG_HEIGHT * .88, BAG_DEPTH / 2 + .012),
+      new THREE.Vector3(x + side * .035, BAG_HEIGHT * .52, BAG_DEPTH / 2 + .04),
+      new THREE.Vector3(x, BAG_HEIGHT * .14, BAG_DEPTH / 2 + .012),
+    ]);
+    group.add(new THREE.Mesh(new THREE.TubeGeometry(strapCurve, 14, STRAP_RADIUS, 6, false), strapMaterial()));
+  }
+
+  const closure = new THREE.Mesh(new THREE.BoxGeometry(.035, .115, .014), strapMaterial());
+  closure.position.set(0, BAG_HEIGHT * .69, BAG_DEPTH / 2 + .065);
+  group.add(closure);
+
+  // Four simple bars make a readable square buckle without filling its
+  // center, even when the icon is rendered down to the phone UI.
+  const buckleY = BAG_HEIGHT * .57;
+  const buckleZ = BAG_DEPTH / 2 + .076;
+  for (const x of [-.025, .025]) {
+    const bar = new THREE.Mesh(new THREE.BoxGeometry(.007, .042, .009), buckleMaterial());
+    bar.position.set(x, buckleY, buckleZ);
+    group.add(bar);
+  }
+  for (const y of [-.018, .018]) {
+    const bar = new THREE.Mesh(new THREE.BoxGeometry(.057, .007, .009), buckleMaterial());
+    bar.position.set(0, buckleY + y, buckleZ);
+    group.add(bar);
+  }
 
   return group;
 }

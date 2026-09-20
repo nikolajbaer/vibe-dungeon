@@ -1,6 +1,7 @@
 import { containerStore } from "./store";
 import { useObserved } from "./useObserved";
 import { inventoryStore } from "../inventory/store";
+import { ItemIcon } from "../inventory/ItemIcon";
 
 /**
  * Container panel — shown whenever `containerStore` has an open container
@@ -74,7 +75,7 @@ export function ContainerPanel() {
                 title={`Take ${item.name}`}
                 onClick={() => tapTake(item)}
               >
-                <span class="inv-list-item-icon">{item.icon}</span>
+                <ItemIcon class="inv-list-item-icon" itemTypeId={item.itemTypeId} fallback={item.icon} />
                 {item.count !== undefined && <span class="inv-list-item-count">{item.count}</span>}
               </button>
             ))}
@@ -95,7 +96,7 @@ export function ContainerPanel() {
                 title={isLootOnly ? "Can't leave items on a corpse" : isFull ? "Storage is full" : `Store ${item.name}`}
                 onClick={() => tapGive(item)}
               >
-                <span class="inv-list-item-icon">{item.icon}</span>
+                <ItemIcon class="inv-list-item-icon" itemTypeId={item.itemTypeId} fallback={item.icon} />
                 {item.count !== undefined && <span class="inv-list-item-count">{item.count}</span>}
               </button>
             ))}
@@ -108,7 +109,7 @@ export function ContainerPanel() {
       {pendingTransfer && (
         <div class="container-transfer-overlay" data-testid="container-transfer">
           <div class="container-transfer-header">
-            <span class="inv-list-item-icon">{pendingTransfer.icon}</span>
+            <ItemIcon class="inv-list-item-icon" itemTypeId={pendingTransfer.itemTypeId} fallback={pendingTransfer.icon} />
             <span>{pendingTransfer.name}</span>
           </div>
           <div class="container-transfer-stepper">

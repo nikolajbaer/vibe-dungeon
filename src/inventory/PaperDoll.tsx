@@ -1,6 +1,7 @@
 import type { CarriedSlot } from "../ecs/components";
 import { inventoryStore } from "./store";
 import { useObserved } from "./useObserved";
+import { ItemIcon } from "./ItemIcon";
 
 /** The five paper-doll slots, in display order. Only the two hand slots
  * currently do anything (equip/unequip, viewmodel, and now — issue #47 —
@@ -61,7 +62,7 @@ export function PaperDoll() {
               else inventoryStore.tapSlot(slot);
             }}
           >
-            <span class="inv-slot-icon">{item?.icon ?? ""}</span>
+            {item && <ItemIcon class="inv-slot-icon" itemTypeId={item.itemTypeId} fallback={item.icon} />}
             <span class="inv-slot-label">{label}</span>
           </button>
         );

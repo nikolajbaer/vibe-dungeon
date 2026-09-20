@@ -36,6 +36,7 @@ import { noticeStore } from "./notice/store";
 import { mountContainer } from "./container/mount";
 import { containerSync } from "./container/sync";
 import { containerStore, type ContainerActions } from "./container/store";
+import { generateItemIcons } from "./assets/itemIcons";
 
 const EYE_HEIGHT = 1.6; // camera height above the player's feet
 // How far in front of the player (meters) and how far above their feet a
@@ -593,6 +594,7 @@ export function startGame(container: HTMLElement): void {
   const keyboard = new Keyboard();
   const pointerLook = new PointerLook(renderer.domElement);
   const touch = new TouchControls(container, renderer.domElement);
+  generateItemIcons();
   mountHud(container);
   mountInventory(container);
   mountDialogue(container);
