@@ -1,12 +1,12 @@
 import * as THREE from "three";
 import Stats from "three/examples/jsm/libs/stats.module.js";
-import { addComponent, addEntity, createWorld, hasComponent } from "bitecs";
+import { addComponent, addEntity, createWorld, hasComponent, removeComponent } from "bitecs";
 import { query } from "bitecs";
 import { Position, Velocity, Rotation, CharacterBody, DynamicBody, PhysicsBody, PhysicsCollider, PhysicsRotation, RenderOffsetY, PlayerControlled, Object3DRef, Door, Dead, DeathSector, Health, CarryCapacity, Combat, Stamina, Practice, NPC, Item, Carried, Readable, Container, Stackable } from "./ecs/components";
 import { getPlayerMoveSpeed, inputSystem, setPlayerMoveSpeed } from "./ecs/systems/input";
 import { characterSystem, physicsSyncSystem, teleportCharacter } from "./ecs/systems/character";
 import { dynamicSyncSystem } from "./ecs/systems/dynamics";
-import { addCharacter, createPhysics, PHYSICS_DT } from "./physics/world";
+import { addCharacter, CHARACTER_GROUPS, createPhysics, PHYSICS_DT } from "./physics/world";
 import { doorAnimationSystem, tryInteract } from "./ecs/systems/doors";
 import { applyMeleeDamage, combatSystem, setBlocking, tryMeleeAttack, type AttackType } from "./ecs/systems/combat";
 import { meleeCollisionSystem } from "./ecs/systems/meleeCollision";
@@ -358,6 +358,15 @@ export function startGame(container: HTMLElement, options: StartGameOptions = {}
       Velocity.x[player] = 0;
       Velocity.z[player] = 0;
       Health.current[player] = Health.max[player];
+      // A real (non-combat-test) death goes through the same applyMeleeDamage/
+      // applyRangedDamage path as an NPC's, which adds Dead and (see
+      // combat.ts's disableCorpseCollision) zeroes the player's own movement
+      // collider's collision groups so a corpse doesn't block traffic --
+      // both need undoing here, or a respawned player would carry Dead
+      // forever (tripping every hasComponent(..., Dead) check elsewhere) and
+      // stay a ghost nothing else can collide with.
+      if (hasComponent(world, player, Dead)) removeComponent(world, player, Dead);
+      PhysicsCollider[player]?.setCollisionGroups(CHARACTER_GROUPS);
     },
   };
   hudStore.bindActions(hudActions);

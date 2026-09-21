@@ -1,7 +1,7 @@
 import * as THREE from "three";
 import { hasComponent, removeComponent, type World } from "bitecs";
-import { Combat, Dead, DeathSector, Health, NPC, NpcState, Object3DRef, PhysicsBody, Position, Velocity } from "../ecs/components";
-import type { Physics } from "../physics/world";
+import { Combat, Dead, DeathSector, Health, NPC, NpcState, Object3DRef, PhysicsBody, PhysicsCollider, Position, Velocity } from "../ecs/components";
+import { CHARACTER_GROUPS, type Physics } from "../physics/world";
 import { spawnNpcs } from "../level/spawning";
 import { mountOpponentConfigurator, openOpponentConfigurator } from "./mount";
 import type { OpponentConfig, OpponentWeapon } from "./OpponentConfigurator";
@@ -133,7 +133,14 @@ export class CombatTestSandbox {
     // the player immediately, and leave the opponents available for inspection.
     if (Health.current[player] <= 0 || hasComponent(this.world, player, Dead)) {
       Health.current[player] = Health.max[player];
-      if (hasComponent(this.world, player, Dead)) removeComponent(this.world, player, Dead);
+      if (hasComponent(this.world, player, Dead)) {
+        removeComponent(this.world, player, Dead);
+        // combat.ts's disableCorpseCollision zeroed this on death (so a
+        // corpse doesn't block traffic) -- a non-terminal defeat is the one
+        // place a "dead" combatant comes right back to fighting, so it's
+        // the one place that needs undoing outside game.ts's own respawn.
+        PhysicsCollider[player]?.setCollisionGroups(CHARACTER_GROUPS);
+      }
       for (const eid of this.allOpponents()) {
         if (!hasComponent(this.world, eid, NPC)) continue;
         NPC.testStyle[eid] = "passive";

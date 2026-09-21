@@ -1,5 +1,5 @@
 import { addComponent, hasComponent, query, type World } from "bitecs";
-import { Carried, Combat, Dead, Health, Item, NPC, NpcState, PlayerControlled, Practice, Rotation, Stamina } from "../components";
+import { Carried, Combat, Dead, Health, Item, NPC, NpcState, PhysicsCollider, PlayerControlled, Practice, Rotation, Stamina } from "../components";
 import { ITEM_REGISTRY } from "../../assets/itemRegistry";
 import { NPC_REGISTRY } from "../../assets/npcRegistry";
 import { isHandSlot, triggerViewmodelSwing, triggerViewmodelParry } from "./items";
@@ -127,6 +127,21 @@ function weaponClassFor(world: World, eid: number): WeaponClass {
   return "unarmed";
 }
 
+/** Stops a freshly-dead character's own movement collider from blocking
+ * anyone else -- without this, `CHARACTER_GROUPS` making characters solid
+ * to each other (physics/world.ts) means a corpse permanently occupies its
+ * death spot as an obstacle, which a living character can shove up against
+ * but never truly reach (an interact raycast at point-blank range can end
+ * up just short of a corpse it should be standing right next to). Zeroing
+ * *this* collider's own collision groups is one-directional: nothing else
+ * treats it as an obstacle any more, but the corpse's own still-running
+ * `characterSystem` query (which always uses the constant `CHARACTER_GROUPS`
+ * for what *it* looks for, independent of its own collider's group) keeps
+ * finding the floor and staying grounded exactly as before. */
+function disableCorpseCollision(targetEid: number): void {
+  PhysicsCollider[targetEid]?.setCollisionGroups(0);
+}
+
 function recordFriendlyFire(world: World, targetEid: number, attackerEid?: number): void {
   if (attackerEid === undefined || !hasComponent(world, attackerEid, PlayerControlled)
       || !hasComponent(world, targetEid, NPC) || NPC.provoked[targetEid] !== 0) return;
@@ -214,6 +229,7 @@ export function applyMeleeDamage(world: World, targetEid: number, rawDamage: num
 
   if (Health.current[targetEid] <= 0) {
     addComponent(world, targetEid, Dead);
+    disableCorpseCollision(targetEid);
     triggerDeathCollapse(targetEid);
   } else if (mitigation === 0) {
     triggerHitReaction(targetEid);
@@ -246,6 +262,7 @@ export function applyRangedDamage(world: World, targetEid: number, rawDamage: nu
   recordFriendlyFire(world, targetEid, attackerEid);
   if (Health.current[targetEid] <= 0) {
     addComponent(world, targetEid, Dead);
+    disableCorpseCollision(targetEid);
     triggerDeathCollapse(targetEid);
   } else {
     triggerHitReaction(targetEid);
