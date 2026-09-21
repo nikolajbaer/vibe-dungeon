@@ -203,6 +203,16 @@ export const NPC = {
    * outside places -- like the combat-test sandbox -- that actually want
    * more than one non-zero team. */
   team: [] as number[],
+  /** 1 once this NPC and its current chase target have actually shared a
+   * sector at some point since aggroing -- see `npc.ts`'s `updateAggressive`
+   * for why the sector-leash check needs this rather than comparing
+   * sectors from the very first CHASING tick: `aggroRange` has no
+   * line-of-sight check, so a target can be noticed (and the chase begun)
+   * from an adjacent sector, on the other side of a wall or a door an NPC
+   * can never open itself -- leashing immediately in that case would give
+   * up before the chase ever had a chance to close the distance. Reset to
+   * 0 on every fresh LOITERING -> CHASING transition. */
+  reachedTargetSector: [] as number[],
 };
 
 /** Hit points. Added ahead of real combat (#16) so the HUD health bar (#23)
@@ -234,6 +244,12 @@ export const Combat = {
   /** Reactive NPC block chance per incoming melee hit (0..1) -- an NPC has
    * no real held block input, so this is rolled once per landed swing. */
   agility: [] as number[],
+  /** 1 while the player is holding the charged-swing button/key, winding
+   * the weapon up into its held pose -- see combat.ts's
+   * `tryStartSwingCharge`/`releaseSwingCharge`. Only the player ever sets
+   * this; an NPC's own generic swing (npc.ts) fires instantly, with no
+   * charge phase of its own. */
+  charging: [] as number[],
 };
 
 /** Per-entity stamina pool (RPG-groundwork: a real per-character stat block

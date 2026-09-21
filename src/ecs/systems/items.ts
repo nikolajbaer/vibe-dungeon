@@ -468,12 +468,26 @@ export function unequipItem(world: World, itemEid: number): void {
 const SWING_DURATION = 0.22; // seconds, roundtrip
 const STAB_DISTANCE = 0.35; // meters, how far forward the blade thrusts at the peak
 const STAB_INWARD = 0.06; // meters, drifts toward screen-center at the peak
+/** How long (seconds) the charged swing's held pose takes to rise into its
+ * fully-raised windup once charging starts -- fast enough to feel
+ * responsive, then it just sits there at full raise however much longer
+ * the charge is actually held (see `viewmodelSwingSystem`'s "swing"
+ * branch). */
+const CHARGE_RAISE_SECONDS = 0.15;
 
 interface SwingState {
   itemEid: number;
   elapsed: number;
   attackType: import("./combat").AttackType | "parry";
   duration: number;
+  /** True only for a `"swing"` entry that's still being held (see
+   * `startViewmodelCharge`) -- while true, `viewmodelSwingSystem` drives the
+   * raised pose from `chargeElapsed` below instead of `elapsed`/`duration`,
+   * and the entry never expires on its own no matter how long it's held. */
+  charging: boolean;
+  /** Seconds spent charging so far -- only ever read while `charging` is
+   * true; irrelevant (and unused) once released. */
+  chargeElapsed: number;
 }
 
 /** Items currently mid-swing (see `triggerViewmodelSwing`/
@@ -486,17 +500,61 @@ const activeSwings: SwingState[] = [];
  * attack attempt, hit or miss, since the swing is what the player *did*,
  * not a reaction to a hit. No-ops harmlessly next frame in
  * `viewmodelSwingSystem` if the item turns out not to have a viewmodel
- * (unarmed) or gets unequipped mid-swing. */
+ * (unarmed) or gets unequipped mid-swing.
+ *
+ * If `itemEid` is currently *charging* a swing (`startViewmodelCharge`
+ * below), this is `releaseSwingCharge` (combat.ts) actually throwing it --
+ * rather than resetting `elapsed` to 0, which would visibly snap the
+ * viewmodel back down to resting before instantly re-raising it, this just
+ * flips `charging` off and hands the entry a fresh release `duration`:
+ * `viewmodelSwingSystem`'s "swing" release phase always *starts* at the
+ * exact same fully-raised pose the held charge was already sitting in, so
+ * the transition is seamless. */
 export function triggerViewmodelSwing(itemEid: number, attackType: import("./combat").AttackType = "jab", duration = SWING_DURATION): void {
   const existing = activeSwings.find((s) => s.itemEid === itemEid);
-  if (existing) Object.assign(existing, { elapsed: 0, attackType, duration });
-  else activeSwings.push({ itemEid, elapsed: 0, attackType, duration });
+  if (existing?.charging) {
+    existing.charging = false;
+    existing.elapsed = 0;
+    existing.attackType = attackType;
+    existing.duration = duration;
+    return;
+  }
+  if (existing) Object.assign(existing, { elapsed: 0, chargeElapsed: 0, attackType, duration, charging: false });
+  else activeSwings.push({ itemEid, elapsed: 0, chargeElapsed: 0, attackType, duration, charging: false });
 }
 
 export function triggerViewmodelParry(itemEid: number, duration: number): void {
   const existing = activeSwings.find((s) => s.itemEid === itemEid);
-  if (existing) Object.assign(existing, { elapsed: 0, attackType: "parry" as const, duration });
-  else activeSwings.push({ itemEid, elapsed: 0, attackType: "parry", duration });
+  if (existing) Object.assign(existing, { elapsed: 0, chargeElapsed: 0, attackType: "parry" as const, duration, charging: false });
+  else activeSwings.push({ itemEid, elapsed: 0, chargeElapsed: 0, attackType: "parry", duration, charging: false });
+}
+
+/** Starts holding `itemEid`'s viewmodel raised in the charged-swing windup
+ * pose -- the Skyrim-style "hold attack to charge a power swing" mechanic
+ * (combat.ts's `tryStartSwingCharge`) -- until `triggerViewmodelSwing` is
+ * called again for the same item (the release, see its own doc comment
+ * above) or `cancelViewmodelCharge` drops it. */
+export function startViewmodelCharge(itemEid: number): void {
+  const existing = activeSwings.find((s) => s.itemEid === itemEid);
+  if (existing) Object.assign(existing, { elapsed: 0, chargeElapsed: 0, attackType: "swing" as const, duration: 0, charging: true });
+  else activeSwings.push({ itemEid, elapsed: 0, chargeElapsed: 0, attackType: "swing", duration: 0, charging: true });
+}
+
+/** Cancels a charge started by `startViewmodelCharge` without ever
+ * swinging -- e.g. a modal opening mid-charge (game.ts) -- snapping the
+ * viewmodel straight back to its resting pose rather than playing out any
+ * part of the swing. */
+export function cancelViewmodelCharge(itemEid: number): void {
+  const i = activeSwings.findIndex((s) => s.itemEid === itemEid && s.charging);
+  if (i === -1) return;
+  activeSwings.splice(i, 1);
+  const slot = Carried.slot[itemEid];
+  const mesh = Viewmodel[itemEid];
+  if (mesh && isHandSlot(slot)) {
+    const base = VIEWMODEL_OFFSET[slot];
+    mesh.position.set(...base.pos);
+    mesh.rotation.set(...base.rot);
+  }
 }
 
 /**
@@ -524,27 +582,46 @@ export function viewmodelSwingSystem(dt: number): void {
       continue;
     }
 
-    swing.elapsed += dt;
-    const t = Math.min(1, swing.elapsed / swing.duration);
-    const arc = Math.sin(t * Math.PI);
     // hand-right sits at a positive resting X, hand-left at negative — this
     // sign always points back toward screen-center regardless of which hand.
     const inwardSign = slot === "hand-right" ? -1 : 1;
     const base = VIEWMODEL_OFFSET[slot];
 
+    if (swing.attackType === "swing") {
+      if (swing.charging) {
+        // Held phase: rise into the windup and then just sit there, however
+        // long the charge is actually held -- no forward swing motion at all
+        // yet (that's the release phase below, which always starts from
+        // exactly this same fully-raised chamber=1 pose).
+        swing.chargeElapsed += dt;
+        const chamber = Math.min(1, swing.chargeElapsed / CHARGE_RAISE_SECONDS);
+        mesh.position.set(base.pos[0], base.pos[1] + .12 * chamber, base.pos[2]);
+        mesh.rotation.set(base.rot[0] - .95 * chamber, base.rot[1], base.rot[2]);
+        continue;
+      }
+      // Release phase: the raised weapon swings through and settles back to
+      // rest -- chamber unwinds 1 -> 0 across the same span arc sweeps
+      // through its own 0 -> 1 -> 0, so both hit their resting values
+      // (chamber=0, arc=0) together right as the swing finishes.
+      swing.elapsed += dt;
+      const releaseT = Math.min(1, swing.elapsed / swing.duration);
+      const chamber = 1 - releaseT;
+      const arc = Math.sin(releaseT * Math.PI);
+      mesh.position.set(base.pos[0] + inwardSign * .08 * arc, base.pos[1] + .12 * chamber - .16 * arc, base.pos[2] - .16 * arc);
+      mesh.rotation.set(base.rot[0] - .95 * chamber + 1.7 * arc, base.rot[1], base.rot[2] + inwardSign * .22 * arc);
+      if (releaseT >= 1) activeSwings.splice(i, 1);
+      continue;
+    }
+
+    swing.elapsed += dt;
+    const t = Math.min(1, swing.elapsed / swing.duration);
+    const arc = Math.sin(t * Math.PI);
     if (swing.attackType === "parry") {
       mesh.position.set(base.pos[0] + inwardSign * .20 * arc, base.pos[1] + .15 * arc, base.pos[2] - .06 * arc);
       mesh.rotation.set(base.rot[0] - .25 * arc, base.rot[1] + inwardSign * .75 * arc, base.rot[2] + inwardSign * 1.15 * arc);
-    } else if (swing.attackType === "jab") {
+    } else { // "jab"
       mesh.position.set(base.pos[0] + inwardSign * STAB_INWARD * arc, base.pos[1], base.pos[2] - arc * STAB_DISTANCE);
       mesh.rotation.set(...base.rot);
-    } else if (swing.attackType === "cross") {
-      mesh.position.set(base.pos[0] + inwardSign * .18 * arc, base.pos[1] + .03 * arc, base.pos[2] - .18 * arc);
-      mesh.rotation.set(base.rot[0], base.rot[1] + inwardSign * .9 * arc, base.rot[2] + inwardSign * .45 * arc);
-    } else {
-      const chamber = Math.sin(Math.min(1, t * 2) * Math.PI / 2);
-      mesh.position.set(base.pos[0] + inwardSign * .08 * arc, base.pos[1] + .12 * chamber - .16 * arc, base.pos[2] - .16 * arc);
-      mesh.rotation.set(base.rot[0] - .95 * chamber + 1.7 * arc, base.rot[1], base.rot[2] + inwardSign * .22 * arc);
     }
 
     if (t >= 1) activeSwings.splice(i, 1);

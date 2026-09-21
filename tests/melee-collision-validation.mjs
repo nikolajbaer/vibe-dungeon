@@ -7,7 +7,7 @@ try {
   const {Carried,CharacterBody,Combat,Dead,Health,Item,NPC,NpcState,PhysicsBody,PlayerControlled,Position,Rotation,Stamina,Velocity}=await server.ssrLoadModule('/src/ecs/components.ts');
   const {initPhysics,createPhysics,addCharacter,addCombatHitboxes,queryCombatHitboxes}=await server.ssrLoadModule('/src/physics/world.ts');
   const {registerMeleeSwing,meleeCollisionSystem,getCombatHitboxColliders}=await server.ssrLoadModule('/src/ecs/systems/meleeCollision.ts');
-  const {ATTACK_STAMINA_COST,applyMeleeDamage,tryMeleeAttack}=await server.ssrLoadModule('/src/ecs/systems/combat.ts');
+  const {ATTACK_STAMINA_COST,applyMeleeDamage,cancelSwingCharge,releaseSwingCharge,setBlocking,tryMeleeAttack,tryStartSwingCharge}=await server.ssrLoadModule('/src/ecs/systems/combat.ts');
   const {npcSystem}=await server.ssrLoadModule('/src/ecs/systems/npc.ts');
   const {default:bandit}=await server.ssrLoadModule('/src/assets/npcs/bandit.ts');
 
@@ -171,7 +171,7 @@ try {
 
   // tryMeleeAttack end to end: an equipped sword's reach is scaled by the
   // requested attack type -- a jab's extended reach connects at a distance
-  // a chop's shorter one can't.
+  // the charged swing's shorter one can't.
   {
     const setupPlayer=(attackType,distance)=>{
       const bx=nextBlock();
@@ -196,12 +196,12 @@ try {
       removeComponent(world,player,PlayerControlled);
       return hits;
     };
-    // sword reach 1.4m; jab multiplier 1.15 -> 1.61m box reach, chop 0.85 ->
+    // sword reach 1.4m; jab multiplier 1.15 -> 1.61m box reach, swing 0.85 ->
     // 1.19m. The target's own .35m capsule radius brings its near surface
     // that much closer than its center distance, so 1.7m center-to-center
-    // (surface at 1.35m) sits inside jab's reach but outside chop's.
+    // (surface at 1.35m) sits inside jab's reach but outside the swing's.
     assert.equal(setupPlayer('jab',1.7).length,1,'a jab\'s extended reach connects at 1.7m');
-    assert.equal(setupPlayer('chop',1.7).length,0,'a chop\'s shorter reach misses the same 1.7m target');
+    assert.equal(setupPlayer('swing',1.7).length,0,'the charged swing\'s shorter reach misses the same 1.7m target');
   }
 
   // tryMeleeAttack refuses outright -- same as being on cooldown -- without
@@ -211,11 +211,69 @@ try {
     const player=spawnCombatant(bx,{dz:0});
     addComponent(world,player,PlayerControlled);addComponent(world,player,Combat);addComponent(world,player,Stamina);
     Combat.attackRecovery[player]=0;Combat.blocking[player]=0;Combat.agility[player]=0;
-    Stamina.max[player]=100;Stamina.current[player]=ATTACK_STAMINA_COST.chop-1;
-    assert.equal(tryMeleeAttack(world,'chop'),false,'too little stamina refuses the chop outright');
-    Stamina.current[player]=ATTACK_STAMINA_COST.chop;
-    assert.equal(tryMeleeAttack(world,'chop'),true,'exactly enough stamina lets the chop through');
-    assert.equal(Stamina.current[player],0,'the chop\'s full stamina cost was deducted');
+    Stamina.max[player]=100;Stamina.current[player]=ATTACK_STAMINA_COST.swing-1;
+    assert.equal(tryMeleeAttack(world,'swing'),false,'too little stamina refuses the swing outright');
+    Stamina.current[player]=ATTACK_STAMINA_COST.swing;
+    assert.equal(tryMeleeAttack(world,'swing'),true,'exactly enough stamina lets the swing through');
+    assert.equal(Stamina.current[player],0,'the swing\'s full stamina cost was deducted');
+    removeComponent(world,player,PlayerControlled);
+  }
+
+  // Charged swing: hold to wind up (tryStartSwingCharge), release to
+  // actually throw it (releaseSwingCharge) -- stamina is only ever spent at
+  // release, never at the start of a charge, and a real hit resolves
+  // end-to-end exactly like an instant tryMeleeAttack('swing') would.
+  {
+    const bx=nextBlock();
+    const player=spawnCombatant(bx,{dz:0});
+    addComponent(world,player,PlayerControlled);addComponent(world,player,Combat);addComponent(world,player,Stamina);
+    Combat.attackRecovery[player]=0;Combat.blocking[player]=0;Combat.agility[player]=0;Combat.charging[player]=0;
+    Stamina.max[player]=100;Stamina.current[player]=100;
+    spawnCombatant(bx,{dz:-1}); // well within the charged swing's reach
+    warmUp();
+
+    assert.equal(tryStartSwingCharge(world),true,'charging starts');
+    assert.equal(Combat.charging[player],1,'Combat.charging is set while held');
+    assert.equal(tryStartSwingCharge(world),false,'cannot start a second charge while already charging');
+    assert.equal(Stamina.current[player],100,'no stamina spent yet -- only paid on release');
+    setBlocking(world,player,true);
+    assert.equal(Combat.blocking[player],0,'block refuses to raise while charging');
+
+    const hits=[];
+    for(let t=0;t<.2;t+=1/60) hits.push(...tick(1/60)); // held charge produces no swing/hit at all yet
+    assert.equal(hits.length,0,'nothing resolves while the swing is still just being held');
+
+    assert.equal(releaseSwingCharge(world),true,'releasing an active charge throws the real swing');
+    assert.equal(Combat.charging[player],0,'Combat.charging clears on release');
+    assert.equal(Stamina.current[player],100-ATTACK_STAMINA_COST.swing,'stamina is spent exactly once, on release');
+
+    let resolvedHits=[];
+    for(let t=0;t<.05;t+=1/60) resolvedHits=resolvedHits.concat(tick(1/60));
+    assert.equal(resolvedHits.length,1,'the released charge resolves a real hit through the normal pipeline');
+    assert.equal(resolvedHits[0].attackerEid,player);
+    removeComponent(world,player,PlayerControlled);
+  }
+
+  // Cancelling a charge (e.g. a modal opening mid-charge, game.ts) never
+  // swings and never spends the stamina a real release would have.
+  {
+    const bx=nextBlock();
+    const player=spawnCombatant(bx,{dz:0});
+    addComponent(world,player,PlayerControlled);addComponent(world,player,Combat);addComponent(world,player,Stamina);
+    Combat.attackRecovery[player]=0;Combat.blocking[player]=0;Combat.agility[player]=0;Combat.charging[player]=0;
+    Stamina.max[player]=100;Stamina.current[player]=100;
+    spawnCombatant(bx,{dz:-1});
+    warmUp();
+
+    assert.equal(tryStartSwingCharge(world),true);
+    cancelSwingCharge(world);
+    assert.equal(Combat.charging[player],0,'cancelling clears the charging flag');
+    assert.equal(Stamina.current[player],100,'cancelling never spends the stamina a release would have');
+    assert.equal(releaseSwingCharge(world),false,'a release with nothing charging (already cancelled) is a harmless no-op');
+
+    let hits=[];
+    for(let t=0;t<.3;t+=1/60) hits=hits.concat(tick(1/60));
+    assert.equal(hits.length,0,'a cancelled charge never resolves any hit at all');
     removeComponent(world,player,PlayerControlled);
   }
 
@@ -240,7 +298,7 @@ try {
 
     let landed=false;
     for(let t=0;t<1.5 && !landed;t+=1/60){
-      npcSystem(world,1/60);
+      npcSystem(world,1/60,()=>'test-sector');
       if(tick(1/60).length>0) landed=true;
     }
     assert.ok(landed,'an aggressive NPC within range eventually lands a resolved swing on the player');
@@ -310,7 +368,7 @@ try {
 
     let aHit=false, bHit=false;
     for(let t=0;t<3 && !(aHit&&bHit);t+=1/60){
-      npcSystem(world,1/60);
+      npcSystem(world,1/60,()=>'test-sector');
       for(const hit of tick(1/60)){
         if(hit.targetEid===npcA) aHit=true;
         if(hit.targetEid===npcB) bHit=true;
@@ -320,5 +378,5 @@ try {
     assert.ok(Health.current[npcA]<bandit.health&&Health.current[npcB]<bandit.health,'both sides took real damage');
   }
 
-  console.log('melee swing collision, flat damage, cylinder placement, weapon reach, stamina gating, cleave, team filtering and NPC-vs-NPC combat passed');
+  console.log('melee swing collision, flat damage, cylinder placement, weapon reach, stamina gating, charged-swing hold/release/cancel, cleave, team filtering and NPC-vs-NPC combat passed');
 } finally {await server.close();}

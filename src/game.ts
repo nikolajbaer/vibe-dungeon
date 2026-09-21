@@ -8,7 +8,7 @@ import { characterSystem, physicsSyncSystem, teleportCharacter } from "./ecs/sys
 import { dynamicSyncSystem } from "./ecs/systems/dynamics";
 import { addCharacter, CHARACTER_GROUPS, createPhysics, PHYSICS_DT } from "./physics/world";
 import { doorAnimationSystem, tryInteract } from "./ecs/systems/doors";
-import { applyMeleeDamage, combatSystem, setBlocking, tryMeleeAttack, type AttackType } from "./ecs/systems/combat";
+import { applyMeleeDamage, cancelSwingCharge, combatSystem, releaseSwingCharge, setBlocking, tryMeleeAttack, tryStartSwingCharge, type AttackType } from "./ecs/systems/combat";
 import { meleeCollisionSystem } from "./ecs/systems/meleeCollision";
 import { getRangedAmmoLabel, getRangedCombatDebugState, rangedCombatSystem, tryFireRanged } from "./ecs/systems/rangedCombat";
 import { hitboxDebugSystem, isHitboxDebugEnabled, setHitboxDebugEnabled } from "./ecs/systems/hitboxDebug";
@@ -64,6 +64,14 @@ const PLAYER_MAX_STAMINA = 100;
  * has no real "held" input the way `keyboard.isDown` does, so a completed
  * swipe instead simulates a fixed-length hold. */
 const TOUCH_BLOCK_PULSE_SECONDS = 0.6;
+
+/** How long (seconds) the melee attack button/key needs to stay held before
+ * it commits to charging the power swing instead of resolving as a quick
+ * jab on release -- see the shared press/release melee state machine in
+ * `frame()`. Long enough that an ordinary deliberate click never
+ * accidentally charges, short enough that holding on purpose still feels
+ * immediate. */
+const SWING_CHARGE_THRESHOLD_SECONDS = 0.2;
 
 /** Ceiling on physics steps per rendered frame — see the accumulator in
  * `frame` for why (spiral-of-death guard). */
@@ -210,6 +218,7 @@ export function startGame(container: HTMLElement, options: StartGameOptions = {}
   Combat.attackRecovery[player] = 0;
   Combat.blocking[player] = 0;
   Combat.agility[player] = 0;
+  Combat.charging[player] = 0;
   Stamina.max[player] = PLAYER_MAX_STAMINA;
   Stamina.current[player] = PLAYER_MAX_STAMINA;
 
@@ -482,8 +491,15 @@ export function startGame(container: HTMLElement, options: StartGameOptions = {}
     // Debug-only direct trigger for automated (Playwright) testing of melee
     // combat (issue #48) without needing to simulate real pointer-lock
     // clicks/touches — fires the exact same `tryMeleeAttack` the real
-    // click/touch-button wiring below calls.
+    // click/touch-button wiring below calls. For `"swing"` this is the
+    // instant bypass (see `tryMeleeAttack`'s own doc comment) rather than a
+    // real held charge -- use `startSwingCharge`/`releaseSwingCharge` below
+    // to exercise the actual charge-and-release mechanic.
     attack: (attackType: AttackType = "jab") => tryMeleeAttack(world, attackType),
+    startSwingCharge: () => tryStartSwingCharge(world),
+    releaseSwingCharge: () => releaseSwingCharge(world),
+    cancelSwingCharge: () => cancelSwingCharge(world),
+    isSwingCharging: () => Combat.charging[player] > 0,
     block: (held: boolean) => setBlocking(world, player, held),
     getCombatState: () => ({
       attackRecovery: Combat.attackRecovery[player],
@@ -682,26 +698,50 @@ export function startGame(container: HTMLElement, options: StartGameOptions = {}
   // requests lock asynchronously (pointer lock only ever activates after
   // this handler returns), so `pointerLook.locked` still reads false on the
   // very click that engages it, meaning that first click never also counts
-  // as an attack. Edge-triggered into `attackRequested` and consumed once
-  // per frame below, the same "just pressed" shape `interactPressed` uses.
+  // as an attack. Edge-triggered into `meleeMousePressed`/`meleeMouseReleased`
+  // and consumed once per frame below, feeding the same press/release melee
+  // state machine touch and the Digit2 hotkey also drive (see its own doc
+  // comment further down) -- a quick press-and-release fires a jab, holding
+  // past `SWING_CHARGE_THRESHOLD_SECONDS` charges the held power swing
+  // instead (Skyrim-style; combat.ts's `tryStartSwingCharge`/
+  // `releaseSwingCharge`).
   //
   // Desktop-only: on a touch device attacking is the dedicated ATK button
-  // (`touch.consumeAttackRequest()` below) alone. Mobile browsers still
-  // synthesize compatibility mouse events (mousedown/click) some time after
-  // a real touch, and some also grant Pointer Lock from a touch gesture, so
-  // without this guard a plain tap-to-interact could silently also land a
-  // melee hit on whatever the player was just trying to talk to.
-  let attackRequested = false;
+  // (`touch.consumePressStart()`/`consumeAttackRelease()` below) alone.
+  // Mobile browsers still synthesize compatibility mouse events (mousedown/
+  // mouseup/click) some time after a real touch, and some also grant
+  // Pointer Lock from a touch gesture, so without this guard a plain
+  // tap-to-interact could silently also land a melee hit on whatever the
+  // player was just trying to talk to.
+  let meleeMousePressed = false;
+  let meleeMouseReleased = false;
   // Real-time seconds left on a touch block gesture's fixed-length pulse
-  // (see `TOUCH_BLOCK_PULSE_SECONDS`) -- unlike `attackRequested` above this
-  // isn't a one-shot flag, since block needs a continuous "still held" state
-  // every frame, not just the instant it was requested.
+  // (see `TOUCH_BLOCK_PULSE_SECONDS`) -- unlike the press/release edges
+  // above this isn't a one-shot flag, since block needs a continuous "still
+  // held" state every frame, not just the instant it was requested.
   let touchBlockPulseRemaining = 0;
   if (!isTouchDevice()) {
     renderer.domElement.addEventListener("mousedown", (e) => {
-      if (e.button === 0 && pointerLook.locked) attackRequested = true;
+      if (e.button === 0 && pointerLook.locked) meleeMousePressed = true;
+    });
+    renderer.domElement.addEventListener("mouseup", (e) => {
+      if (e.button === 0) meleeMouseReleased = true;
     });
   }
+  // The shared press/release melee state machine's own live state (see
+  // `frame()`) -- `meleeHeld` covers the whole window from a press that
+  // resolved as melee (not ranged) up through its eventual release,
+  // `meleeCharging` becomes true partway through once
+  // `SWING_CHARGE_THRESHOLD_SECONDS` is crossed and `tryStartSwingCharge`
+  // actually succeeds.
+  let meleeHeld = false;
+  let meleeHoldSeconds = 0;
+  let meleeCharging = false;
+  // For detecting Digit2's own release edge -- `Keyboard` only exposes a
+  // "just pressed" edge (`consumeJustPressed`) and a continuous `isDown`,
+  // no "just released" of its own, so this compares last frame's state to
+  // this frame's.
+  let wasDigit2Down = false;
 
   window.addEventListener("resize", () => {
     camera.aspect = window.innerWidth / window.innerHeight;
@@ -765,7 +805,7 @@ export function startGame(container: HTMLElement, options: StartGameOptions = {}
       while (accumulator >= PHYSICS_DT && steps < MAX_PHYSICS_STEPS_PER_FRAME) {
         accumulator -= PHYSICS_DT;
         steps++;
-        npcSystem(world, PHYSICS_DT);
+        npcSystem(world, PHYSICS_DT, level.sectorAt);
         combatSystem(world, PHYSICS_DT);
         characterSystem(world, physics, PHYSICS_DT);
         doorAnimationSystem(world, PHYSICS_DT);
@@ -796,17 +836,58 @@ export function startGame(container: HTMLElement, options: StartGameOptions = {}
     // different rays, not the same one in disguise.
     if (interactRequested && !isModalActive()) tryInteract(world, camera, touchInteractPoint ?? undefined);
 
-    const touchAttackType = touch.consumeAttackType();
-    const attackRequestedThisFrame = attackRequested;
-    attackRequested = false;
-    let requestedAttack: AttackType | undefined;
-    if (touchAttackType) requestedAttack = touchAttackType;
-    else if (attackRequestedThisFrame || keyboard.consumeJustPressed("Digit1")) requestedAttack = "jab";
-    else if (keyboard.consumeJustPressed("Digit2")) requestedAttack = "cross";
-    else if (keyboard.consumeJustPressed("Digit3")) requestedAttack = "chop";
-    if (requestedAttack && !isModalActive()) {
+    // Digit1 is a plain, always-instant alternate jab trigger (ranged still
+    // takes priority if a ranged weapon is equipped, exactly like the mouse/
+    // touch button below) -- it has no hold/charge concept of its own, unlike
+    // Digit2 (the charged-swing alternate trigger) which feeds the same
+    // shared press/release state machine mouse and touch drive.
+    if (keyboard.consumeJustPressed("Digit1") && !isModalActive()) {
       const rangedResult = tryFireRanged(world, camera, scene);
-      if (rangedResult === "not-ranged") tryMeleeAttack(world, requestedAttack);
+      if (rangedResult === "not-ranged") tryMeleeAttack(world, "jab");
+    }
+
+    // The shared jab-vs-charged-swing press/release state machine ("like in
+    // Skyrim": hold the attack button/key to wind up a power attack, tap it
+    // for a quick jab instead) -- mouse, the touch ATK button, and the
+    // Digit2 hotkey all just report press/release edges into it.
+    const digit2Down = keyboard.isDown("Digit2");
+    const digit2PressEdge = !wasDigit2Down && digit2Down;
+    const digit2ReleaseEdge = wasDigit2Down && !digit2Down;
+    wasDigit2Down = digit2Down;
+
+    const meleePressEdge = meleeMousePressed || touch.consumePressStart() || digit2PressEdge;
+    meleeMousePressed = false;
+    const meleeReleaseEdge = meleeMouseReleased || touch.consumeAttackRelease() || digit2ReleaseEdge;
+    meleeMouseReleased = false;
+
+    if (meleePressEdge && !isModalActive()) {
+      const rangedResult = tryFireRanged(world, camera, scene);
+      if (rangedResult === "not-ranged") {
+        meleeHeld = true;
+        meleeHoldSeconds = 0;
+        meleeCharging = false;
+      }
+    }
+    if (meleeHeld) {
+      meleeHoldSeconds += dt;
+      if (!meleeCharging && meleeHoldSeconds >= SWING_CHARGE_THRESHOLD_SECONDS) {
+        meleeCharging = tryStartSwingCharge(world);
+        if (!meleeCharging) meleeHeld = false; // couldn't charge (cooldown/stamina/etc) -- stop retrying every frame
+      }
+    }
+    if (meleeReleaseEdge) {
+      if (meleeCharging) releaseSwingCharge(world);
+      else if (meleeHeld) tryMeleeAttack(world, "jab");
+      meleeHeld = false;
+      meleeCharging = false;
+    }
+    // A modal opening mid-charge (dialogue, death, the combat-test config
+    // panel) drops it outright rather than leaving the player's weapon stuck
+    // raised, or a stray release firing the swing once the modal closes.
+    if (isModalActive() && Combat.charging[player] > 0) {
+      cancelSwingCharge(world);
+      meleeHeld = false;
+      meleeCharging = false;
     }
     // Skyrim-style held block, not an edge-triggered press: `setBlocking`
     // runs every frame with the input's *current* state (keyboard.isDown, a

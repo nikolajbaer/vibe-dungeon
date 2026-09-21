@@ -8,13 +8,14 @@ try {
   const {ATTACK_PROFILES,ATTACK_STAMINA_COST,BLOCK_MITIGATION,STAMINA_REGEN_PER_SECOND,applyMeleeDamage,combatSystem,setBlocking,tryMeleeAttack}=await server.ssrLoadModule('/src/ecs/systems/combat.ts');
   const {classifyCombatGesture}=await server.ssrLoadModule('/src/input/touchControls.ts');
 
-  assert.deepEqual(ATTACK_PROFILES,{jab:{damageMultiplier:.7,recovery:.5},cross:{damageMultiplier:1,recovery:.75},chop:{damageMultiplier:1.35,recovery:1}});
+  assert.deepEqual(ATTACK_PROFILES,{jab:{damageMultiplier:.7,recovery:.5},swing:{damageMultiplier:1.35,recovery:1}});
   assert.deepEqual(BLOCK_MITIGATION,{unarmed:.3,dagger:.5,oneHanded:.75});
-  assert.equal(classifyCombatGesture(6,8),'jab','10px remains a tap');
-  assert.equal(classifyCombatGesture(-11,2),'cross','left swipe swings');
-  assert.equal(classifyCombatGesture(11,2),'jab','right swipe jabs');
-  assert.equal(classifyCombatGesture(2,-11),'chop','up swipe chops');
-  assert.equal(classifyCombatGesture(2,11),'block','down swipe blocks');
+  // jab vs. the charged swing is decided by hold duration now (combat.ts's
+  // tryStartSwingCharge/releaseSwingCharge), not by swipe shape -- this only
+  // ever needs to pull a deliberate downward swipe (block) out.
+  assert.equal(classifyCombatGesture(8),'attack','a small vertical drift attacks');
+  assert.equal(classifyCombatGesture(-11),'attack','an upward nudge attacks');
+  assert.equal(classifyCombatGesture(21),'block','a deliberate downward swipe blocks');
 
   const setup=(weapon)=>{
     const world=createWorld(),defender=addEntity(world);
@@ -68,14 +69,14 @@ try {
     addComponent(world,player,PlayerControlled);addComponent(world,player,Combat);addComponent(world,player,Stamina);
     Combat.attackRecovery[player]=0;Combat.blocking[player]=0;Combat.agility[player]=0;
     Stamina.max[player]=100;Stamina.current[player]=100;
-    assert.equal(tryMeleeAttack(world,'chop'),true,'enough stamina lets the attack through');
-    assert.equal(Stamina.current[player],100-ATTACK_STAMINA_COST.chop,'the attack deducted its stamina cost');
+    assert.equal(tryMeleeAttack(world,'swing'),true,'enough stamina lets the attack through');
+    assert.equal(Stamina.current[player],100-ATTACK_STAMINA_COST.swing,'the attack deducted its stamina cost');
     Combat.attackRecovery[player]=0; // bypass recovery gate to isolate the stamina check
-    Stamina.current[player]=ATTACK_STAMINA_COST.chop-1;
-    assert.equal(tryMeleeAttack(world,'chop'),false,'too little stamina refuses the attack outright');
-    assert.equal(Stamina.current[player],ATTACK_STAMINA_COST.chop-1,'a refused attack never deducts stamina');
+    Stamina.current[player]=ATTACK_STAMINA_COST.swing-1;
+    assert.equal(tryMeleeAttack(world,'swing'),false,'too little stamina refuses the attack outright');
+    assert.equal(Stamina.current[player],ATTACK_STAMINA_COST.swing-1,'a refused attack never deducts stamina');
     combatSystem(world,1);
-    assert.ok(Math.abs(Stamina.current[player]-(ATTACK_STAMINA_COST.chop-1+STAMINA_REGEN_PER_SECOND))<1e-9,'stamina regenerates over time');
+    assert.ok(Math.abs(Stamina.current[player]-(ATTACK_STAMINA_COST.swing-1+STAMINA_REGEN_PER_SECOND))<1e-9,'stamina regenerates over time');
   }
 
   {

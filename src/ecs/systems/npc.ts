@@ -3,8 +3,14 @@ import { Dead, Health, NPC, NpcState, Position, Rotation, Stamina, Velocity, Pla
 import { NPC_REGISTRY } from "../../assets/npcRegistry";
 import type { NpcArchetypeDef } from "../../assets/types";
 import { triggerAttack, triggerWeaponDraw } from "./npcAnimation";
-import { ATTACK_ACTIVE_WINDOW, ATTACK_SHAPES, ATTACK_STAMINA_COST, UNARMED_REACH } from "./combat";
+import { NPC_ATTACK_ACTIVE_WINDOW, NPC_ATTACK_SHAPE, NPC_ATTACK_STAMINA_COST, UNARMED_REACH } from "./combat";
 import { isHostileTo, registerMeleeSwing } from "./meleeCollision";
+
+/** Looks up which sector a world position falls in -- `level/level.ts`'s
+ * `Level.sectorAt`, threaded in as a plain function (rather than importing
+ * the `Level` type here) so this module stays decoupled from level-building
+ * code entirely. Used by `updateAggressive`'s leash check below. */
+export type SectorAt = (x: number, y: number, z: number) => string | undefined;
 
 const FOLLOW_SPEED = 2; // m/s — slower than the player's 3.2 so it doesn't ride the player's heels
 export const FOLLOW_STOP_DISTANCE = 2; // meters — target follow distance, directly behind is fine for v1
@@ -60,7 +66,7 @@ export function toggleNpcFollow(eid: number): void {
  * itself; whether it actually lands is resolved later, the same as a
  * player's own attack.
  */
-export function npcSystem(world: World, dt: number): void {
+export function npcSystem(world: World, dt: number, sectorAt: SectorAt): void {
   const [playerEid] = query(world, [PlayerControlled, Position]);
 
   for (const eid of query(world, [NPC, Position, Velocity])) {
@@ -83,11 +89,11 @@ export function npcSystem(world: World, dt: number): void {
       continue;
     }
     if (testStyle === "aggressive") {
-      updateAggressive(world, eid, archetype, dt, true);
+      updateAggressive(world, eid, archetype, dt, sectorAt, true);
       continue;
     }
     if (testStyle === "defensive") {
-      if (NPC.provoked[eid]) updateAggressive(world, eid, archetype, dt, true);
+      if (NPC.provoked[eid]) updateAggressive(world, eid, archetype, dt, sectorAt, true);
       else {
         Velocity.x[eid] = 0;
         Velocity.z[eid] = 0;
@@ -96,7 +102,7 @@ export function npcSystem(world: World, dt: number): void {
     }
     const sparring = hasComponent(world, eid, Practice) && !!Practice.active[eid];
     if (archetype?.behavior === "aggressive" || sparring || !!NPC.provoked[eid]) {
-      updateAggressive(world, eid, archetype, dt, sparring);
+      updateAggressive(world, eid, archetype, dt, sectorAt, sparring);
       continue;
     }
 
@@ -185,15 +191,27 @@ function giveUpAndLoiter(eid: number): void {
  * — see `meleeCollision.ts`) every `archetype.attackCooldown` seconds for as
  * long as the target stays in range (stepping back out to `CHASING` if they
  * retreat) — being in `attackRange` triggers the swing, not a guaranteed
- * hit, since the swing's own box is a separate, real geometric test. From either
- * `CHASING` or `ATTACKING`, straying more than `archetype.leashRange` from
- * home gives up and returns to `LOITERING` — see that field's doc comment
- * for why (an unleashed chase could otherwise cross the whole reachable
- * map once doors are open). A sparring bout always targets the player
- * specifically (never `findHostileTarget`) — a training dummy that
- * wandered off to fight some other NPC mid-bout would defeat the point.
+ * hit, since the swing's own box is a separate, real geometric test. The
+ * chase itself is relentless -- retreating, however far, never shakes it on
+ * its own -- but once the NPC and target have actually shared a sector at
+ * some point since the chase began (`NPC.reachedTargetSector`), the instant
+ * the target's sector (`sectorAt`) diverges from the NPC's own current one
+ * again, it gives up and returns to `LOITERING`: leaving the room (or
+ * whatever sector boundary a door/threshold marks) is what actually loses
+ * an established chase, not distance. The "actually shared a sector" gate
+ * matters because `aggroRange` has no line-of-sight check -- a chase can
+ * begin with the target already on the other side of a wall or a door an
+ * NPC can never open itself, and leashing on that mismatch immediately
+ * would give up before the chase ever had a real chance to close the gap.
+ * Re-checked fresh every frame like everything else here, so an NPC still
+ * hot on the target's heels when they both cross the same threshold just
+ * keeps going, while one that's fallen behind gives up right at the doorway
+ * instead of tunneling through walls to close an unbounded distance. A
+ * sparring bout always targets the player specifically (never
+ * `findHostileTarget`) and never leashes at all -- a training dummy that
+ * wandered off (or gave up) mid-bout would defeat the point.
  */
-function updateAggressive(world: World, eid: number, archetype: NpcArchetypeDef, dt: number, sparring = false): void {
+function updateAggressive(world: World, eid: number, archetype: NpcArchetypeDef, dt: number, sectorAt: SectorAt, sparring = false): void {
   const targetEid = sparring ? query(world, [PlayerControlled, Position])[0] : findHostileTarget(world, eid);
   if (targetEid === undefined) {
     // Nothing left to fight -- stand down from a chase/attack rather than
@@ -209,6 +227,7 @@ function updateAggressive(world: World, eid: number, archetype: NpcArchetypeDef,
     if (sparring || Math.hypot(dx, dz) <= (archetype.aggroRange ?? 0)) {
       NPC.state[eid] = NpcState.CHASING;
       NPC.drawRemaining[eid] = .5;
+      NPC.reachedTargetSector[eid] = 0;
       triggerWeaponDraw(eid);
     } else {
       wander(eid, dt);
@@ -216,9 +235,18 @@ function updateAggressive(world: World, eid: number, archetype: NpcArchetypeDef,
     return;
   }
 
-  // CHASING or ATTACKING from here — both give up past the leash range.
-  const homeDist = Math.hypot(Position.x[eid] - NPC.homeX[eid], Position.z[eid] - NPC.homeZ[eid]);
-  if (!sparring && homeDist > (archetype.leashRange ?? Infinity)) {
+  // CHASING or ATTACKING from here — give up the instant the target leaves
+  // whatever sector the NPC is currently standing in, but only once the two
+  // have actually shared a sector at some point since this chase began
+  // (`NPC.reachedTargetSector`'s own doc comment explains why: `aggroRange`
+  // has no line-of-sight check, so a chase can begin with the target
+  // already in a different sector -- behind a wall, or a closed door an NPC
+  // can never open itself -- and leashing immediately in that case would
+  // give up before ever getting a real chance to close the distance).
+  const ownSector = sectorAt(Position.x[eid], Position.y[eid], Position.z[eid]);
+  const targetSector = sectorAt(Position.x[targetEid], Position.y[targetEid], Position.z[targetEid]);
+  if (targetSector === ownSector) NPC.reachedTargetSector[eid] = 1;
+  else if (!sparring && NPC.reachedTargetSector[eid]) {
     giveUpAndLoiter(eid);
     return;
   }
@@ -247,7 +275,7 @@ function updateAggressive(world: World, eid: number, archetype: NpcArchetypeDef,
   Velocity.z[eid] = 0;
 
   NPC.attackCooldownRemaining[eid] -= dt;
-  // Same stamina gate as the player's own tryMeleeAttack (ATTACK_STAMINA_COST.cross,
+  // Same stamina gate as the player's own tryMeleeAttack (NPC_ATTACK_STAMINA_COST,
   // since this is the one generic swing every aggressive NPC reuses) -- an
   // NPC that's out of stamina just keeps waiting in ATTACKING with its
   // cooldown already elapsed, ready to swing the instant it regenerates
@@ -258,17 +286,17 @@ function updateAggressive(world: World, eid: number, archetype: NpcArchetypeDef,
   // tryMeleeAttack uses.
   const hasStamina = Stamina.current[eid] !== undefined;
   if (NPC.drawRemaining[eid] <= 0 && NPC.attackCooldownRemaining[eid] <= 0
-      && (!hasStamina || Stamina.current[eid] >= ATTACK_STAMINA_COST.cross)) {
+      && (!hasStamina || Stamina.current[eid] >= NPC_ATTACK_STAMINA_COST)) {
     triggerAttack(eid);
     const fallbackDamage = archetype.weaponClass === "oneHanded" ? 7 : archetype.weaponClass === "dagger" ? 5 : 3;
     const fallbackReach = archetype.weaponClass === "oneHanded" ? 1.4 : archetype.weaponClass === "dagger" ? 1.0 : UNARMED_REACH;
-    const shape = ATTACK_SHAPES.cross; // NPCs have no jab/cross/chop of their own -- a neutral generic swing
+    const shape = NPC_ATTACK_SHAPE; // NPCs have no jab/charged-swing distinction of their own -- a neutral generic swing
     // Humanoids face local +Z (see the yaw comment above), the opposite of
     // the player's own camera-only -Z convention -- registerMeleeSwing
     // takes a resolved direction rather than a bare yaw for exactly this
     // reason (see its own doc comment).
-    registerMeleeSwing(eid, Math.sin(Rotation.yaw[eid]), Math.cos(Rotation.yaw[eid]), (archetype.attackReach ?? fallbackReach) * shape.reachMultiplier, shape.width, shape.height, archetype.attackDamage ?? fallbackDamage, ATTACK_ACTIVE_WINDOW.cross);
-    if (hasStamina) Stamina.current[eid] -= ATTACK_STAMINA_COST.cross;
+    registerMeleeSwing(eid, Math.sin(Rotation.yaw[eid]), Math.cos(Rotation.yaw[eid]), (archetype.attackReach ?? fallbackReach) * shape.reachMultiplier, shape.width, shape.height, archetype.attackDamage ?? fallbackDamage, NPC_ATTACK_ACTIVE_WINDOW);
+    if (hasStamina) Stamina.current[eid] -= NPC_ATTACK_STAMINA_COST;
     NPC.attackCooldownRemaining[eid] = archetype.attackCooldown ?? 1;
   }
 }

@@ -29,7 +29,6 @@ const bandit: NpcArchetypeDef = {
   agility: 0.35,
   weaponClass: "dagger",
   chaseSpeed: 2.5,
-  leashRange: 10,
   maxStamina: 60,
   createMesh: (eid) => {
     const mesh = createAnimatedNpcMesh(getBanditHumanoidRig(), eid);
