@@ -211,16 +211,30 @@ export const CarryCapacity = {
   maxWeight: [] as number[],
 };
 
-/** Per-entity melee timing. Attack recovery prevents input-spam; parry has
- * a short anticipation before its active window, followed by recovery. */
+/** Per-entity melee timing/defense state. Attack recovery prevents
+ * input-spam. `blocking` is a plain held flag (Skyrim-style: up for as long
+ * as the block key/gesture is held down, or, for an NPC, for the instant a
+ * hit lands and its reactive `agility` roll succeeds) -- there's no more
+ * timed startup/active-window/recovery to track, so this replaces what used
+ * to be four separate `parry*` fields. Mitigation itself isn't stored here;
+ * it's looked up fresh from whatever weapon class is actually equipped (or,
+ * for an NPC, its archetype's `weaponClass`) at the moment a hit resolves --
+ * see `combat.ts`'s `weaponClassFor`/`BLOCK_MITIGATION`. */
 export const Combat = {
   attackRecovery: [] as number[],
-  parryStartup: [] as number[],
-  parryWindow: [] as number[],
-  parryRecovery: [] as number[],
-  parryMitigation: [] as number[],
-  /** Reactive NPC parry chance per detected incoming melee attack (0..1). */
+  blocking: [] as number[],
+  /** Reactive NPC block chance per incoming melee hit (0..1) -- an NPC has
+   * no real held block input, so this is rolled once per landed swing. */
   agility: [] as number[],
+};
+
+/** Per-entity stamina pool (RPG-groundwork: a real per-character stat block
+ * a future leveling/perk system can scale, rather than a flat constant).
+ * Each melee swing costs stamina (see combat.ts's `ATTACK_STAMINA_COST`);
+ * `current` regenerates toward `max` over time in `combatSystem`. */
+export const Stamina = {
+  current: [] as number[],
+  max: [] as number[],
 };
 
 /** Temporary non-lethal sparring score. While active, melee damage drains

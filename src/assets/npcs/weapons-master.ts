@@ -15,7 +15,8 @@ const weaponsMaster: NpcArchetypeDef = {
   attackCooldown: .8,
   chaseSpeed: 2.6,
   leashRange: 8,
-  parryWeaponClass: "oneHanded",
+  weaponClass: "oneHanded",
+  maxStamina: 150,
   createMesh: eid => createAnimatedNpcMesh(getWeaponsMasterHumanoidRig(), eid),
 };
 

@@ -1,6 +1,6 @@
 import * as THREE from "three";
 import { addComponent, addEntity, removeComponent, type World } from "bitecs";
-import { Position, Velocity, Rotation, CharacterBody, DynamicBody, PhysicsBody, PhysicsCollider, PhysicsRotation, Object3DRef, Item, NPC, NpcState, Health, Combat, Readable, Container, Carried, Stackable } from "../ecs/components";
+import { Position, Velocity, Rotation, CharacterBody, DynamicBody, PhysicsBody, PhysicsCollider, PhysicsRotation, Object3DRef, Item, NPC, NpcState, Health, Combat, Stamina, Readable, Container, Carried, Stackable } from "../ecs/components";
 import { ITEM_REGISTRY } from "../assets/itemRegistry";
 import type { ItemAssetDef } from "../assets/types";
 import { FURNITURE_REGISTRY } from "../assets/furnitureRegistry";
@@ -8,7 +8,10 @@ import { NPC_REGISTRY } from "../assets/npcRegistry";
 import type { PropPlacement, ItemSpawn, NpcSpawn, ReadablePlacement, ContentsEntry } from "./placementTypes";
 import { floorBaseline } from "./tiles";
 import { addCharacter, addDynamicBox, addStaticBox, type BoxShape, type Physics } from "../physics/world";
-import { PARRY_MITIGATION } from "../ecs/systems/combat";
+
+/** Fallback max stamina (RPG groundwork -- see `ecs/components.ts`'s
+ * `Stamina`) for an archetype that doesn't author its own `maxStamina`. */
+const DEFAULT_NPC_MAX_STAMINA = 100;
 
 // Generic spawners for the asset-authoring system: turn plain `PropPlacement`/
 // `ItemSpawn` data (src/level/rooms/*.ts) into real ECS entities + three.js
@@ -344,6 +347,7 @@ export function spawnNpcs(world: World, physics: Physics, scene: THREE.Scene, sp
     addComponent(world, eid, Object3DRef);
     addComponent(world, eid, Health);
     addComponent(world, eid, Combat);
+    addComponent(world, eid, Stamina);
     const floorY = floorBaseline(spawn.floor ?? 0);
     Position.x[eid] = spawn.x;
     Position.y[eid] = floorY; // the humanoid rig's origin is at its feet
@@ -379,11 +383,10 @@ export function spawnNpcs(world: World, physics: Physics, scene: THREE.Scene, sp
     Health.current[eid] = archetype.health;
     Health.max[eid] = archetype.health;
     Combat.attackRecovery[eid] = 0;
-    Combat.parryStartup[eid] = 0;
-    Combat.parryWindow[eid] = 0;
-    Combat.parryRecovery[eid] = 0;
-    Combat.parryMitigation[eid] = PARRY_MITIGATION[archetype.parryWeaponClass ?? "unarmed"];
+    Combat.blocking[eid] = 0;
     Combat.agility[eid] = archetype.agility ?? 0;
+    Stamina.max[eid] = archetype.maxStamina ?? DEFAULT_NPC_MAX_STAMINA;
+    Stamina.current[eid] = Stamina.max[eid];
 
     const mesh = archetype.createMesh(eid);
     scene.add(mesh);

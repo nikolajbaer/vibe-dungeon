@@ -229,19 +229,29 @@ export interface NpcArchetypeDef {
   attackDamage?: number;
   /** Aggressive only: reach (meters) of this archetype's melee swing box —
    * same meaning as `ItemAssetDef.meleeReach`, since an NPC never actually
-   * equips a real weapon item (its `parryWeaponClass` is cosmetic/numeric
+   * equips a real weapon item (its `weaponClass` is cosmetic/numeric
    * only — see `createAnimatedNpcMesh`'s rig-baked weapon mesh). Omitted
-   * archetypes fall back to a value picked from `parryWeaponClass`, the
+   * archetypes fall back to a value picked from `weaponClass`, the
    * same "derive a sensible default from the weapon class" pattern
    * `attackDamage`/`attackRange` already fall back to in `npc.ts`. */
   attackReach?: number;
   /** Aggressive only: seconds between attacks while `ATTACKING` and still
    * in range. */
   attackCooldown?: number;
-  /** Chance from 0..1 to detect and parry an incoming melee attack. */
+  /** Chance from 0..1 that this NPC is already blocking at the instant an
+   * incoming melee hit lands (`combat.ts`'s `applyMeleeDamage`) -- an NPC
+   * has no real held-block input of its own, so this stands in for one. */
   agility?: number;
-  /** What the NPC visually parries with; controls damage reduction. */
-  parryWeaponClass?: "unarmed" | "dagger" | "oneHanded";
+  /** What this NPC effectively fights and defends with -- used both as the
+   * `attackDamage`/`attackReach` fallback basis above and to look up its
+   * block mitigation (`combat.ts`'s `BLOCK_MITIGATION`) when it blocks a
+   * hit, since an NPC never actually equips a real weapon item to read
+   * either from directly. */
+  weaponClass?: "unarmed" | "dagger" | "oneHanded";
+  /** Max stamina (RPG groundwork -- see `ecs/components.ts`'s `Stamina`).
+   * Omitted archetypes fall back to `DEFAULT_NPC_MAX_STAMINA` in
+   * `level/spawning.ts`. */
+  maxStamina?: number;
   /** Aggressive only: movement speed (m/s) while `CHASING` — deliberately a
    * separate field from a docile archetype's (shared, module-level) wander/
    * follow speeds in `npc.ts`, since only aggressive archetypes need to

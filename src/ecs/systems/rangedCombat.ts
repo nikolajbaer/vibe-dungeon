@@ -5,6 +5,7 @@ import { ITEM_REGISTRY } from "../../assets/itemRegistry";
 import type { ItemAssetDef } from "../../assets/types";
 import { isHandSlot } from "./items";
 import { applyRangedDamage } from "./combat";
+import { BODY_PART_DAMAGE_MULTIPLIER, getBodyPartAt } from "./meleeCollision";
 import { buildItemWorldBody, withPickupHitbox } from "../../level/spawning";
 import type { Physics } from "../../physics/world";
 import { hudStore } from "../../hud/store";
@@ -299,7 +300,16 @@ export function rangedCombatSystem(world: World, physics: Physics, scene: THREE.
     if (hit) {
       const targetEid = owningEid(hit.object);
       if (targetEid !== undefined && hasComponent(world, targetEid, Health) && !hasComponent(world, targetEid, Dead)) {
-        applyRangedDamage(world, targetEid, bolt.damage, bolt.attackerEid);
+        // Melee moved to flat damage regardless of struck body part (see
+        // meleeCollision.ts's BODY_PART_DAMAGE_MULTIPLIER doc comment), but
+        // a bolt still has one real hit point to place, so ranged keeps the
+        // precision reward: whichever combat hitbox cylinder the impact
+        // point falls inside (a plain height lookup, not a physics query --
+        // see getBodyPartAt) scales the damage the same way it used to for
+        // melee.
+        const part = getBodyPartAt(targetEid, hit.point.y);
+        const damage = part ? bolt.damage * BODY_PART_DAMAGE_MULTIPLIER[part] : bolt.damage;
+        applyRangedDamage(world, targetEid, damage, bolt.attackerEid, part);
       }
       makeRecoverableBolt(world, physics, scene, bolt, hit);
       flyingBolts.splice(i, 1);

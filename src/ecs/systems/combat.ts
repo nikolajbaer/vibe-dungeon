@@ -1,6 +1,7 @@
 import { addComponent, hasComponent, query, type World } from "bitecs";
-import { Carried, Combat, Dead, Health, Item, NPC, NpcState, PlayerControlled, Practice, Rotation } from "../components";
+import { Carried, Combat, Dead, Health, Item, NPC, NpcState, PlayerControlled, Practice, Rotation, Stamina } from "../components";
 import { ITEM_REGISTRY } from "../../assets/itemRegistry";
+import { NPC_REGISTRY } from "../../assets/npcRegistry";
 import { isHandSlot, triggerViewmodelSwing, triggerViewmodelParry } from "./items";
 import { triggerDeathCollapse, triggerHitReaction, triggerParry } from "./npcAnimation";
 import { flashCharacterHit, flashWeaponHit } from "./hitboxDebug";
@@ -47,18 +48,48 @@ export const ATTACK_ACTIVE_WINDOW: Record<AttackType, number> = {
 
 export const UNARMED_DAMAGE = 5;
 /** Reach (meters) for an attacker with no weapon equipped (or, for an NPC,
- * no `attackReach` and no `parryWeaponClass` to derive one from) -- the
+ * no `attackReach` and no `weaponClass` to derive one from) -- the
  * same "sensible unarmed default" role `UNARMED_DAMAGE` already plays for
  * damage. */
 export const UNARMED_REACH = 0.9;
-export const PARRY_MITIGATION: Record<WeaponClass, number> = {
+
+/** Fraction of incoming melee damage removed while the defender is
+ * blocking -- Skyrim-style: held for as long as the block input is down (or,
+ * for an NPC, however long its reactive `agility` roll happens to cover),
+ * not a timed window the defender has to land. A bigger weapon/shield
+ * blocks better, the same balance the old timed-parry system used, just no
+ * longer gated on timing skill. */
+export const BLOCK_MITIGATION: Record<WeaponClass, number> = {
   unarmed: 0.3,
   dagger: 0.5,
   oneHanded: 0.75,
 };
-export const PARRY_STARTUP = 0.1;
-export const PARRY_WINDOW = 0.28;
-export const PARRY_RECOVERY = 0.75;
+
+/** Purely cosmetic -- how long the first-person weapon's "guard raised"
+ * flourish plays when block starts (see `setBlocking`). The actual
+ * mitigation lasts exactly as long as `Combat.blocking` is set, independent
+ * of this; a genuinely held guard *pose* (rather than a brief raise-then-
+ * settle animation) is a follow-up animation-system improvement, not
+ * something this constant tries to fake. */
+const BLOCK_RAISE_ANIMATION_SECONDS = 0.3;
+
+/** Stamina cost of each attack type -- roughly tracks the balance table
+ * above (a chop is the "power attack" analog: slow, strong, and the most
+ * expensive). NPCs have no jab/cross/chop of their own and pay `cross`'s
+ * cost for their one generic swing, same as they reuse its shape/damage
+ * multiplier. Insufficient stamina simply refuses the attack outright
+ * (`tryMeleeAttack` returns false), the same as being on cooldown. */
+export const ATTACK_STAMINA_COST: Record<AttackType, number> = {
+  jab: 8,
+  cross: 12,
+  chop: 20,
+};
+
+/** Stamina regenerated per second while not... doing anything special --
+ * regen is unconditional and continuous (no post-attack delay) for now,
+ * the simplest version of the mechanic. A future leveling/perk system is
+ * the intended place to let this vary per character. */
+export const STAMINA_REGEN_PER_SECOND = 15;
 
 interface EquippedWeapon {
   itemEid: number;
@@ -84,8 +115,16 @@ function getEquippedWeapon(world: World, attackerEid: number): EquippedWeapon | 
   return best;
 }
 
+/** What `eid` effectively fights/defends with -- a real carried weapon item
+ * if it has one (the player always does, when armed), otherwise, for an
+ * NPC, its archetype's own `weaponClass` (NPCs never equip a real weapon
+ * item -- see `NpcArchetypeDef.weaponClass`'s doc comment), otherwise
+ * unarmed. */
 function weaponClassFor(world: World, eid: number): WeaponClass {
-  return getEquippedWeapon(world, eid)?.weaponClass ?? "unarmed";
+  const equipped = getEquippedWeapon(world, eid);
+  if (equipped) return equipped.weaponClass;
+  if (hasComponent(world, eid, NPC)) return NPC_REGISTRY[NPC.archetypeId[eid]]?.weaponClass ?? "unarmed";
+  return "unarmed";
 }
 
 function recordFriendlyFire(world: World, targetEid: number, attackerEid?: number): void {
@@ -99,53 +138,61 @@ function recordFriendlyFire(world: World, targetEid: number, attackerEid?: numbe
   }
 }
 
-/** Advances attack recovery and the startup/active/recovery phases of parry. */
+/** Advances attack recovery and regenerates stamina. */
 export function combatSystem(world: World, dt: number): void {
   for (const eid of query(world, [Combat])) {
     Combat.attackRecovery[eid] = Math.max(0, Combat.attackRecovery[eid] - dt);
-    Combat.parryRecovery[eid] = Math.max(0, Combat.parryRecovery[eid] - dt);
-    if (Combat.parryStartup[eid] > 0) {
-      Combat.parryStartup[eid] = Math.max(0, Combat.parryStartup[eid] - dt);
-      if (Combat.parryStartup[eid] === 0) Combat.parryWindow[eid] = PARRY_WINDOW;
-    } else {
-      Combat.parryWindow[eid] = Math.max(0, Combat.parryWindow[eid] - dt);
+    if (hasComponent(world, eid, Stamina)) {
+      Stamina.current[eid] = Math.min(Stamina.max[eid], Stamina.current[eid] + STAMINA_REGEN_PER_SECOND * dt);
     }
   }
 }
 
-/** Starts a timed parry. It cannot be buffered during attack/parry recovery. */
-export function tryParry(world: World, defenderEid?: number): boolean {
-  const eid = defenderEid ?? query(world, [PlayerControlled, Combat])[0];
-  if (eid === undefined || Combat.attackRecovery[eid] > 0 || Combat.parryRecovery[eid] > 0) return false;
-  Combat.parryStartup[eid] = PARRY_STARTUP;
-  Combat.parryWindow[eid] = 0;
-  Combat.parryRecovery[eid] = PARRY_RECOVERY;
+/**
+ * Sets whether `eid` is currently holding block (Skyrim-style: a plain held
+ * state, not a timed window to land) -- called every frame from game.ts
+ * with the real-time state of the block input (`keyboard.isDown`, or a
+ * touch block gesture's own pulse), not edge-triggered like the old
+ * `tryParry` was, since block needs to track "still held" every frame, not
+ * just the moment it started.
+ *
+ * Raising block (the `held && !already blocking` transition) is refused
+ * mid-attack-recovery -- the same "can't parry mid-swing" gate the old
+ * timed parry had -- and plays the brief "weapon comes up" flourish once;
+ * releasing it (`!held`) always succeeds. Holding it down across frames
+ * where it was already up is a no-op, not a repeated trigger.
+ */
+export function setBlocking(world: World, eid: number, held: boolean): void {
+  if (!hasComponent(world, eid, Combat)) return;
+  const wasBlocking = Combat.blocking[eid] > 0;
+  if (!held) {
+    Combat.blocking[eid] = 0;
+    return;
+  }
+  if (wasBlocking || Combat.attackRecovery[eid] > 0) return;
+  Combat.blocking[eid] = 1;
   const weapon = getEquippedWeapon(world, eid);
-  Combat.parryMitigation[eid] = PARRY_MITIGATION[weapon?.weaponClass ?? "unarmed"];
-  if (weapon) triggerViewmodelParry(weapon.itemEid, PARRY_RECOVERY);
+  if (weapon) triggerViewmodelParry(weapon.itemEid, BLOCK_RAISE_ANIMATION_SECONDS);
   triggerParry(eid);
-  return true;
 }
 
-/** Applies one resolved hit and returns the actual post-parry damage. */
+/** Applies one resolved hit and returns the actual post-block damage. */
 export function applyMeleeDamage(world: World, targetEid: number, rawDamage: number, attackerEid?: number, part?: CombatBodyPart): number {
   if (!hasComponent(world, targetEid, Health) || hasComponent(world, targetEid, Dead)) return 0;
-  if (hasComponent(world, targetEid, Combat)
-      && Combat.parryRecovery[targetEid] <= 0
-      && Combat.agility[targetEid] > 0
-      && Math.random() < Combat.agility[targetEid]) {
-    // NPCs detect the incoming wind-up, so their successful reactive parry
-    // enters the active window before this strike resolves.
-    Combat.parryStartup[targetEid] = 0;
-    Combat.parryWindow[targetEid] = PARRY_WINDOW;
-    Combat.parryRecovery[targetEid] = PARRY_RECOVERY;
-    triggerParry(targetEid);
-  }
-  const mitigation = hasComponent(world, targetEid, Combat) && Combat.parryWindow[targetEid] > 0
-    ? Combat.parryMitigation[targetEid] || PARRY_MITIGATION[weaponClassFor(world, targetEid)]
-    : 0;
+  // The player's own `Combat.blocking` is a real held key/gesture, tracked
+  // every frame by `setBlocking` -- there's nothing to roll for. An NPC has
+  // no such input, so it instead rolls once, right here, whether it happens
+  // to be blocking at the exact instant this swing lands, using `agility` as
+  // that chance (the same role it played reacting into the old timed parry
+  // window, just without a window to react into anymore).
+  const isPlayerDefender = hasComponent(world, targetEid, PlayerControlled);
+  const npcReactiveBlock = !isPlayerDefender && hasComponent(world, targetEid, Combat)
+    && Combat.agility[targetEid] > 0 && Math.random() < Combat.agility[targetEid];
+  const isBlocking = (hasComponent(world, targetEid, Combat) && Combat.blocking[targetEid] > 0) || npcReactiveBlock;
+  if (npcReactiveBlock) triggerParry(targetEid);
+  const mitigation = isBlocking ? BLOCK_MITIGATION[weaponClassFor(world, targetEid)] : 0;
   const damage = Math.max(1, Math.round(rawDamage * (1 - mitigation)));
-  // A parried hit (mitigation > 0) is already its own visual feedback --
+  // A blocked hit (mitigation > 0) is already its own visual feedback --
   // this is the same "did it land clean" gate `triggerHitReaction` below
   // uses, shared here so the hitbox debug overlay's red flash (play-testing
   // aid only, see hitboxDebug.ts) never fires for a hit the defender
@@ -174,11 +221,16 @@ export function applyMeleeDamage(world: World, targetEid: number, rawDamage: num
   return damage;
 }
 
-/** Projectile damage bypasses melee parry detection but shares death/hit
- * reactions and practice-health semantics with hand-to-hand attacks. */
-export function applyRangedDamage(world: World, targetEid: number, rawDamage: number, attackerEid?: number): number {
+/** Projectile damage bypasses melee blocking entirely (no shield-raise for
+ * an incoming bolt yet) but shares death/hit reactions and practice-health
+ * semantics with hand-to-hand attacks, plus the same hitbox-debug flash --
+ * `rawDamage` already carries the struck body part's multiplier by the time
+ * it gets here (see rangedCombat.ts), `part` is only for the flash. */
+export function applyRangedDamage(world: World, targetEid: number, rawDamage: number, attackerEid?: number, part?: CombatBodyPart): number {
   if (!hasComponent(world, targetEid, Health) || hasComponent(world, targetEid, Dead)) return 0;
   const damage = Math.max(1, Math.round(rawDamage));
+  flashCharacterHit(targetEid, part);
+  if (attackerEid !== undefined) flashWeaponHit(attackerEid);
   if (hasComponent(world, targetEid, Practice) && Practice.active[targetEid]) {
     Practice.points[targetEid] = Math.max(0, Practice.points[targetEid] - damage);
     triggerHitReaction(targetEid);
@@ -201,15 +253,20 @@ export function applyRangedDamage(world: World, targetEid: number, rawDamage: nu
  * parameter needed here anymore). Recovery gates subsequent attacks and
  * matches the balance table above; whether the swing actually connects is
  * resolved later, by `meleeCollisionSystem`, once its active window has had
- * a chance to overlap a target. */
+ * a chance to overlap a target. Refuses outright -- same as being on
+ * cooldown -- while blocking (can't swing with your guard up) or without
+ * enough stamina for this attack type's `ATTACK_STAMINA_COST`. */
 export function tryMeleeAttack(world: World, attackType: AttackType = "jab"): boolean {
   const [attackerEid] = query(world, [PlayerControlled, Combat]);
-  if (attackerEid === undefined || Combat.attackRecovery[attackerEid] > 0 || Combat.parryRecovery[attackerEid] > 0) return false;
+  if (attackerEid === undefined || Combat.attackRecovery[attackerEid] > 0 || Combat.blocking[attackerEid] > 0) return false;
+  const cost = ATTACK_STAMINA_COST[attackType];
+  if (hasComponent(world, attackerEid, Stamina) && Stamina.current[attackerEid] < cost) return false;
 
   const profile = ATTACK_PROFILES[attackType];
   const shape = ATTACK_SHAPES[attackType];
   const weapon = getEquippedWeapon(world, attackerEid);
   Combat.attackRecovery[attackerEid] = profile.recovery;
+  if (hasComponent(world, attackerEid, Stamina)) Stamina.current[attackerEid] -= cost;
   if (weapon) triggerViewmodelSwing(weapon.itemEid, attackType, profile.recovery);
 
   const reach = (weapon?.reach ?? UNARMED_REACH) * shape.reachMultiplier;

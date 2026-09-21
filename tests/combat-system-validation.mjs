@@ -4,45 +4,80 @@ import {createServer} from 'vite';
 const server=await createServer({server:{middlewareMode:true},appType:'custom'});
 try {
   const {addComponent,addEntity,createWorld}=await import('bitecs');
-  const {Combat,Health,Item,Carried,NPC,NpcState,PlayerControlled}=await server.ssrLoadModule('/src/ecs/components.ts');
-  const {ATTACK_PROFILES,PARRY_MITIGATION,PARRY_STARTUP,PARRY_WINDOW,applyMeleeDamage,combatSystem,tryParry}=await server.ssrLoadModule('/src/ecs/systems/combat.ts');
+  const {Combat,Health,Item,Carried,NPC,NpcState,PlayerControlled,Stamina}=await server.ssrLoadModule('/src/ecs/components.ts');
+  const {ATTACK_PROFILES,ATTACK_STAMINA_COST,BLOCK_MITIGATION,STAMINA_REGEN_PER_SECOND,applyMeleeDamage,combatSystem,setBlocking,tryMeleeAttack}=await server.ssrLoadModule('/src/ecs/systems/combat.ts');
   const {classifyCombatGesture}=await server.ssrLoadModule('/src/input/touchControls.ts');
 
   assert.deepEqual(ATTACK_PROFILES,{jab:{damageMultiplier:.7,recovery:.5},cross:{damageMultiplier:1,recovery:.75},chop:{damageMultiplier:1.35,recovery:1}});
-  assert.deepEqual(PARRY_MITIGATION,{unarmed:.3,dagger:.5,oneHanded:.75});
+  assert.deepEqual(BLOCK_MITIGATION,{unarmed:.3,dagger:.5,oneHanded:.75});
   assert.equal(classifyCombatGesture(6,8),'jab','10px remains a tap');
   assert.equal(classifyCombatGesture(-11,2),'cross','left swipe swings');
   assert.equal(classifyCombatGesture(11,2),'jab','right swipe jabs');
   assert.equal(classifyCombatGesture(2,-11),'chop','up swipe chops');
-  assert.equal(classifyCombatGesture(2,11),'parry','down swipe parries');
+  assert.equal(classifyCombatGesture(2,11),'block','down swipe blocks');
 
   const setup=(weapon)=>{
     const world=createWorld(),defender=addEntity(world);
     addComponent(world,defender,Health);addComponent(world,defender,Combat);
     Health.current[defender]=100;Health.max[defender]=100;
-    Combat.attackRecovery[defender]=0;Combat.parryStartup[defender]=0;Combat.parryWindow[defender]=0;Combat.parryRecovery[defender]=0;
-    Combat.parryMitigation[defender]=0;Combat.agility[defender]=0;
+    Combat.attackRecovery[defender]=0;Combat.blocking[defender]=0;Combat.agility[defender]=0;
     if(weapon){const item=addEntity(world);addComponent(world,item,Item);addComponent(world,item,Carried);Item.itemTypeId[item]=weapon;Carried.ownerEid[item]=defender;Carried.slot[item]='hand-right';}
     return {world,defender};
   };
 
+  // Held block (Skyrim-style, replacing the old timed parry): mitigation is
+  // looked up live from whatever's currently equipped, not snapshotted when
+  // block started, and there's no window to miss -- every hit while it's
+  // held is mitigated, and releasing it drops straight back to full damage.
   for(const [weapon,expected] of [[undefined,7],['dagger',5],['sword',3]]){
     const {world,defender}=setup(weapon);
-    assert(tryParry(world,defender),`${weapon??'unarmed'} parry starts`);
-    applyMeleeDamage(world,defender,10);
-    assert.equal(Health.current[defender],90,'startup does not mitigate');
-    combatSystem(world,PARRY_STARTUP);
-    assert.equal(Combat.parryWindow[defender],PARRY_WINDOW,'active window opens after startup');
+    setBlocking(world,defender,true);
+    assert.equal(Combat.blocking[defender],1,`${weapon??'unarmed'} block raises`);
     assert.equal(applyMeleeDamage(world,defender,10),expected,`${weapon??'unarmed'} mitigation`);
-    assert(!tryParry(world,defender),'parry cannot be spammed during recovery');
+    setBlocking(world,defender,false);
+    assert.equal(Combat.blocking[defender],0,'releasing block clears the flag');
+    assert.equal(applyMeleeDamage(world,defender,10),10,'an unblocked hit lands full damage');
   }
+
+  // Block can't be raised mid-attack-recovery -- the same "can't parry
+  // mid-swing" gate the old timed parry had.
+  {
+    const {world,defender}=setup();
+    Combat.attackRecovery[defender]=0.5;
+    setBlocking(world,defender,true);
+    assert.equal(Combat.blocking[defender],0,'block cannot be raised mid-attack-recovery');
+  }
+
+  // NPC reactive block: agility rolls once per landed hit (no held input of
+  // its own), rather than reacting into a timed window.
   {
     const {world,defender}=setup();
     Combat.agility[defender]=1;
-    Combat.parryMitigation[defender]=PARRY_MITIGATION.dagger;
-    assert.equal(applyMeleeDamage(world,defender,10),5,'agile NPC detects the strike and dagger-parries');
-    assert(Combat.parryWindow[defender]>0,'reactive NPC parry opens the active window');
+    assert.equal(applyMeleeDamage(world,defender,10),7,'a fully agile unarmed NPC always blocks (30% mitigation)');
   }
+  {
+    const {world,defender}=setup();
+    Combat.agility[defender]=0;
+    assert.equal(applyMeleeDamage(world,defender,10),10,'a zero-agility NPC never reactively blocks');
+  }
+
+  // Stamina: each attack type costs stamina and refuses outright -- the same
+  // as being on cooldown -- once it's too low; it regenerates continuously.
+  {
+    const world=createWorld(),player=addEntity(world);
+    addComponent(world,player,PlayerControlled);addComponent(world,player,Combat);addComponent(world,player,Stamina);
+    Combat.attackRecovery[player]=0;Combat.blocking[player]=0;Combat.agility[player]=0;
+    Stamina.max[player]=100;Stamina.current[player]=100;
+    assert.equal(tryMeleeAttack(world,'chop'),true,'enough stamina lets the attack through');
+    assert.equal(Stamina.current[player],100-ATTACK_STAMINA_COST.chop,'the attack deducted its stamina cost');
+    Combat.attackRecovery[player]=0; // bypass recovery gate to isolate the stamina check
+    Stamina.current[player]=ATTACK_STAMINA_COST.chop-1;
+    assert.equal(tryMeleeAttack(world,'chop'),false,'too little stamina refuses the attack outright');
+    assert.equal(Stamina.current[player],ATTACK_STAMINA_COST.chop-1,'a refused attack never deducts stamina');
+    combatSystem(world,1);
+    assert.ok(Math.abs(Stamina.current[player]-(ATTACK_STAMINA_COST.chop-1+STAMINA_REGEN_PER_SECOND))<1e-9,'stamina regenerates over time');
+  }
+
   {
     const {world,defender}=setup(),player=addEntity(world);
     addComponent(world,defender,NPC);addComponent(world,player,PlayerControlled);
@@ -54,5 +89,5 @@ try {
     assert.equal(NPC.state[defender],NpcState.CHASING);
     assert.equal(NPC.drawRemaining[defender],.5,'retaliation waits for weapon draw');
   }
-  console.log('attack balance, recovery and timed parry mitigation passed');
+  console.log('attack balance, held block mitigation, and stamina gating passed');
 } finally {await server.close();}
