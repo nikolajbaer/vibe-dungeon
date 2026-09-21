@@ -8,6 +8,7 @@ try {
   const {Dead,Health,NPC,NpcState,PlayerControlled,Position,Practice,Stamina}=await server.ssrLoadModule('/src/ecs/components.ts');
   const {hudStore}=await server.ssrLoadModule('/src/hud/store.ts');
   const {hudSync}=await server.ssrLoadModule('/src/ecs/systems/hudSync.ts');
+  const {setHitboxDebugEnabled}=await server.ssrLoadModule('/src/ecs/systems/hitboxDebug.ts');
 
   // A real camera (for real projection math) looking down -Z from the
   // origin, matching this project's own forward convention -- and a
@@ -77,15 +78,22 @@ try {
   assert.deepEqual(hudStore.enemyHealthBars,[]);
   Practice.active[chaser]=0;
 
-  // Floating state label: a provoked (or aggressive-archetype) NPC gets one
-  // at any state, LOITERING included -- broader than the health tiles above,
-  // since the point is to see an enemy go idle -> alert -> attacking, not
-  // only ever read "Attacking" once it's already too late to matter.
+  // Floating state labels are a play-testing aid, gated on the "Show
+  // hitboxes" debug toggle (hitboxDebug.ts) -- off by default, and off here
+  // too until explicitly enabled below, so a provoked NPC gets none yet.
   NPC.provoked[loitering]=1;
   NPC.state[loitering]=NpcState.LOITERING;
   hudSync(world,camera,renderer);
+  assert.deepEqual(hudStore.enemyLabels,[],'labels stay off while the hitbox debug toggle is disabled, even for a provoked NPC');
+
+  // Enabling it turns labels on: a provoked (or aggressive-archetype) NPC
+  // gets one at any state, LOITERING included -- broader than the health
+  // tiles above, since the point is to see an enemy go idle -> alert ->
+  // attacking, not only ever read "Attacking" once it's already too late.
+  setHitboxDebugEnabled(true);
+  hudSync(world,camera,renderer);
   let label=hudStore.enemyLabels.find((l)=>l.eid===loitering);
-  assert.ok(label,'a provoked NPC gets a floating label even while merely LOITERING');
+  assert.ok(label,'a provoked NPC gets a floating label once hitbox debug is enabled, even while merely LOITERING');
   assert.equal(label.text,'Idle');
   assert.equal(label.state,NpcState.LOITERING);
   assert.ok(Number.isFinite(label.x)&&Number.isFinite(label.y),'the label carries real projected screen coordinates');
