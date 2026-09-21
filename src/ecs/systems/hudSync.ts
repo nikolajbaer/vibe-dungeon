@@ -4,6 +4,7 @@ import { Dead, Health, NPC, NpcState, PlayerControlled, Position, Practice, Stam
 import { NPC_REGISTRY } from "../../assets/npcRegistry";
 import { hudStore, type EnemyHealthEntry, type EnemyLabelEntry } from "../../hud/store";
 import { worldToScreen } from "../../render/worldToScreen";
+import { isHitboxDebugEnabled } from "./hitboxDebug";
 
 /** How far above an NPC's feet (`Position.y`) its state label floats --
  * just clear of a humanoid's ~1.79m head (`HUMANOID_HEIGHT`, level/spawning.ts). */
@@ -58,7 +59,12 @@ export function hudSync(world: World, camera: THREE.Camera, renderer: THREE.WebG
   // included, so the player can see a bandit go from idle to alert to
   // attacking rather than only ever reading "Chasing"/"Attacking" once it's
   // already too late to matter -- hence `isCombatCapable` below rather than
-  // reusing the CHASING/ATTACKING check the health tiles use.
+  // reusing the CHASING/ATTACKING check the health tiles use. It's a
+  // play-testing aid, not shipped player-facing UI, so it only ever shows
+  // alongside the "Show hitboxes" debug toggle (hitboxDebug.ts) -- checked
+  // once per frame here rather than skipping the loop below entirely, since
+  // the health-tile half of it still needs to run either way.
+  const showLabels = isHitboxDebugEnabled();
   const enemies: EnemyHealthEntry[] = [];
   const labels: EnemyLabelEntry[] = [];
   for (const eid of query(world, [NPC, Health, Position])) {
@@ -69,6 +75,7 @@ export function hudSync(world: World, camera: THREE.Camera, renderer: THREE.WebG
       enemies.push({ eid, current: Health.current[eid], max: Health.max[eid] });
     }
 
+    if (!showLabels) continue;
     const archetype = NPC_REGISTRY[NPC.archetypeId[eid]];
     const isCombatCapable = archetype?.behavior === "aggressive" || !!NPC.provoked[eid];
     if (!isCombatCapable) continue;

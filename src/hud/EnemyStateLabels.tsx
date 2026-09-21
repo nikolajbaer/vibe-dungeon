@@ -14,10 +14,12 @@ const STATE_CLASS: Record<number, string> = {
 /**
  * Floating text above every combat-capable NPC in view, showing its current
  * `NpcState` (`hudSync.ts` does the screen-space projection, since the store
- * itself has no camera to project with). Unlike `EnemyHealthBars.tsx` this
- * isn't gated on `hudStore.inCombat` -- the whole point is to see an enemy
- * go from idle to alert to attacking, not just read "Attacking" once it
- * already is.
+ * itself has no camera to project with, and only bothers when the "Show
+ * hitboxes" debug toggle is on -- see hudSync.ts's own doc comment for why
+ * this is a play-testing aid, not shipped player-facing UI). Unlike
+ * `EnemyHealthBars.tsx` it also isn't gated on `hudStore.inCombat` -- the
+ * whole point is to see an enemy go from idle to alert to attacking, not
+ * just read "Attacking" once it already is.
  */
 export function EnemyStateLabels() {
   const labels = useObserved(() => hudStore.enemyLabels);
