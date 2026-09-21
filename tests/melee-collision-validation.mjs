@@ -247,5 +247,78 @@ try {
     assert.ok(Health.current[player]<100,'the resolved swing actually damaged the player');
   }
 
-  console.log('melee swing collision, flat damage, cylinder placement, weapon reach, stamina gating and NPC attack passed');
+  // Cleave: a swing wide enough to overlap two distinct, separately-placed
+  // targets damages both, not just whichever one the query happens to find
+  // first -- the "count one collision for the swing" block above already
+  // covers the *other* half of this (several cylinders on the *same*
+  // target still dedupe to one hit); this is the cross-target case.
+  {
+    const bx=nextBlock();
+    const attacker=spawnCombatant(bx,{dz:0});
+    const left=spawnCombatant(bx,{dx:-.5,dz:-1});
+    const right=spawnCombatant(bx,{dx:.5,dz:-1});
+    warmUp();
+    registerMeleeSwing(attacker,0,-1,1.4,2.4,1.1,15,.2); // wide chop-like box spanning both targets
+    const hits=tick(1/60);
+    assert.equal(hits.length,2,'a wide swing overlapping two distinct targets hits both, not just one');
+    const hitEids=new Set(hits.map(h=>h.targetEid));
+    assert.ok(hitEids.has(left)&&hitEids.has(right),'both the left and right target are among the resolved hits');
+    for(const hit of hits) assert.equal(hit.damage,15,'every cleaved target takes the swing\'s full, undivided damage');
+  }
+
+  // Same-team NPCs never damage each other, even when a swing's box overlaps
+  // them; a different-team target in that same swing still gets hit.
+  {
+    const bx=nextBlock();
+    const attacker=spawnCombatant(bx,{dz:0});
+    addComponent(world,attacker,NPC);NPC.team[attacker]=1;
+    const ally=spawnCombatant(bx,{dx:-.5,dz:-1});
+    addComponent(world,ally,NPC);NPC.team[ally]=1;
+    const enemy=spawnCombatant(bx,{dx:.5,dz:-1});
+    addComponent(world,enemy,NPC);NPC.team[enemy]=2;
+    warmUp();
+    registerMeleeSwing(attacker,0,-1,1.4,2.4,1.1,15,.2);
+    const hits=tick(1/60);
+    assert.equal(hits.length,1,'a swing overlapping both an ally and an enemy only resolves against the enemy');
+    assert.equal(hits[0].targetEid,enemy,'the same-team ally is skipped entirely');
+  }
+
+  // Real NPC-vs-NPC combat, end to end through npcSystem: two aggressive
+  // bandits on different teams, no player involved at all, actually chase
+  // (findHostileTarget generalizes npc.ts's old hardcoded "always the
+  // player") and land real resolved hits on *each other*.
+  {
+    const bx=nextBlock();
+    const npcA=spawnCombatant(bx,{dz:0});
+    addComponent(world,npcA,NPC);addComponent(world,npcA,Velocity);addComponent(world,npcA,Stamina);
+    Velocity.x[npcA]=0;Velocity.z[npcA]=0;
+    Health.current[npcA]=Health.max[npcA]=bandit.health;
+    NPC.archetypeId[npcA]='bandit';NPC.team[npcA]=1;
+    NPC.state[npcA]=NpcState.LOITERING;
+    NPC.attackCooldownRemaining[npcA]=0;NPC.drawRemaining[npcA]=0;NPC.provoked[npcA]=0;NPC.provocationHits[npcA]=0;
+    Stamina.max[npcA]=Stamina.current[npcA]=bandit.maxStamina;
+
+    const npcB=spawnCombatant(bx,{dz:-1});
+    addComponent(world,npcB,NPC);addComponent(world,npcB,Velocity);addComponent(world,npcB,Stamina);
+    Velocity.x[npcB]=0;Velocity.z[npcB]=0;
+    Health.current[npcB]=Health.max[npcB]=bandit.health;
+    NPC.archetypeId[npcB]='bandit';NPC.team[npcB]=2;
+    NPC.state[npcB]=NpcState.LOITERING;
+    NPC.attackCooldownRemaining[npcB]=0;NPC.drawRemaining[npcB]=0;NPC.provoked[npcB]=0;NPC.provocationHits[npcB]=0;
+    Stamina.max[npcB]=Stamina.current[npcB]=bandit.maxStamina;
+    warmUp();
+
+    let aHit=false, bHit=false;
+    for(let t=0;t<3 && !(aHit&&bHit);t+=1/60){
+      npcSystem(world,1/60);
+      for(const hit of tick(1/60)){
+        if(hit.targetEid===npcA) aHit=true;
+        if(hit.targetEid===npcB) bHit=true;
+      }
+    }
+    assert.ok(aHit&&bHit,'two different-team NPCs with no player around actually fight -- and land hits on -- each other');
+    assert.ok(Health.current[npcA]<bandit.health&&Health.current[npcB]<bandit.health,'both sides took real damage');
+  }
+
+  console.log('melee swing collision, flat damage, cylinder placement, weapon reach, stamina gating, cleave, team filtering and NPC-vs-NPC combat passed');
 } finally {await server.close();}

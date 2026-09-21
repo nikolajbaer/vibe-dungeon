@@ -1,10 +1,10 @@
 import { hasComponent, query, type World } from "bitecs";
-import { Dead, NPC, NpcState, Position, Rotation, Stamina, Velocity, PlayerControlled, Practice } from "../components";
+import { Dead, Health, NPC, NpcState, Position, Rotation, Stamina, Velocity, PlayerControlled, Practice } from "../components";
 import { NPC_REGISTRY } from "../../assets/npcRegistry";
 import type { NpcArchetypeDef } from "../../assets/types";
 import { triggerAttack, triggerWeaponDraw } from "./npcAnimation";
 import { ATTACK_ACTIVE_WINDOW, ATTACK_SHAPES, ATTACK_STAMINA_COST, UNARMED_REACH } from "./combat";
-import { registerMeleeSwing } from "./meleeCollision";
+import { isHostileTo, registerMeleeSwing } from "./meleeCollision";
 
 const FOLLOW_SPEED = 2; // m/s — slower than the player's 3.2 so it doesn't ride the player's heels
 export const FOLLOW_STOP_DISTANCE = 2; // meters — target follow distance, directly behind is fine for v1
@@ -83,11 +83,11 @@ export function npcSystem(world: World, dt: number): void {
       continue;
     }
     if (testStyle === "aggressive") {
-      updateAggressive(eid, playerEid, archetype, dt, true);
+      updateAggressive(world, eid, archetype, dt, true);
       continue;
     }
     if (testStyle === "defensive") {
-      if (NPC.provoked[eid]) updateAggressive(eid, playerEid, archetype, dt, true);
+      if (NPC.provoked[eid]) updateAggressive(world, eid, archetype, dt, true);
       else {
         Velocity.x[eid] = 0;
         Velocity.z[eid] = 0;
@@ -96,25 +96,26 @@ export function npcSystem(world: World, dt: number): void {
     }
     const sparring = hasComponent(world, eid, Practice) && !!Practice.active[eid];
     if (archetype?.behavior === "aggressive" || sparring || !!NPC.provoked[eid]) {
-      updateAggressive(eid, playerEid, archetype, dt, sparring);
+      updateAggressive(world, eid, archetype, dt, sparring);
       continue;
     }
 
     if (NPC.state[eid] === NpcState.FOLLOWING && playerEid !== undefined) {
-      seekPlayer(eid, playerEid, FOLLOW_SPEED, FOLLOW_STOP_DISTANCE);
+      seekTarget(eid, playerEid, FOLLOW_SPEED, FOLLOW_STOP_DISTANCE);
     } else {
       wander(eid, dt);
     }
   }
 }
 
-/** Moves `eid` toward `playerEid` at `speed`, stopping once within
- * `stopDistance` — shared by docile `FOLLOWING` and aggressive `CHASING`
- * (which just uses its own `chaseSpeed`/`attackRange` instead of
+/** Moves `eid` toward `targetEid` at `speed`, stopping once within
+ * `stopDistance` — shared by docile `FOLLOWING` (always the player) and
+ * aggressive `CHASING` (whatever `findHostileTarget` picked, which just
+ * uses its own `chaseSpeed`/`attackRange` instead of
  * `FOLLOW_SPEED`/`FOLLOW_STOP_DISTANCE`). */
-function seekPlayer(eid: number, playerEid: number, speed: number, stopDistance: number): void {
-  const dx = Position.x[playerEid] - Position.x[eid];
-  const dz = Position.z[playerEid] - Position.z[eid];
+function seekTarget(eid: number, targetEid: number, speed: number, stopDistance: number): void {
+  const dx = Position.x[targetEid] - Position.x[eid];
+  const dz = Position.z[targetEid] - Position.z[eid];
   const dist = Math.hypot(dx, dz);
 
   if (dist <= stopDistance) {
@@ -125,6 +126,38 @@ function seekPlayer(eid: number, playerEid: number, speed: number, stopDistance:
 
   Velocity.x[eid] = (dx / dist) * speed;
   Velocity.z[eid] = (dz / dist) * speed;
+}
+
+/**
+ * The nearest entity `eid` (an aggressive/provoked NPC) is hostile to --
+ * the player, or any other NPC on a different `NPC.team` (`isHostileTo`,
+ * meleeCollision.ts) -- for `updateAggressive` to chase/attack, in place of
+ * the old hardcoded "always the player." Re-picked fresh every frame rather
+ * than remembered once acquired: the simplest version of the mechanic (this
+ * codebase's own "v1, simple" bar elsewhere), and a real behavior in its
+ * own right -- an NPC mid-fight will redirect to a nearer threat that shows
+ * up, the same way `distToPlayer`/`homeDist` below were already recomputed
+ * fresh every frame with no memory of their own. `undefined` means no one
+ * to fight (every hostile candidate is dead, or there simply isn't one). */
+function findHostileTarget(world: World, eid: number): number | undefined {
+  let bestEid: number | undefined;
+  let bestDist = Infinity;
+  const consider = (candidateEid: number): void => {
+    if (candidateEid === eid) return;
+    if (hasComponent(world, candidateEid, Dead)) return;
+    if (!isHostileTo(world, eid, candidateEid)) return;
+    const dx = Position.x[candidateEid] - Position.x[eid];
+    const dz = Position.z[candidateEid] - Position.z[eid];
+    const dist = Math.hypot(dx, dz);
+    if (dist < bestDist) {
+      bestDist = dist;
+      bestEid = candidateEid;
+    }
+  };
+  const [playerEid] = query(world, [PlayerControlled, Position]);
+  if (playerEid !== undefined) consider(playerEid);
+  for (const otherEid of query(world, [NPC, Position, Health])) consider(otherEid);
+  return bestEid;
 }
 
 /** Sends `eid` back to `LOITERING`, re-anchoring its wander home to wherever
@@ -143,29 +176,36 @@ function giveUpAndLoiter(eid: number): void {
 
 /**
  * Drives one aggressive-archetype NPC: `LOITERING` wanders exactly like a
- * docile archetype until the player comes within `archetype.aggroRange` (a
- * plain distance check — no line-of-sight, see that field's doc comment in
- * `assets/types.ts`), then `CHASING` closes in at `archetype.chaseSpeed`
+ * docile archetype until a hostile target (the player, or another NPC on a
+ * different team — `findHostileTarget`) comes within `archetype.aggroRange`
+ * (a plain distance check — no line-of-sight, see that field's doc comment
+ * in `assets/types.ts`), then `CHASING` closes in at `archetype.chaseSpeed`
  * until within `archetype.attackRange`, then `ATTACKING` stops and swings
  * (a real hit-detection box, `archetype.attackDamage` at `archetype.attackReach`
  * — see `meleeCollision.ts`) every `archetype.attackCooldown` seconds for as
- * long as the player stays in range (stepping back out to `CHASING` if they
+ * long as the target stays in range (stepping back out to `CHASING` if they
  * retreat) — being in `attackRange` triggers the swing, not a guaranteed
  * hit, since the swing's own box is a separate, real geometric test. From either
  * `CHASING` or `ATTACKING`, straying more than `archetype.leashRange` from
  * home gives up and returns to `LOITERING` — see that field's doc comment
  * for why (an unleashed chase could otherwise cross the whole reachable
- * map once doors are open).
+ * map once doors are open). A sparring bout always targets the player
+ * specifically (never `findHostileTarget`) — a training dummy that
+ * wandered off to fight some other NPC mid-bout would defeat the point.
  */
-function updateAggressive(eid: number, playerEid: number | undefined, archetype: NpcArchetypeDef, dt: number, sparring = false): void {
-  if (playerEid === undefined) {
-    wander(eid, dt);
+function updateAggressive(world: World, eid: number, archetype: NpcArchetypeDef, dt: number, sparring = false): void {
+  const targetEid = sparring ? query(world, [PlayerControlled, Position])[0] : findHostileTarget(world, eid);
+  if (targetEid === undefined) {
+    // Nothing left to fight -- stand down from a chase/attack rather than
+    // freezing mid-battle-stance; already-LOITERING just keeps wandering.
+    if (NPC.state[eid] !== NpcState.LOITERING) giveUpAndLoiter(eid);
+    else wander(eid, dt);
     return;
   }
 
   if (NPC.state[eid] === NpcState.LOITERING) {
-    const dx = Position.x[playerEid] - Position.x[eid];
-    const dz = Position.z[playerEid] - Position.z[eid];
+    const dx = Position.x[targetEid] - Position.x[eid];
+    const dz = Position.z[targetEid] - Position.z[eid];
     if (sparring || Math.hypot(dx, dz) <= (archetype.aggroRange ?? 0)) {
       NPC.state[eid] = NpcState.CHASING;
       NPC.drawRemaining[eid] = .5;
@@ -183,9 +223,9 @@ function updateAggressive(eid: number, playerEid: number | undefined, archetype:
     return;
   }
 
-  const dx = Position.x[playerEid] - Position.x[eid];
-  const dz = Position.z[playerEid] - Position.z[eid];
-  const distToPlayer = Math.hypot(dx, dz);
+  const dx = Position.x[targetEid] - Position.x[eid];
+  const dz = Position.z[targetEid] - Position.z[eid];
+  const distToTarget = Math.hypot(dx, dz);
   const attackRange = archetype.attackRange ?? (NPC.provoked[eid] ? 1.5 : 0);
 
   if (NPC.drawRemaining[eid] > 0) {
@@ -193,12 +233,12 @@ function updateAggressive(eid: number, playerEid: number | undefined, archetype:
   }
 
   // Humanoids face local +Z, so this yaw points the bandit's chest, head,
-  // and held weapon at the player throughout both pursuit and melee guard.
+  // and held weapon at its target throughout both pursuit and melee guard.
   Rotation.yaw[eid] = Math.atan2(dx, dz);
 
-  if (distToPlayer > attackRange) {
+  if (distToTarget > attackRange) {
     NPC.state[eid] = NpcState.CHASING;
-    seekPlayer(eid, playerEid, NPC.moveSpeed[eid] || archetype.chaseSpeed || FOLLOW_SPEED, attackRange);
+    seekTarget(eid, targetEid, NPC.moveSpeed[eid] || archetype.chaseSpeed || FOLLOW_SPEED, attackRange);
     return;
   }
 

@@ -5,7 +5,7 @@ import { NPC_REGISTRY } from "../../assets/npcRegistry";
 import { isHandSlot, triggerViewmodelSwing, triggerViewmodelParry } from "./items";
 import { triggerDeathCollapse, triggerHitReaction, triggerParry } from "./npcAnimation";
 import { flashCharacterHit, flashWeaponHit } from "./hitboxDebug";
-import { registerMeleeSwing } from "./meleeCollision";
+import { isHostileTo, registerMeleeSwing } from "./meleeCollision";
 import type { CombatBodyPart } from "../../physics/world";
 
 export type AttackType = "jab" | "cross" | "chop";
@@ -228,6 +228,12 @@ export function applyMeleeDamage(world: World, targetEid: number, rawDamage: num
  * it gets here (see rangedCombat.ts), `part` is only for the flash. */
 export function applyRangedDamage(world: World, targetEid: number, rawDamage: number, attackerEid?: number, part?: CombatBodyPart): number {
   if (!hasComponent(world, targetEid, Health) || hasComponent(world, targetEid, Dead)) return 0;
+  // Melee's own team check lives in meleeCollisionSystem (it decides which
+  // targets a swing even resolves against in the first place); a bolt has
+  // no equivalent upstream filter, so it's checked here instead. Never
+  // affects player-vs-NPC combat -- the player is always team 0 and every
+  // NPC defaults to team 1, so they're never equal -- only NPC-vs-NPC.
+  if (attackerEid !== undefined && !isHostileTo(world, attackerEid, targetEid)) return 0;
   const damage = Math.max(1, Math.round(rawDamage));
   flashCharacterHit(targetEid, part);
   if (attackerEid !== undefined) flashWeaponHit(attackerEid);

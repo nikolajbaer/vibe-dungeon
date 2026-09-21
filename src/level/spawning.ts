@@ -380,6 +380,7 @@ export function spawnNpcs(world: World, physics: Physics, scene: THREE.Scene, sp
     NPC.provoked[eid] = 0;
     NPC.moveSpeed[eid] = 0;
     NPC.testStyle[eid] = undefined;
+    NPC.team[eid] = 1; // ordinary dungeon NPCs share the one "hostile to the player" team
     Health.current[eid] = archetype.health;
     Health.max[eid] = archetype.health;
     Combat.attackRecovery[eid] = 0;

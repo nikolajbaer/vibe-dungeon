@@ -82,14 +82,16 @@ export const MAX_SLOPE_CLIMB_DEGREES = 50;
 // are "which groups am I a member of", the low 16 are "which groups do I
 // interact with".
 //
-// Characters deliberately do NOT interact with each other — the pre-Rapier
-// collision pass resolved movers against level geometry only, never against
-// one another (an NPC and the player could overlap freely), and the migration
-// kept that. Making characters solid to each other is a one-line change here
-// rather than a system rewrite, but it's a gameplay decision, not a physics
-// one. Everything else interacts with everything: props collide with the
-// level, with characters (who push them), and with each other (so they
-// stack).
+// Characters interact with each other (below), on top of level geometry and
+// props: with multiple NPCs now spawnable in the same small area (the
+// combat-test sandbox's opponent count), letting them freely overlap read as
+// a bug rather than a quirk. Before this, the pre-Rapier collision pass
+// resolved movers against level geometry only, never against one another
+// (an NPC and the player could overlap freely), and the migration kept
+// that — flipping it is the one-line change noted here in case it ever
+// needs undoing. Everything else interacts with everything: props collide
+// with the level, with characters (who push them), and with each other (so
+// they stack).
 const GROUP_LEVEL = 0x0001;
 const GROUP_CHARACTER = 0x0002;
 const GROUP_PROP = 0x0004;
@@ -103,7 +105,7 @@ const GROUP_PROP = 0x0004;
 const GROUP_COMBAT_HITBOX = 0x0008;
 const GROUP_COMBAT_WEAPON = 0x0010;
 const LEVEL_GROUPS = (GROUP_LEVEL << 16) | (GROUP_LEVEL | GROUP_CHARACTER | GROUP_PROP);
-export const CHARACTER_GROUPS = (GROUP_CHARACTER << 16) | (GROUP_LEVEL | GROUP_PROP);
+export const CHARACTER_GROUPS = (GROUP_CHARACTER << 16) | (GROUP_LEVEL | GROUP_PROP | GROUP_CHARACTER);
 const PROP_GROUPS = (GROUP_PROP << 16) | (GROUP_LEVEL | GROUP_CHARACTER | GROUP_PROP);
 const COMBAT_HITBOX_GROUPS = (GROUP_COMBAT_HITBOX << 16) | GROUP_COMBAT_WEAPON;
 /** Not attached to any real collider — passed as the `filterGroups` argument
