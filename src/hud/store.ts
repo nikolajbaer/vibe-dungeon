@@ -34,6 +34,20 @@ export interface EnemyHealthEntry {
   max: number;
 }
 
+/** One combat-capable NPC's floating on-screen state label
+ * (`EnemyStateLabels.tsx`), already projected to screen-space pixel
+ * coordinates by `hudSync.ts` (the store has no camera to project with
+ * itself). `state` is the raw `NpcState` value, kept alongside the
+ * human-readable `text` so the label component can color-code by state
+ * without re-deriving it from the text. */
+export interface EnemyLabelEntry {
+  eid: number;
+  state: number;
+  text: string;
+  x: number;
+  y: number;
+}
+
 class HudStore {
   healthCurrent = 100;
   healthMax = 100;
@@ -47,6 +61,11 @@ class HudStore {
    * source of truth for "is there a live target out there" instead of two
    * that could drift apart. */
   enemyHealthBars: EnemyHealthEntry[] = [];
+  /** Every combat-capable NPC's floating state label, screen-projected by
+   * `hudSync.ts` -- broader than `enemyHealthBars` above (LOITERING
+   * included), since the point is to show an enemy's state at a glance
+   * before it's already attacking, not just once it is. */
+  enemyLabels: EnemyLabelEntry[] = [];
   /** True once `healthCurrent` hits 0 (aggressive NPC archetypes can now
    * actually kill the player) — drives `DeathOverlay.tsx`. Deliberately a
    * plain derived flag set alongside `healthCurrent`/`healthMax` rather than
@@ -106,6 +125,12 @@ class HudStore {
    * approach as `setHealth` above. */
   setCombatState(enemies: EnemyHealthEntry[]): void {
     this.enemyHealthBars = enemies;
+  }
+
+  /** Replaces the whole floating-label list -- same "write unconditionally"
+   * shape as `setCombatState` above, called every frame from `hudSync.ts`. */
+  setEnemyLabels(labels: EnemyLabelEntry[]): void {
+    this.enemyLabels = labels;
   }
 
   setPractice(active: boolean, points = 0, max = 0, opponentPoints = 0, opponentMax = 0): void {

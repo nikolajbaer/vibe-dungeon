@@ -41,6 +41,7 @@ import { containerSync } from "./container/sync";
 import { containerStore, type ContainerActions } from "./container/store";
 import { generateItemIcons } from "./assets/itemIcons";
 import { buildCombatTestLevel, CombatTestSandbox, COMBAT_TEST_CARRY_WEIGHT } from "./combatTest/bootstrap";
+import { worldToScreen } from "./render/worldToScreen";
 
 const EYE_HEIGHT = 1.6; // camera height above the player's feet
 // How far in front of the player (meters) and how far above their feet a
@@ -424,12 +425,8 @@ export function startGame(container: HTMLElement, options: StartGameOptions = {}
     // which needs to compute exactly where an object renders on screen
     // without duplicating three.js's own projection math in the test.
     worldToScreen: (x: number, y: number, z: number) => {
-      const ndcPoint = new THREE.Vector3(x, y, z).project(camera);
-      const rect = renderer.domElement.getBoundingClientRect();
-      return {
-        x: rect.left + ((ndcPoint.x + 1) / 2) * rect.width,
-        y: rect.top + ((1 - ndcPoint.y) / 2) * rect.height,
-      };
+      const { x: screenX, y: screenY } = worldToScreen(camera, renderer, new THREE.Vector3(x, y, z));
+      return { x: screenX, y: screenY };
     },
     getRotation: () => ({ yaw: Rotation.yaw[player], pitch: Rotation.pitch[player] }),
     getCurrentSector: () => currentSector,
@@ -868,7 +865,7 @@ export function startGame(container: HTMLElement, options: StartGameOptions = {}
     if (!modalActive) corpseCleanupSystem(world, sector, dt);
 
     syncSystem(world);
-    hudSync(world);
+    hudSync(world, camera, renderer);
     inventorySync(world);
     containerSync(world);
     const ammoLabel = getRangedAmmoLabel(world, player);
