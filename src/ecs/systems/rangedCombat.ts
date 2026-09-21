@@ -1,6 +1,6 @@
 import * as THREE from "three";
 import { addComponent, addEntity, hasComponent, query, type World } from "bitecs";
-import { Carried, Dead, Health, Item, Object3DRef, PhysicsBody, PlayerControlled, Position, Stackable, Viewmodel } from "../components";
+import { Carried, Dead, Embedded, Health, Item, Object3DRef, PhysicsBody, PlayerControlled, Position, Stackable, Viewmodel } from "../components";
 import { ITEM_REGISTRY } from "../../assets/itemRegistry";
 import type { ItemAssetDef } from "../../assets/types";
 import { isHandSlot } from "./items";
@@ -77,13 +77,65 @@ export function getRangedAmmoLabel(world: World, ownerEid: number): string | und
   return `${count} ${count === 1 ? singular : name.toLowerCase()}`;
 }
 
-export function shouldEmbedProjectile(speed: number, hasImpact: boolean): boolean {
-  return hasImpact && speed >= .25;
+/** How deep (meters, along the struck surface's normal) an embedded bolt's
+ * tip sits below the surface -- independent of the angle it hit at. */
+export function embeddedBoltDepth(): number {
+  return BOLT_LENGTH * (1 - BOLT_PROTRUDING_FRACTION);
 }
 
-export function embeddedBoltOriginOffset(): number {
-  const embeddedLength = BOLT_LENGTH * (1 - BOLT_PROTRUDING_FRACTION);
-  return embeddedLength - BOLT_TIP_OFFSET;
+/** The steepest a hit can be (as `|direction . normal|`, 1 = dead-on,
+ * 0 = perfectly grazing) and still leave the nock end (`embeddedBoltOrigin`'s
+ * result) at or above the surface once embedded. Below this, walking the
+ * origin back from the tip along `direction` (mostly parallel to the
+ * surface at a shallow angle) can't climb back out of `embeddedBoltDepth()`
+ * of penetration before running out of `BOLT_TIP_OFFSET` to do it with, so
+ * the whole bolt -- nock included -- ends up buried and invisible instead of
+ * looking embedded. A hit shallower than this clatters off instead (see
+ * `shouldEmbedProjectile`), the same as a real arrow skipping off a target
+ * it struck too obliquely to bite into. */
+const MIN_EMBED_INCIDENCE = embeddedBoltDepth() / BOLT_TIP_OFFSET;
+
+/** `incidence` is `|direction . normal|` for the hit (1 = dead-on, 0 =
+ * perfectly grazing); omit it only where there's no real hit to measure
+ * (existing speed/impact-only callers, which still want dead-on behavior). */
+export function shouldEmbedProjectile(speed: number, hasImpact: boolean, incidence = 1): boolean {
+  return hasImpact && speed >= .25 && incidence >= MIN_EMBED_INCIDENCE;
+}
+
+/** Where an embedded bolt's mesh origin (its local Z=0, at the nock end --
+ * see `createBoltMesh`) belongs in world space, given the raycast `hitPoint`,
+ * the struck surface's world-space unit `normal`, and the bolt's own
+ * world-space unit travel `direction`.
+ *
+ * The tip (local Z=`BOLT_TIP_OFFSET` ahead of the origin) is placed
+ * `embeddedBoltDepth()` behind the surface along `normal` -- the actual,
+ * physical "how far in" measurement, correct at any incidence angle -- and
+ * the origin is then walked back from that tip along `direction` (the axis
+ * the mesh is actually oriented on, via the quaternion set alongside this)
+ * by `BOLT_TIP_OFFSET`. Using `direction` for that second step, rather than
+ * `normal` again, matters: it's what keeps the visible shaft parallel to the
+ * bolt's real flight path instead of snapping to point along the surface
+ * normal.
+ *
+ * Earlier versions measured the embed depth along `direction` too, i.e.
+ * assumed every hit was dead-on into the surface -- true for a bolt shot
+ * straight into a wall (where `direction` and `-normal` roughly coincide),
+ * but for a shallow/grazing hit (a level shot skimming into a floor, `normal`
+ * mostly vertical while `direction` is mostly horizontal) that undercounted
+ * the vertical embed almost to nothing: the bolt would end up resting right
+ * at the surface instead of actually sunk into it. */
+export function embeddedBoltOrigin(hitPoint: THREE.Vector3, normal: THREE.Vector3, direction: THREE.Vector3): THREE.Vector3 {
+  return hitPoint.clone()
+    .addScaledVector(normal, -embeddedBoltDepth())
+    .addScaledVector(direction, -BOLT_TIP_OFFSET);
+}
+
+/** `hit.normal` (per three.js's `Mesh.raycast`) is in the struck object's
+ * *local* space -- transform it to world space, or fall back to a level
+ * floor's normal if the geometry didn't carry one. Shared by the embed and
+ * bounce/clatter paths below. */
+function worldSurfaceNormal(hit?: THREE.Intersection): THREE.Vector3 {
+  return hit?.normal ? hit.normal.clone().transformDirection(hit.object.matrixWorld) : new THREE.Vector3(0, 1, 0);
 }
 
 /** The deterministic part of a failed-embed bounce: `incoming` reflected off
@@ -91,7 +143,7 @@ export function embeddedBoltOriginOffset(): number {
  * `BOLT_BOUNCE_RESTITUTION`. `makeRecoverableBolt` adds random scatter/spin
  * on top of this so repeated bounces don't all look identical -- kept out of
  * this function so the reflection math itself stays a plain, testable
- * function, the same shape as `embeddedBoltOriginOffset` above. */
+ * function, the same shape as `embeddedBoltOrigin` above. */
 export function reflectBounceVelocity(incoming: THREE.Vector3, normal: THREE.Vector3): THREE.Vector3 {
   return incoming
     .clone()
@@ -160,10 +212,14 @@ function makeRecoverableBolt(world: World, physics: Physics, scene: THREE.Scene,
   Item.itemTypeId[eid] = "bolt";
   Stackable.count[eid] = 1;
 
-  if (hit && shouldEmbedProjectile(bolt.velocity.length(), true)) {
+  const direction = bolt.velocity.clone().normalize();
+  const normal = worldSurfaceNormal(hit); // hit=undefined falls back to a level floor's normal
+  const incidence = Math.abs(direction.dot(normal));
+
+  if (hit && shouldEmbedProjectile(bolt.velocity.length(), true, incidence)) {
     addComponent(world, eid, Position);
     addComponent(world, eid, Object3DRef);
-    const direction = bolt.velocity.clone().normalize();
+    addComponent(world, eid, Embedded);
     // `bolt.mesh` was parented directly to the scene throughout flight, so
     // its position/quaternion track *world*-space coordinates, not (0,0,0)
     // local like a freshly-created item mesh. `withPickupHitbox` wraps it in
@@ -175,7 +231,7 @@ function makeRecoverableBolt(world: World, physics: Physics, scene: THREE.Scene,
     bolt.mesh.position.set(0, 0, 0);
     bolt.mesh.quaternion.identity();
     const group = withPickupHitbox(bolt.mesh, eid);
-    group.position.copy(hit.point).addScaledVector(direction, embeddedBoltOriginOffset());
+    group.position.copy(embeddedBoltOrigin(hit.point, normal, direction));
     group.quaternion.setFromUnitVectors(new THREE.Vector3(0, 0, 1), direction);
     Position.x[eid] = group.position.x;
     Position.y[eid] = group.position.y;
@@ -194,7 +250,6 @@ function makeRecoverableBolt(world: World, physics: Physics, scene: THREE.Scene,
     // random scatter/spin so repeated bounces don't all look identical.
     const body = PhysicsBody[eid];
     if (body) {
-      const normal = hit?.normal ? hit.normal.clone().transformDirection(hit.object.matrixWorld) : new THREE.Vector3(0, 1, 0);
       const reflected = reflectBounceVelocity(bolt.velocity, normal);
       reflected.x += (Math.random() - 0.5) * BOLT_BOUNCE_SCATTER;
       reflected.y += Math.random() * BOLT_BOUNCE_SCATTER * 0.5; // biased upward, not into the floor
