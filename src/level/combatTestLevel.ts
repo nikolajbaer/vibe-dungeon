@@ -9,6 +9,57 @@ import { ceilingMaterial, floorMaterial, wallMaterial } from "./materials";
 const ROOM_HALF = 15;
 const WALL_HEIGHT = 7;
 
+function createSandMaterial(): THREE.MeshStandardMaterial {
+  const size = 128;
+  const canvas = document.createElement("canvas");
+  canvas.width = canvas.height = size;
+  const context = canvas.getContext("2d")!;
+  const image = context.createImageData(size, size);
+  for (let y = 0; y < size; y++) {
+    for (let x = 0; x < size; x++) {
+      const hash = Math.abs(Math.sin(x * 12.9898 + y * 78.233) * 43758.5453) % 1;
+      const coarse = Math.abs(Math.sin(Math.floor(x / 5) * 4.13 + Math.floor(y / 5) * 9.71) * 113.7) % 1;
+      const shade = (hash - 0.5) * 24 + (coarse - 0.5) * 14;
+      const index = (y * size + x) * 4;
+      image.data[index] = 190 + shade;
+      image.data[index + 1] = 158 + shade;
+      image.data[index + 2] = 99 + shade * 0.65;
+      image.data[index + 3] = 255;
+    }
+  }
+  context.putImageData(image, 0, 0);
+  const texture = new THREE.CanvasTexture(canvas);
+  texture.wrapS = texture.wrapT = THREE.RepeatWrapping;
+  texture.repeat.set(9, 9);
+  const material = new THREE.MeshStandardMaterial({ map: texture, color: 0xffffff, roughness: 1 });
+  material.name = "combatTestSand";
+  return material;
+}
+
+function addArcheryTarget(scene: THREE.Scene, z: number): void {
+  const target = new THREE.Group();
+  target.name = "combatTestArcheryTarget";
+  target.userData.combatTestArcheryTarget = true;
+  target.userData.surfaceMaterial = "wood";
+  target.position.set(-14.76, 2.15, z);
+  const rings = [
+    { radius: 0.78, color: 0xe4ddc4 },
+    { radius: 0.58, color: 0x2f3540 },
+    { radius: 0.38, color: 0xd9d1b7 },
+    { radius: 0.2, color: 0xb63d32 },
+  ];
+  rings.forEach(({ radius, color }, index) => {
+    const ring = new THREE.Mesh(
+      new THREE.CylinderGeometry(radius, radius, 0.07, 24),
+      new THREE.MeshStandardMaterial({ color, roughness: 0.9 }),
+    );
+    ring.rotation.z = Math.PI / 2;
+    ring.position.x = index * 0.012;
+    target.add(ring);
+  });
+  scene.add(target);
+}
+
 function addWallTorch(scene: THREE.Scene, x: number, z: number, inwardX: number, inwardZ: number): void {
   const group = new THREE.Group();
   group.name = "combatTestTorch";
@@ -83,7 +134,7 @@ export function buildCombatTestLevel(world: World, physics: Physics, scene: THRE
   const stone = floorMaterial();
   const texturedWall = wallMaterial();
   const ceiling = ceilingMaterial();
-  const sand = new THREE.MeshStandardMaterial({ color: 0xb99a62, roughness: 1 });
+  const sand = createSandMaterial();
   const wood = new THREE.MeshStandardMaterial({ color: 0x76502d, roughness: 0.88 });
 
   addBox(physics, scene, new THREE.Vector3(30, 0.2, 30), new THREE.Vector3(0, -0.1, 0), stone);
@@ -105,18 +156,21 @@ export function buildCombatTestLevel(world: World, physics: Physics, scene: THRE
   addSwordAndShield(scene, 0, 14.78, Math.PI);
   addSwordAndShield(scene, -14.78, 0, Math.PI / 2);
   addSwordAndShield(scene, 14.78, 0, -Math.PI / 2);
+  addArcheryTarget(scene, -4.5);
+  addArcheryTarget(scene, 4.5);
 
-  // Long equipment table along the west wall.
-  addBox(physics, scene, new THREE.Vector3(0.9, 0.12, 4.8), new THREE.Vector3(-12.5, 0.78, 0), wood);
-  for (const z of [-2.1, 2.1]) {
-    addBox(physics, scene, new THREE.Vector3(0.12, 0.72, 0.12), new THREE.Vector3(-12.75, 0.36, z), wood);
-    addBox(physics, scene, new THREE.Vector3(0.12, 0.72, 0.12), new THREE.Vector3(-12.25, 0.36, z), wood);
+  // Long equipment table along the north wall, leaving the west wall clear
+  // for archery targets opposite the east-side projectile barrel.
+  addBox(physics, scene, new THREE.Vector3(4.8, 0.12, 0.9), new THREE.Vector3(0, 0.78, -12.5), wood);
+  for (const x of [-2.1, 2.1]) {
+    addBox(physics, scene, new THREE.Vector3(0.12, 0.72, 0.12), new THREE.Vector3(x, 0.36, -12.75), wood);
+    addBox(physics, scene, new THREE.Vector3(0.12, 0.72, 0.12), new THREE.Vector3(x, 0.36, -12.25), wood);
   }
   spawnItems(world, physics, scene, [
-    { id: "dagger", x: -12.5, y: 1.05, z: -1.7 },
-    { id: "sword", x: -12.5, y: 1.05, z: -0.6 },
-    { id: "wooden_sword", x: -12.5, y: 1.05, z: 0.6 },
-    { id: "crossbow", x: -12.5, y: 1.05, z: 1.7 },
+    { id: "dagger", x: -1.7, y: 1.05, z: -12.5 },
+    { id: "sword", x: -0.6, y: 1.05, z: -12.5 },
+    { id: "wooden_sword", x: 0.6, y: 1.05, z: -12.5 },
+    { id: "crossbow", x: 1.7, y: 1.05, z: -12.5 },
   ]);
 
   // The projectile barrel currently contains every projectile commodity in

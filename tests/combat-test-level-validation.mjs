@@ -36,6 +36,12 @@ try {
   assert(bolts !== undefined && Stackable.count[bolts] === 50, "projectile barrel contains 50 bolts");
   assert.equal(scene.children.filter((object) => object.userData.combatTestTorch).length, 8, "two torches are spaced along each wall");
   assert.equal(scene.children.filter((object) => object.userData.combatTestWallDecoration).length, 4, "each wall has a centered sword-and-shield display");
+  assert.equal(scene.children.filter((object) => object.userData.combatTestArcheryTarget).length, 2, "west wall has archery targets opposite the projectile barrel");
+  const sandMaterial = scene.children
+    .filter((object) => object instanceof THREE.Mesh)
+    .map((object) => object.material)
+    .find((material) => material?.name === "combatTestSand");
+  assert(sandMaterial?.map, "raised sparring mat uses a repeated procedural sand texture");
   const player = addEntity(world);
   addComponent(world, player, CarryCapacity);
   CarryCapacity.maxWeight[player] = 100;
