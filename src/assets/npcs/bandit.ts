@@ -24,6 +24,7 @@ const bandit: NpcArchetypeDef = {
   aggroRange: 6,
   attackRange: 1.5,
   attackDamage: 8,
+  attackReach: 1.0,
   attackCooldown: 1.2,
   agility: 0.35,
   parryWeaponClass: "dagger",

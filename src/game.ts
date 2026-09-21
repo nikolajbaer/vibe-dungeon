@@ -8,7 +8,8 @@ import { characterSystem, physicsSyncSystem, teleportCharacter } from "./ecs/sys
 import { dynamicSyncSystem } from "./ecs/systems/dynamics";
 import { addCharacter, createPhysics, PHYSICS_DT } from "./physics/world";
 import { doorAnimationSystem, tryInteract } from "./ecs/systems/doors";
-import { combatSystem, tryMeleeAttack, tryParry, type AttackType } from "./ecs/systems/combat";
+import { applyMeleeDamage, combatSystem, tryMeleeAttack, tryParry, type AttackType } from "./ecs/systems/combat";
+import { meleeCollisionSystem } from "./ecs/systems/meleeCollision";
 import { getRangedAmmoLabel, getRangedCombatDebugState, rangedCombatSystem, tryFireRanged } from "./ecs/systems/rangedCombat";
 import { hitboxDebugSystem, isHitboxDebugEnabled, setHitboxDebugEnabled } from "./ecs/systems/hitboxDebug";
 import { practiceSystem, startPractice } from "./ecs/systems/practice";
@@ -468,7 +469,7 @@ export function startGame(container: HTMLElement, options: StartGameOptions = {}
     // combat (issue #48) without needing to simulate real pointer-lock
     // clicks/touches — fires the exact same `tryMeleeAttack` the real
     // click/touch-button wiring below calls.
-    attack: (attackType: AttackType = "jab") => tryMeleeAttack(world, camera, attackType),
+    attack: (attackType: AttackType = "jab") => tryMeleeAttack(world, attackType),
     parry: () => tryParry(world, player),
     getCombatState: () => ({
       attackRecovery: Combat.attackRecovery[player],
@@ -786,13 +787,21 @@ export function startGame(container: HTMLElement, options: StartGameOptions = {}
     else if (keyboard.consumeJustPressed("Digit3")) requestedAttack = "chop";
     if (requestedAttack && !isModalActive()) {
       const rangedResult = tryFireRanged(world, camera, scene);
-      if (rangedResult === "not-ranged") tryMeleeAttack(world, camera, requestedAttack);
+      if (rangedResult === "not-ranged") tryMeleeAttack(world, requestedAttack);
     }
     if ((keyboard.consumeJustPressed("KeyF") || touch.consumeParryRequest()) && !isModalActive()) tryParry(world);
     resolvePractice();
     viewmodelSwingSystem(dt);
-    if (!isModalActive()) rangedCombatSystem(world, physics, scene, dt);
-    hitboxDebugSystem(world, scene, dt);
+    if (!isModalActive()) {
+      rangedCombatSystem(world, physics, scene, dt);
+      // meleeCollisionSystem only resolves *which* swings connected (real
+      // Rapier sensor-cylinder geometry, replacing the old raycast-vs-distance
+      // split between the player and NPCs) -- applying the actual damage
+      // still goes through combat.ts's applyMeleeDamage, same as it always
+      // has, so parry mitigation/death/practice-scoring stay in one place.
+      for (const hit of meleeCollisionSystem(world, physics, dt)) applyMeleeDamage(world, hit.targetEid, hit.damage, hit.attackerEid, hit.part);
+    }
+    hitboxDebugSystem(scene, dt);
 
     // Belt-and-suspenders alongside the pause above: if the NPC a dialogue
     // is open for ends up Dead by any other means, drop the dialogue rather

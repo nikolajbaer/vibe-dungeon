@@ -24,6 +24,7 @@ const dagger: ItemAssetDef = {
   icon: "🗡️",
   slot: "hand",
   meleeDamage: 8,
+  meleeReach: 1.0,
   mass: 0.6,
   createWorldMesh: createDaggerMesh,
   createViewmodelMesh: () => {

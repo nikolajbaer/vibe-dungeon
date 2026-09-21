@@ -11,6 +11,7 @@ const weaponsMaster: NpcArchetypeDef = {
   dialogueId: "weapons-master",
   attackRange: 1.5,
   attackDamage: 5,
+  attackReach: 1.4,
   attackCooldown: .8,
   chaseSpeed: 2.6,
   leashRange: 8,

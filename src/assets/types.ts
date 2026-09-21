@@ -57,6 +57,14 @@ export interface ItemAssetDef {
    * so a non-weapon `slot: "hand"` item (the lantern, a future torch or
    * shield) doesn't accidentally zero out an otherwise-unarmed attack. */
   meleeDamage?: number;
+  /** Reach (meters) of this weapon's melee hit-detection box — see
+   * `meleeCollision.ts`'s `registerMeleeSwing`, which scales this by the
+   * current attack type's own shape (a jab thrusts further/narrower, a chop
+   * covers a wider arc) rather than using it as a flat distance. `undefined`
+   * (no weapon, or a non-weapon hand item like the lantern) falls back to
+   * `UNARMED_REACH` in combat.ts, the same pattern `meleeDamage` already
+   * uses for damage. */
+  meleeReach?: number;
   /** Optional ranged-weapon tuning. Ammo is another stackable item type;
    * firing consumes one unit and the weapon cannot fire again until reload. */
   rangedWeapon?: {
@@ -219,6 +227,14 @@ export interface NpcArchetypeDef {
    * `CHASING`, stop and switch to `ATTACKING`. */
   attackRange?: number;
   attackDamage?: number;
+  /** Aggressive only: reach (meters) of this archetype's melee swing box —
+   * same meaning as `ItemAssetDef.meleeReach`, since an NPC never actually
+   * equips a real weapon item (its `parryWeaponClass` is cosmetic/numeric
+   * only — see `createAnimatedNpcMesh`'s rig-baked weapon mesh). Omitted
+   * archetypes fall back to a value picked from `parryWeaponClass`, the
+   * same "derive a sensible default from the weapon class" pattern
+   * `attackDamage`/`attackRange` already fall back to in `npc.ts`. */
+  attackReach?: number;
   /** Aggressive only: seconds between attacks while `ATTACKING` and still
    * in range. */
   attackCooldown?: number;
