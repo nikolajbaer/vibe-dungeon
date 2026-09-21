@@ -105,6 +105,17 @@ export function createAnimatedNpcMesh(rig: HumanoidRig, eid: number): THREE.Obje
   return clone;
 }
 
+/** The NPC's own weapon prop mesh (the "shortSword"/"dagger"/"woodenSword"
+ * object baked into its rig -- see `createAnimatedNpcMesh`), or `undefined`
+ * for an eid with no registered animation state or an unarmed archetype.
+ * Its `.visible` still needs checking by callers: the mesh exists and is
+ * tracked from spawn, but stays hidden (sheathed) until `triggerWeaponDraw`
+ * actually reveals it. Exists for `hitboxDebug.ts`'s play-testing overlay,
+ * which needs a real `Object3D` to wrap in a box helper. */
+export function getNpcWeaponMesh(eid: number): THREE.Object3D | undefined {
+  return npcAnimations.get(eid)?.weapon;
+}
+
 /** Draws a one-handed weapon from the opposite hip before combat begins. */
 export function triggerWeaponDraw(eid: number): boolean {
   const state = npcAnimations.get(eid);
