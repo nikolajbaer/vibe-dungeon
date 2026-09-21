@@ -10,6 +10,7 @@ import { addCharacter, createPhysics, PHYSICS_DT } from "./physics/world";
 import { doorAnimationSystem, tryInteract } from "./ecs/systems/doors";
 import { combatSystem, tryMeleeAttack, tryParry, type AttackType } from "./ecs/systems/combat";
 import { getRangedAmmoLabel, getRangedCombatDebugState, rangedCombatSystem, tryFireRanged } from "./ecs/systems/rangedCombat";
+import { hitboxDebugSystem, isHitboxDebugEnabled, setHitboxDebugEnabled } from "./ecs/systems/hitboxDebug";
 import { practiceSystem, startPractice } from "./ecs/systems/practice";
 import { npcSystem, toggleNpcFollow } from "./ecs/systems/npc";
 import { getNpcAnimationDebugState, npcAnimationSystem } from "./ecs/systems/npcAnimation";
@@ -639,6 +640,7 @@ export function startGame(container: HTMLElement, options: StartGameOptions = {}
     initialFov: baseFov,
     initialAmbient: ambientLight.intensity,
     initialWalkSpeed: getPlayerMoveSpeed(),
+    initialShowHitboxes: isHitboxDebugEnabled(),
     onFovChange(value) {
       baseFov = value;
       camera.fov = value;
@@ -648,6 +650,7 @@ export function startGame(container: HTMLElement, options: StartGameOptions = {}
       ambientLight.intensity = value;
     },
     onWalkSpeedChange: setPlayerMoveSpeed,
+    onShowHitboxesChange: setHitboxDebugEnabled,
     onRestart() {
       sessionStorage.setItem("vibe-dungeon-restart", "1");
       sessionStorage.setItem("vibe-dungeon-restart-mode", gameMode);
@@ -789,6 +792,7 @@ export function startGame(container: HTMLElement, options: StartGameOptions = {}
     resolvePractice();
     viewmodelSwingSystem(dt);
     if (!isModalActive()) rangedCombatSystem(world, physics, scene, dt);
+    hitboxDebugSystem(world, scene, dt);
 
     // Belt-and-suspenders alongside the pause above: if the NPC a dialogue
     // is open for ends up Dead by any other means, drop the dialogue rather

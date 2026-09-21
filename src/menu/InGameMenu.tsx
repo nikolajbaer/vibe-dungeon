@@ -5,9 +5,11 @@ export interface InGameMenuProps {
   initialFov: number;
   initialAmbient: number;
   initialWalkSpeed: number;
+  initialShowHitboxes: boolean;
   onFovChange(value: number): void;
   onAmbientChange(value: number): void;
   onWalkSpeedChange(value: number): void;
+  onShowHitboxesChange(value: boolean): void;
   onRestart(): void;
   onMainMenu(): void;
 }
@@ -19,6 +21,7 @@ export function InGameMenu(props: InGameMenuProps) {
   const [fov, setFov] = useState(props.initialFov);
   const [ambient, setAmbient] = useState(props.initialAmbient);
   const [walkSpeed, setWalkSpeed] = useState(props.initialWalkSpeed);
+  const [showHitboxes, setShowHitboxes] = useState(props.initialShowHitboxes);
 
   useEffect(() => {
     const update = () => setFullscreen(isGameFullscreen());
@@ -116,6 +119,19 @@ export function InGameMenu(props: InGameMenuProps) {
                     const value = Number(event.currentTarget.value);
                     setWalkSpeed(value);
                     props.onWalkSpeedChange(value);
+                  }}
+                />
+              </label>
+              <label class="game-debug-control game-debug-checkbox">
+                <span>Show hitboxes</span>
+                <input
+                  type="checkbox"
+                  checked={showHitboxes}
+                  data-testid="debug-show-hitboxes"
+                  onInput={(event) => {
+                    const value = event.currentTarget.checked;
+                    setShowHitboxes(value);
+                    props.onShowHitboxesChange(value);
                   }}
                 />
               </label>

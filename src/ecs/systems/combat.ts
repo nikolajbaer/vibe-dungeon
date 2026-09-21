@@ -4,6 +4,7 @@ import { Carried, Combat, Dead, Health, Item, NPC, NpcState, Object3DRef, Player
 import { ITEM_REGISTRY } from "../../assets/itemRegistry";
 import { isHandSlot, triggerViewmodelParry, triggerViewmodelSwing } from "./items";
 import { triggerDeathCollapse, triggerHitReaction, triggerParry } from "./npcAnimation";
+import { flashCharacterHit, flashWeaponHit } from "./hitboxDebug";
 
 export type AttackType = "jab" | "cross" | "chop";
 export type WeaponClass = "unarmed" | "dagger" | "oneHanded";
@@ -117,6 +118,15 @@ export function applyMeleeDamage(world: World, targetEid: number, rawDamage: num
     ? Combat.parryMitigation[targetEid] || PARRY_MITIGATION[weaponClassFor(world, targetEid)]
     : 0;
   const damage = Math.max(1, Math.round(rawDamage * (1 - mitigation)));
+  // A parried hit (mitigation > 0) is already its own visual feedback --
+  // this is the same "did it land clean" gate `triggerHitReaction` below
+  // uses, shared here so the hitbox debug overlay's red flash (play-testing
+  // aid only, see hitboxDebug.ts) never fires for a hit the defender
+  // actually blocked.
+  if (mitigation === 0) {
+    flashCharacterHit(targetEid);
+    if (attackerEid !== undefined) flashWeaponHit(attackerEid);
+  }
   if (hasComponent(world, targetEid, Practice) && Practice.active[targetEid]) {
     Practice.points[targetEid] = Math.max(0, Practice.points[targetEid] - damage);
     if (mitigation === 0) triggerHitReaction(targetEid);
