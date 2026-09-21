@@ -9,7 +9,7 @@ import { dynamicSyncSystem } from "./ecs/systems/dynamics";
 import { addCharacter, createPhysics, PHYSICS_DT } from "./physics/world";
 import { doorAnimationSystem, tryInteract } from "./ecs/systems/doors";
 import { combatSystem, tryMeleeAttack, tryParry, type AttackType } from "./ecs/systems/combat";
-import { getRangedCombatDebugState, rangedCombatSystem, tryFireRanged } from "./ecs/systems/rangedCombat";
+import { getRangedAmmoLabel, getRangedCombatDebugState, rangedCombatSystem, tryFireRanged } from "./ecs/systems/rangedCombat";
 import { practiceSystem, startPractice } from "./ecs/systems/practice";
 import { npcSystem, toggleNpcFollow } from "./ecs/systems/npc";
 import { getNpcAnimationDebugState, npcAnimationSystem } from "./ecs/systems/npcAnimation";
@@ -83,6 +83,8 @@ export function startGame(container: HTMLElement, options: StartGameOptions = {}
   // edges of wide phone screens. (90 degrees would be wider than the old 70
   // and therefore exaggerate that distortion rather than reduce it.)
   const camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.05, 100);
+  let baseFov = camera.fov;
+  let aimZoom = 1;
   camera.rotation.order = "YXZ";
   scene.add(camera);
 
@@ -655,10 +657,11 @@ export function startGame(container: HTMLElement, options: StartGameOptions = {}
     mountOpponentConfigurator(container, spawnTestOpponent, (open) => { combatConfigOpen = open; });
   }
   mountInGameMenu(container, {
-    initialFov: camera.fov,
+    initialFov: baseFov,
     initialAmbient: ambientLight.intensity,
     initialWalkSpeed: getPlayerMoveSpeed(),
     onFovChange(value) {
+      baseFov = value;
       camera.fov = value;
       camera.updateProjectionMatrix();
     },
@@ -881,7 +884,31 @@ export function startGame(container: HTMLElement, options: StartGameOptions = {}
     hudSync(world);
     inventorySync(world);
     containerSync(world);
+    const ammoLabel = getRangedAmmoLabel(world, player);
+    touch.setAmmoLabel(ammoLabel);
+    const agility = THREE.MathUtils.clamp(Combat.agility[player] || 0, 0, 1);
+    const holdSeconds = ammoLabel ? touch.aimHoldSeconds : 0;
+    const zoomDelay = THREE.MathUtils.lerp(1.5, 0.7, agility);
+    const maxZoom = THREE.MathUtils.lerp(2, 2.5, agility);
+    const zoomProgress = THREE.MathUtils.smoothstep(holdSeconds / zoomDelay, 0, 1);
+    const targetZoom = holdSeconds > 0 ? THREE.MathUtils.lerp(1, maxZoom, zoomProgress) : 1;
+    aimZoom = THREE.MathUtils.lerp(aimZoom, targetZoom, Math.min(1, dt * (targetZoom > aimZoom ? 7 : 10)));
+    const aimedFov = THREE.MathUtils.radToDeg(2 * Math.atan(Math.tan(THREE.MathUtils.degToRad(baseFov) / 2) / aimZoom));
+    if (Math.abs(camera.fov - aimedFov) > .01) {
+      camera.fov = aimedFov;
+      camera.updateProjectionMatrix();
+    }
+    const baseRotationX = camera.rotation.x;
+    const baseRotationY = camera.rotation.y;
+    if (holdSeconds > 0) {
+      const sway = THREE.MathUtils.lerp(.008, .0025, agility);
+      const heartbeat = performance.now() / 1000 * Math.PI * 2 * 1.15;
+      camera.rotation.x += Math.sin(heartbeat) * sway;
+      camera.rotation.y += Math.sin(heartbeat * .5 + .8) * sway * .65;
+    }
     renderer.render(scene, camera);
+    camera.rotation.x = baseRotationX;
+    camera.rotation.y = baseRotationY;
     stats.end();
   }
   frame();

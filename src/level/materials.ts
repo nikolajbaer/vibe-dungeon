@@ -10,10 +10,8 @@ import {
 // materials from src/materials/dungeonMaterials.ts (issue #11), wired in as
 // described in README's Design Notes ("Procedural stone textures").
 //
-// This initial pass uses each material's default `repeat` rather than
-// threading real per-face size in meters through from tileBuilder.ts — see
-// issue #27. A fast-follow can pass a `repeat` scaled to each face's actual
-// size once tileBuilder's wall-segment geometry settles.
+// Tile-sized faces share cached materials. The repeats below deliberately
+// make the masonry read at a denser, dungeon-scale frequency.
 //
 // `doorMaterial()` now uses the procedural wood-grain material (issue #42).
 
@@ -24,13 +22,12 @@ let door: THREE.Material | undefined;
 let lockedDoor: THREE.Material | undefined;
 
 export function wallMaterial(): THREE.Material {
-  return (wall ??= stoneWallMaterial());
+  return (wall ??= stoneWallMaterial(3));
 }
 
 export function floorMaterial(): THREE.Material {
-  // repeat 1.5 (50% more repetition than the default) — smaller-looking
-  // flagstones per the coordinator's request.
-  return (floor ??= stoneFloorMaterial(1.5));
+  // Three times the previous 1.5 repeat yields smaller, more numerous stones.
+  return (floor ??= stoneFloorMaterial(4.5));
 }
 
 export function ceilingMaterial(): THREE.Material {

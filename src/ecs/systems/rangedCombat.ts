@@ -53,6 +53,21 @@ function ammoStack(world: World, ownerEid: number, itemTypeId: string): number |
   return undefined;
 }
 
+export function getRangedAmmoLabel(world: World, ownerEid: number): string | undefined {
+  const equipped = getEquippedRangedWeapon(world, ownerEid);
+  if (!equipped) return undefined;
+  const ammoType = equipped.def.rangedWeapon.ammoItemTypeId;
+  const eid = ammoStack(world, ownerEid, ammoType);
+  const count = eid === undefined ? 0 : Stackable.count[eid];
+  const name = ITEM_REGISTRY[ammoType]?.name ?? ammoType;
+  const singular = name.replace(/s$/i, "").toLowerCase();
+  return `${count} ${count === 1 ? singular : name.toLowerCase()}`;
+}
+
+export function shouldEmbedProjectile(speed: number, hasImpact: boolean): boolean {
+  return hasImpact && speed >= 1;
+}
+
 export type RangedFireResult = "not-ranged" | "fired" | "reloading" | "no-ammo";
 
 /** Fires the equipped ranged weapon from the reticle. Damage waits for the
@@ -103,13 +118,6 @@ function owningEid(object: THREE.Object3D): number | undefined {
   return undefined;
 }
 
-function isWood(object: THREE.Object3D): boolean {
-  for (let current: THREE.Object3D | null = object; current; current = current.parent) {
-    if (current.userData.surfaceMaterial === "wood") return true;
-  }
-  return false;
-}
-
 function makeRecoverableBolt(world: World, physics: Physics, scene: THREE.Scene, bolt: FlyingBolt, hit?: THREE.Intersection): void {
   bolt.mesh.removeFromParent();
   const eid = addEntity(world);
@@ -118,7 +126,7 @@ function makeRecoverableBolt(world: World, physics: Physics, scene: THREE.Scene,
   Item.itemTypeId[eid] = "bolt";
   Stackable.count[eid] = 1;
 
-  if (hit && isWood(hit.object)) {
+  if (hit && shouldEmbedProjectile(bolt.velocity.length(), true)) {
     addComponent(world, eid, Position);
     addComponent(world, eid, Object3DRef);
     const direction = bolt.velocity.clone().normalize();
@@ -129,7 +137,7 @@ function makeRecoverableBolt(world: World, physics: Physics, scene: THREE.Scene,
     Position.y[eid] = group.position.y;
     Position.z[eid] = group.position.z;
     scene.add(group);
-    hit.object.attach(group); // follows a moving door/crate while embedded
+    hit.object.attach(group); // follows any moving surface while embedded
     Object3DRef[eid] = group;
   } else {
     const p = hit?.point ?? bolt.position;

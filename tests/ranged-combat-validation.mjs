@@ -12,6 +12,9 @@ try {
 
   assert.equal(crossbow.rangedWeapon.reloadSeconds,1.5);
   assert.equal(crossbow.rangedWeapon.maxRange,12);
+  assert.equal(ranged.shouldEmbedProjectile(1,true),true);
+  assert.equal(ranged.shouldEmbedProjectile(.99,true),false);
+  assert.equal(ranged.shouldEmbedProjectile(20,false),false);
 
   const world=createWorld(),player=addEntity(world),weapon=addEntity(world),ammo=addEntity(world);
   addComponent(world,player,PlayerControlled);
@@ -19,6 +22,7 @@ try {
   Item.itemTypeId[weapon]='crossbow';Carried.ownerEid[weapon]=player;Carried.slot[weapon]='hand-right';
   addComponent(world,ammo,Item);addComponent(world,ammo,Carried);addComponent(world,ammo,Stackable);
   Item.itemTypeId[ammo]='bolt';Carried.ownerEid[ammo]=player;Carried.slot[ammo]='inventory';Stackable.count[ammo]=3;
+  assert.equal(ranged.getRangedAmmoLabel(world,player),'3 crossbow bolts');
 
   const scene=new THREE.Scene(),camera=new THREE.PerspectiveCamera();
   camera.position.set(0,1.5,0);camera.lookAt(0,1.5,-1);camera.updateMatrixWorld(true);
@@ -39,5 +43,5 @@ try {
   assert.equal(ranged.tryFireRanged(world,camera,scene),'reloading','still gated before 1.5 seconds');
   ranged.rangedCombatSystem(world,{},scene,.1);
   assert.equal(ranged.tryFireRanged(world,camera,scene),'fired','ready after the 1.5 second reload');
-  console.log('crossbow ammo, reload, wood sticking and bolt recovery passed');
+  console.log('crossbow ammo label, reload, surface sticking and bolt recovery passed');
 } finally {await server.close();}
