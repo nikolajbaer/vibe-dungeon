@@ -1,5 +1,5 @@
-import { query, type World } from "bitecs";
-import { Position, Rotation, Object3DRef, PhysicsRotation, RenderOffsetY } from "../components";
+import { hasComponent, query, type World } from "bitecs";
+import { Embedded, Position, Rotation, Object3DRef, PhysicsRotation, RenderOffsetY } from "../components";
 
 /** Copies ECS transform data into the corresponding three.js Object3D
  * (an NPC's mesh, a world item, or the player's camera). Runs last, right
@@ -14,6 +14,12 @@ import { Position, Rotation, Object3DRef, PhysicsRotation, RenderOffsetY } from 
  * entities to sync. */
 export function syncSystem(world: World): void {
   for (const eid of query(world, [Position, Object3DRef])) {
+    // An `Embedded` item's object is parented to whatever it struck, not the
+    // scene -- its local transform was set once, correctly, by `attach()`
+    // at embed time, and `Position` here holds world coordinates instead of
+    // that local-to-parent transform. Writing it in would double up the
+    // parent's own offset (see `Embedded`'s doc comment in components.ts).
+    if (hasComponent(world, eid, Embedded)) continue;
     const obj = Object3DRef[eid];
     if (!obj) continue;
     obj.position.set(Position.x[eid], Position.y[eid] + (RenderOffsetY[eid] ?? 0), Position.z[eid]);

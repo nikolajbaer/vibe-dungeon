@@ -486,6 +486,19 @@ export function startGame(container: HTMLElement, options: StartGameOptions = {}
     // testing — world item positions to walk to, and each item's current
     // carry/equip state and world-mesh visibility.
     getItemSpawns: () => Object.fromEntries(ALL_ITEM_SPAWNS.map((s) => [s.id, { x: s.x, z: s.z }])),
+    // An item's actual rendered world position -- `getItemStates` never
+    // reports position at all, and an embedded item's `Object3DRef` may be
+    // parented to whatever it struck rather than the scene (see `Embedded`
+    // in ecs/components.ts), so its own `.position` alone isn't world
+    // coordinates. For automated (Playwright) testing of projectile/embed
+    // placement, where "is it actually where it should be" can't be
+    // answered any other way without a screenshot.
+    getItemWorldPosition: (eid: number) => {
+      const obj = Object3DRef[eid];
+      if (!obj) return null;
+      const p = obj.getWorldPosition(new THREE.Vector3());
+      return { x: p.x, y: p.y, z: p.z };
+    },
     getItemStates: () =>
       Array.from(query(world, [Item])).map((eid) => ({
         eid,

@@ -1,6 +1,6 @@
 import * as THREE from "three";
-import { addComponent, addEntity, hasComponent, query, type World } from "bitecs";
-import { Carried, CarryCapacity, Container, Item, Object3DRef, PhysicsBody, Stackable, Viewmodel, type CarriedSlot } from "../components";
+import { addComponent, addEntity, hasComponent, query, removeComponent, type World } from "bitecs";
+import { Carried, CarryCapacity, Container, Embedded, Item, Object3DRef, PhysicsBody, Stackable, Viewmodel, type CarriedSlot } from "../components";
 import { ITEM_REGISTRY } from "../../assets/itemRegistry";
 
 export type HandSlot = "hand-left" | "hand-right";
@@ -286,6 +286,13 @@ export function pickUpItem(world: World, itemEid: number, ownerEid: number): Pic
 
   const obj = Object3DRef[itemEid];
   if (obj) obj.visible = false;
+
+  // An embedded projectile's object is parented to whatever it struck, not
+  // the scene (see `Embedded`'s doc comment) -- clear the tag once it's
+  // picked up so a later drop (which always reparents a fresh mesh under
+  // the scene, via `buildItemWorldBody`) gets the ordinary generic sync
+  // back rather than staying permanently skipped by `syncSystem`.
+  if (hasComponent(world, itemEid, Embedded)) removeComponent(world, itemEid, Embedded);
 
   // Disabled rather than removed from the physics world, for the same reason
   // the mesh is hidden rather than deleted: a future "drop" is then just

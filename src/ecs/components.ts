@@ -239,6 +239,20 @@ export const Practice = {
  * corpse doesn't keep moving, respond to interact, or get hit again. */
 export const Dead: Record<string, never> = {};
 
+/** Tag: this entity's `Object3DRef` is parented to whatever world geometry it
+ * struck (a wall, a crate, a door leaf — see `makeRecoverableBolt` in
+ * rangedCombat.ts) rather than directly to the scene, so its `Position` is
+ * *not* the parent-relative transform `syncSystem` would otherwise write onto
+ * it. `Position` here is still the correct world coordinates (used for
+ * proximity pickup, `doors.ts`'s `tryPickupNearbyItem`) — it's the object's
+ * own already-correct local-to-parent transform (set once, from `attach()`,
+ * at embed time) that must be left alone. `syncSystem` skips its normal
+ * Position -> object.position write for anything tagged here; `pickUpItem`
+ * clears the tag once the item leaves the world (a later drop always
+ * reparents it back under the scene, at which point the generic sync is
+ * correct again). */
+export const Embedded: Record<string, never> = {};
+
 /** Sector (see `level.sectorAt` in `level/level.ts`/`occupancy.ts`) an entity
  * died in — issue #59. Set once, in `game.ts`, at the moment an entity
  * transitions to `Dead` (`sectorAt` isn't reachable from `combat.ts`'s
