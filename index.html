@@ -218,6 +218,30 @@
         background: #d9433f;
         transition: width 0.15s ease;
       }
+      /* Floating per-NPC state label (EnemyStateLabels.tsx), positioned via
+         inline left/top (screen-projected per-enemy every frame, so a fixed
+         CSS position doesn't apply) -- anchored so the point hudSync.ts
+         computes (just above the NPC's head) sits at its bottom-center. */
+      .hud-enemy-label {
+        position: fixed;
+        transform: translate(-50%, -100%);
+        padding: 2px 6px;
+        border-radius: 4px;
+        background: rgba(0, 0, 0, 0.55);
+        font: 600 11px/1.2 system-ui, sans-serif;
+        text-shadow: 0 1px 2px rgba(0, 0, 0, 0.8);
+        white-space: nowrap;
+        pointer-events: none;
+      }
+      .hud-enemy-label-idle {
+        color: #cfcfcf;
+      }
+      .hud-enemy-label-alert {
+        color: #e8a33d;
+      }
+      .hud-enemy-label-attacking {
+        color: #ff6b63;
+      }
       .practice-score {
         position: fixed;
         left: 50%;

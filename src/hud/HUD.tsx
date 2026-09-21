@@ -1,6 +1,7 @@
 import { HealthBar } from "./HealthBar";
 import { StaminaBar } from "./StaminaBar";
 import { EnemyHealthBars } from "./EnemyHealthBars";
+import { EnemyStateLabels } from "./EnemyStateLabels";
 import { DeathOverlay } from "./DeathOverlay";
 import { Message } from "./Message";
 import { PracticeBar } from "./PracticeBar";
@@ -15,6 +16,7 @@ export function HUD() {
   return (
     <div id="hud-root">
       <EnemyHealthBars />
+      <EnemyStateLabels />
       <HealthBar />
       <StaminaBar />
       <PracticeBar />
