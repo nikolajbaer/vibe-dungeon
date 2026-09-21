@@ -2,13 +2,13 @@ import * as THREE from "three";
 import Stats from "three/examples/jsm/libs/stats.module.js";
 import { addComponent, addEntity, createWorld, hasComponent } from "bitecs";
 import { query } from "bitecs";
-import { Position, Velocity, Rotation, CharacterBody, DynamicBody, PhysicsBody, PhysicsCollider, PhysicsRotation, RenderOffsetY, PlayerControlled, Object3DRef, Door, Dead, DeathSector, Health, CarryCapacity, Combat, Practice, NPC, Item, Carried, Readable, Container, Stackable } from "./ecs/components";
+import { Position, Velocity, Rotation, CharacterBody, DynamicBody, PhysicsBody, PhysicsCollider, PhysicsRotation, RenderOffsetY, PlayerControlled, Object3DRef, Door, Dead, DeathSector, Health, CarryCapacity, Combat, Stamina, Practice, NPC, Item, Carried, Readable, Container, Stackable } from "./ecs/components";
 import { getPlayerMoveSpeed, inputSystem, setPlayerMoveSpeed } from "./ecs/systems/input";
 import { characterSystem, physicsSyncSystem, teleportCharacter } from "./ecs/systems/character";
 import { dynamicSyncSystem } from "./ecs/systems/dynamics";
 import { addCharacter, createPhysics, PHYSICS_DT } from "./physics/world";
 import { doorAnimationSystem, tryInteract } from "./ecs/systems/doors";
-import { applyMeleeDamage, combatSystem, tryMeleeAttack, tryParry, type AttackType } from "./ecs/systems/combat";
+import { applyMeleeDamage, combatSystem, setBlocking, tryMeleeAttack, type AttackType } from "./ecs/systems/combat";
 import { meleeCollisionSystem } from "./ecs/systems/meleeCollision";
 import { getRangedAmmoLabel, getRangedCombatDebugState, rangedCombatSystem, tryFireRanged } from "./ecs/systems/rangedCombat";
 import { hitboxDebugSystem, isHitboxDebugEnabled, setHitboxDebugEnabled } from "./ecs/systems/hitboxDebug";
@@ -55,6 +55,14 @@ const PLAYER_HEIGHT = 1.8;
  * caps make up the rest of `PLAYER_HEIGHT`. */
 const PLAYER_HALF_HEIGHT = PLAYER_HEIGHT / 2 - PLAYER_RADIUS;
 const DEBUG_HEALTH_STEP = 10; // debug-only nudge, see `[`/`]` handling below
+/** RPG groundwork -- see `ecs/components.ts`'s `Stamina`. A flat default for
+ * now; a future leveling/perk system is the intended place to grow this. */
+const PLAYER_MAX_STAMINA = 100;
+/** How long (seconds) a completed touch block gesture (see
+ * `touchControls.ts`'s `consumeBlockRequest`) holds block up for -- touch
+ * has no real "held" input the way `keyboard.isDown` does, so a completed
+ * swipe instead simulates a fixed-length hold. */
+const TOUCH_BLOCK_PULSE_SECONDS = 0.6;
 
 /** Ceiling on physics steps per rendered frame — see the accumulator in
  * `frame` for why (spiral-of-death guard). */
@@ -174,6 +182,7 @@ export function startGame(container: HTMLElement, options: StartGameOptions = {}
   addComponent(world, player, Health);
   addComponent(world, player, CarryCapacity);
   addComponent(world, player, Combat);
+  addComponent(world, player, Stamina);
   // `Position` is the player's *feet* now, not the camera — see
   // `CharacterBody` in components.ts. The camera is offset back up to eye
   // height by `RenderOffsetY` at sync time, which also makes the player's
@@ -198,11 +207,10 @@ export function startGame(container: HTMLElement, options: StartGameOptions = {}
   Health.max[player] = 100;
   CarryCapacity.maxWeight[player] = gameMode === "combat-test" ? COMBAT_TEST_CARRY_WEIGHT : BASE_CARRY_WEIGHT;
   Combat.attackRecovery[player] = 0;
-  Combat.parryStartup[player] = 0;
-  Combat.parryWindow[player] = 0;
-  Combat.parryRecovery[player] = 0;
-  Combat.parryMitigation[player] = 0;
+  Combat.blocking[player] = 0;
   Combat.agility[player] = 0;
+  Stamina.max[player] = PLAYER_MAX_STAMINA;
+  Stamina.current[player] = PLAYER_MAX_STAMINA;
 
   // NPCs (issue #36, extended into archetypes: docile villager + aggressive
   // bandit — src/assets/npcs/*.ts) are spawned generically by `buildLevel`
@@ -470,12 +478,12 @@ export function startGame(container: HTMLElement, options: StartGameOptions = {}
     // clicks/touches — fires the exact same `tryMeleeAttack` the real
     // click/touch-button wiring below calls.
     attack: (attackType: AttackType = "jab") => tryMeleeAttack(world, attackType),
-    parry: () => tryParry(world, player),
+    block: (held: boolean) => setBlocking(world, player, held),
     getCombatState: () => ({
       attackRecovery: Combat.attackRecovery[player],
-      parryStartup: Combat.parryStartup[player],
-      parryWindow: Combat.parryWindow[player],
-      parryRecovery: Combat.parryRecovery[player],
+      blocking: Combat.blocking[player] > 0,
+      stamina: Stamina.current[player],
+      maxStamina: Stamina.max[player],
     }),
     getRangedCombatState: () => getRangedCombatDebugState(),
     getPracticeState: () => ({
@@ -678,6 +686,11 @@ export function startGame(container: HTMLElement, options: StartGameOptions = {}
   // without this guard a plain tap-to-interact could silently also land a
   // melee hit on whatever the player was just trying to talk to.
   let attackRequested = false;
+  // Real-time seconds left on a touch block gesture's fixed-length pulse
+  // (see `TOUCH_BLOCK_PULSE_SECONDS`) -- unlike `attackRequested` above this
+  // isn't a one-shot flag, since block needs a continuous "still held" state
+  // every frame, not just the instant it was requested.
+  let touchBlockPulseRemaining = 0;
   if (!isTouchDevice()) {
     renderer.domElement.addEventListener("mousedown", (e) => {
       if (e.button === 0 && pointerLook.locked) attackRequested = true;
@@ -789,7 +802,16 @@ export function startGame(container: HTMLElement, options: StartGameOptions = {}
       const rangedResult = tryFireRanged(world, camera, scene);
       if (rangedResult === "not-ranged") tryMeleeAttack(world, requestedAttack);
     }
-    if ((keyboard.consumeJustPressed("KeyF") || touch.consumeParryRequest()) && !isModalActive()) tryParry(world);
+    // Skyrim-style held block, not an edge-triggered press: `setBlocking`
+    // runs every frame with the input's *current* state (keyboard.isDown, a
+    // real hold) OR'd with a touch block gesture's fixed-length pulse (touch
+    // has no true "held" primitive for this button -- see
+    // TOUCH_BLOCK_PULSE_SECONDS) rather than only reacting to the instant
+    // block starts, so releasing the key/gesture actually lowers the guard.
+    if (touch.consumeBlockRequest()) touchBlockPulseRemaining = TOUCH_BLOCK_PULSE_SECONDS;
+    touchBlockPulseRemaining = Math.max(0, touchBlockPulseRemaining - dt);
+    const wantsBlock = !isModalActive() && (keyboard.isDown("KeyF") || touchBlockPulseRemaining > 0);
+    setBlocking(world, player, wantsBlock);
     resolvePractice();
     viewmodelSwingSystem(dt);
     if (!isModalActive()) {

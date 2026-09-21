@@ -14,11 +14,14 @@ import { addCombatHitboxes, queryCombatHitboxes, type CombatBodyPart, type Melee
 // damage this module resolves -- see its own doc comment for why that stays
 // out of here) resolves it against real Rapier sensor geometry.
 
-/** Damage multiplier per struck body part. Torso is the implicit 1.0
- * baseline every other multiplier is relative to; a head shot rewards
- * precision, a leg hit is still a real hit (never zero) but less than a
- * clean torso strike. */
-const BODY_PART_DAMAGE_MULTIPLIER: Record<CombatBodyPart, number> = {
+/** Damage multiplier per struck body part -- ranged hits only
+ * (rangedCombat.ts's `applyRangedDamage` call). Melee moved to a flat,
+ * uniform hit (see `meleeCollisionSystem` below) as part of the shift
+ * toward a Skyrim-like feel: aiming for a headshot with a bolt is still
+ * worth more, but a sword swing no longer cares which of the three
+ * cylinders it happened to land on. Torso is the implicit 1.0 baseline
+ * every other multiplier is relative to. */
+export const BODY_PART_DAMAGE_MULTIPLIER: Record<CombatBodyPart, number> = {
   head: 1.15,
   torso: 1.0,
   legs: 0.8,
@@ -81,6 +84,25 @@ function pruneDeadHitboxes(world: World, physics: Physics): void {
  * combatant is itself. */
 export function getCombatHitboxColliders(): { eid: number; part: CombatBodyPart; collider: Collider }[] {
   return Array.from(colliderOwners.values());
+}
+
+/** Which of `eid`'s three combat hitbox cylinders a world-space height `y`
+ * falls inside, if any -- for rangedCombat.ts to turn a bolt's raycast hit
+ * point into a body part the same way a melee swing's box query already
+ * does, without needing a second real Rapier query (a bolt already has its
+ * exact hit point in hand; this is just arithmetic against each cylinder's
+ * own live `.translation()`/`.halfHeight()`, cheap enough to do inline). No
+ * query-pipeline staleness concern here, unlike `queryCombatHitboxes` --
+ * these are plain getters on colliders that already exist, not a fresh
+ * intersection test. */
+export function getBodyPartAt(eid: number, y: number): CombatBodyPart | undefined {
+  for (const owner of colliderOwners.values()) {
+    if (owner.eid !== eid) continue;
+    const halfHeight = owner.collider.halfHeight();
+    const centerY = owner.collider.translation().y;
+    if (y >= centerY - halfHeight && y <= centerY + halfHeight) return owner.part;
+  }
+  return undefined;
 }
 
 interface PendingSwing {
@@ -167,26 +189,31 @@ export function registerMeleeSwing(
 export interface ResolvedMeleeHit {
   attackerEid: number;
   targetEid: number;
+  /** Whichever cylinder the swing box happened to overlap first -- no
+   * longer picked for its damage multiplier (melee hits are flat now, see
+   * `BODY_PART_DAMAGE_MULTIPLIER`'s doc comment), kept only so the hitbox
+   * debug overlay can flash the one cylinder that was actually struck
+   * rather than all three. */
   part: CombatBodyPart;
-  /** Already scaled by the struck part's own multiplier -- the caller
-   * (combat.ts's `applyMeleeDamage`, wired up in game.ts) applies this
-   * directly, the same as it would a raycast hit's flat damage number. */
+  /** The swing's flat damage (weapon damage x attack-type multiplier,
+   * already computed by the caller) -- the caller (combat.ts's
+   * `applyMeleeDamage`, wired up in game.ts) applies this directly. */
   damage: number;
 }
 
 /**
  * Advances every pending swing's active window and, once its box overlaps
  * at least one valid target, resolves and removes it -- "count one
- * collision for the swing" -- picking whichever overlapping body part has
- * the highest damage multiplier (a head shot exposed alongside a blocked
- * torso still counts as a head shot) rather than an arbitrary or
- * first-found one. A swing whose window closes with no overlap is simply
- * dropped; a miss is a miss. Doesn't apply any damage itself -- returns
- * what resolved this tick so the caller (game.ts) can hand it to
- * combat.ts's `applyMeleeDamage`, which is what actually knows about parry
- * mitigation, death, and practice-mode scoring. Keeping that out of this
- * module avoids a circular import (combat.ts already needs to call
- * `registerMeleeSwing` above).
+ * collision for the swing," the first valid target/part the query happens
+ * to find (arbitrary among several simultaneous targets in one wide swing;
+ * melee no longer favors a particular body part -- see
+ * `BODY_PART_DAMAGE_MULTIPLIER`'s doc comment). A swing whose window closes
+ * with no overlap is simply dropped; a miss is a miss. Doesn't apply any
+ * damage itself -- returns what resolved this tick so the caller (game.ts)
+ * can hand it to combat.ts's `applyMeleeDamage`, which is what actually
+ * knows about block mitigation, death, and practice-mode scoring. Keeping
+ * that out of this module avoids a circular import (combat.ts already
+ * needs to call `registerMeleeSwing` above).
  */
 export function meleeCollisionSystem(world: World, physics: Physics, dt: number): ResolvedMeleeHit[] {
   ensureCombatHitboxes(world, physics);
@@ -195,16 +222,16 @@ export function meleeCollisionSystem(world: World, physics: Physics, dt: number)
   for (let i = pendingSwings.length - 1; i >= 0; i--) {
     const swing = pendingSwings[i];
     swing.remaining -= dt;
-    let best: { eid: number; part: CombatBodyPart; multiplier: number } | undefined;
+    let hit: { eid: number; part: CombatBodyPart } | undefined;
     for (const collider of queryCombatHitboxes(physics, swing.box)) {
       const owner = colliderOwners.get(collider.handle);
       if (!owner || owner.eid === swing.attackerEid) continue; // never hit yourself
       if (hasComponent(world, owner.eid, Dead)) continue;
-      const multiplier = BODY_PART_DAMAGE_MULTIPLIER[owner.part];
-      if (!best || multiplier > best.multiplier) best = { eid: owner.eid, part: owner.part, multiplier };
+      hit = { eid: owner.eid, part: owner.part };
+      break;
     }
-    if (best) {
-      resolved.push({ attackerEid: swing.attackerEid, targetEid: best.eid, part: best.part, damage: swing.damage * best.multiplier });
+    if (hit) {
+      resolved.push({ attackerEid: swing.attackerEid, targetEid: hit.eid, part: hit.part, damage: swing.damage });
       pendingSwings.splice(i, 1);
     } else if (swing.remaining <= 0) {
       pendingSwings.splice(i, 1);

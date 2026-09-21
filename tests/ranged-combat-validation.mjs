@@ -5,10 +5,11 @@ import {createServer} from 'vite';
 const server=await createServer({server:{middlewareMode:true},appType:'custom'});
 try {
   const {addComponent,addEntity,createWorld,hasComponent,query}=await import('bitecs');
-  const {Carried,Embedded,Item,Object3DRef,PhysicsBody,PlayerControlled,Stackable}=await server.ssrLoadModule('/src/ecs/components.ts');
+  const {Carried,CharacterBody,Embedded,Health,Item,Object3DRef,PhysicsBody,PlayerControlled,Stackable}=await server.ssrLoadModule('/src/ecs/components.ts');
   const {default:crossbow}=await server.ssrLoadModule('/src/assets/items/crossbow.ts');
   const {pickUpItem}=await server.ssrLoadModule('/src/ecs/systems/items.ts');
   const {syncSystem}=await server.ssrLoadModule('/src/ecs/systems/sync.ts');
+  const {BODY_PART_DAMAGE_MULTIPLIER,meleeCollisionSystem,getCombatHitboxColliders}=await server.ssrLoadModule('/src/ecs/systems/meleeCollision.ts');
   const ranged=await server.ssrLoadModule('/src/ecs/systems/rangedCombat.ts');
 
   assert.equal(crossbow.rangedWeapon.reloadSeconds,1.5);
@@ -138,7 +139,7 @@ try {
   // falls to the "else" branch in makeRecoverableBolt, which needs a real
   // Rapier body (buildItemWorldBody calls physics.world.createRigidBody) --
   // unlike the embed path above, `{}` won't do here.
-  const {initPhysics,createPhysics}=await server.ssrLoadModule('/src/physics/world.ts');
+  const {initPhysics,createPhysics,addCharacter}=await server.ssrLoadModule('/src/physics/world.ts');
   await initPhysics();
   const physics=createPhysics();
   const scene2=new THREE.Scene(),camera2=new THREE.PerspectiveCamera();
@@ -197,5 +198,39 @@ try {
   }
   assert.notEqual(shallowEid,undefined,'a shallow hit on the floor resolves to a clatter (PhysicsBody), never an Embedded bolt');
   assert.ok(!hasComponent(world3,shallowEid,Embedded),'too shallow an incidence to embed convincingly clatters off instead');
-  console.log('crossbow ammo label, reload, surface sticking, bolt recovery and clatter physics passed');
+  // Drain world3's reload too -- world4 below is a fourth bitecs world, so
+  // its weapon entity id collides with world3's still-reloading one
+  // otherwise, same reasoning as the world/world2 drains above.
+  for(let t=0;t<1.6;t+=.1) ranged.rangedCombatSystem(world3,physics,scene3,.1);
+
+  // Body-part damage multiplier: melee moved to flat, uniform damage (see
+  // meleeCollision.ts's BODY_PART_DAMAGE_MULTIPLIER doc comment), but a
+  // bolt still has one real impact point, so ranged keeps the precision
+  // reward -- whichever combat hitbox cylinder the hit point falls inside
+  // scales the damage.
+  const world4=createWorld(),player4=addEntity(world4),weapon4=addEntity(world4),ammo4=addEntity(world4),target4=addEntity(world4);
+  addComponent(world4,player4,PlayerControlled);
+  addComponent(world4,weapon4,Item);addComponent(world4,weapon4,Carried);
+  Item.itemTypeId[weapon4]='crossbow';Carried.ownerEid[weapon4]=player4;Carried.slot[weapon4]='hand-right';
+  addComponent(world4,ammo4,Item);addComponent(world4,ammo4,Carried);addComponent(world4,ammo4,Stackable);
+  Item.itemTypeId[ammo4]='bolt';Carried.ownerEid[ammo4]=player4;Carried.slot[ammo4]='inventory';Stackable.count[ammo4]=1;
+  addComponent(world4,target4,Health);addComponent(world4,target4,CharacterBody);addComponent(world4,target4,PhysicsBody);
+  Health.current[target4]=Health.max[target4]=100;
+  CharacterBody.radius[target4]=.35;CharacterBody.halfHeight[target4]=.55;
+  const targetHandles=addCharacter(physics,0,0,-1,.35,.55);
+  PhysicsBody[target4]=targetHandles.body;
+  meleeCollisionSystem(world4,physics,0); // registers target4's three combat hitbox cylinders
+  const headCollider=getCombatHitboxColliders().find((c)=>c.eid===target4&&c.part==='head');
+  const headY=headCollider.collider.translation().y;
+
+  const scene4=new THREE.Scene(),camera4=new THREE.PerspectiveCamera();
+  camera4.position.set(0,headY,0);camera4.lookAt(0,headY,-1);camera4.updateMatrixWorld(true); // level shot aimed exactly at head height
+  const targetMesh=new THREE.Mesh(new THREE.BoxGeometry(.7,2,.7),new THREE.MeshBasicMaterial());
+  targetMesh.position.set(0,1,-1);targetMesh.userData.eid=target4;scene4.add(targetMesh);scene4.updateMatrixWorld(true);
+  assert.equal(ranged.tryFireRanged(world4,camera4,scene4),'fired');
+  for(let t=0;t<1&&Health.current[target4]===100;t+=.02) ranged.rangedCombatSystem(world4,physics,scene4,.02);
+  const expectedHeadDamage=Math.max(1,Math.round(crossbow.rangedWeapon.damage*BODY_PART_DAMAGE_MULTIPLIER.head));
+  assert.equal(Health.current[target4],100-expectedHeadDamage,'a bolt landing at head height applies the head damage multiplier');
+
+  console.log('crossbow ammo label, reload, surface sticking, bolt recovery, clatter physics and body-part multiplier passed');
 } finally {await server.close();}

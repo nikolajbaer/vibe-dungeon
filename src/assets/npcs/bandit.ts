@@ -27,9 +27,10 @@ const bandit: NpcArchetypeDef = {
   attackReach: 1.0,
   attackCooldown: 1.2,
   agility: 0.35,
-  parryWeaponClass: "dagger",
+  weaponClass: "dagger",
   chaseSpeed: 2.5,
   leashRange: 10,
+  maxStamina: 60,
   createMesh: (eid) => {
     const mesh = createAnimatedNpcMesh(getBanditHumanoidRig(), eid);
     tintClonedMesh(mesh, 0xcc4433);

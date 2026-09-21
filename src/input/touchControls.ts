@@ -5,14 +5,14 @@ export function isTouchDevice(): boolean {
   return "ontouchstart" in window || navigator.maxTouchPoints > 0;
 }
 
-export type CombatGesture = "jab" | "cross" | "chop" | "parry";
+export type CombatGesture = "jab" | "cross" | "chop" | "block";
 
 /** Maps a completed attack-button drag to a combat action. Ten pixels or
  * less remains a tap; beyond that the dominant axis wins. */
 export function classifyCombatGesture(dx: number, dy: number): CombatGesture {
   if (Math.hypot(dx, dy) <= 10) return "jab";
   if (Math.abs(dx) > Math.abs(dy)) return dx < 0 ? "cross" : "jab";
-  return dy > 0 ? "parry" : "chop";
+  return dy > 0 ? "block" : "chop";
 }
 
 /**
@@ -141,14 +141,18 @@ export class TouchControls {
 
   consumeAttackType(): "jab" | "cross" | "chop" | null {
     const primaryGesture = this.attackButton?.consumeGesture();
-    if (primaryGesture && primaryGesture !== "parry") return primaryGesture;
-    if (primaryGesture === "parry") this.pendingGestureParry = true;
+    if (primaryGesture && primaryGesture !== "block") return primaryGesture;
+    if (primaryGesture === "block") this.pendingGestureBlock = true;
     return null;
   }
 
-  consumeParryRequest(): boolean {
-    if (this.pendingGestureParry) {
-      this.pendingGestureParry = false;
+  /** True once for the completed swipe-down gesture -- game.ts turns this
+   * into a fixed-length block *pulse* (see `TOUCH_BLOCK_PULSE_SECONDS`),
+   * since a completed gesture has no ongoing "held" state of its own to
+   * report, unlike the keyboard's real `isDown`. */
+  consumeBlockRequest(): boolean {
+    if (this.pendingGestureBlock) {
+      this.pendingGestureBlock = false;
       return true;
     }
     return false;
@@ -162,5 +166,5 @@ export class TouchControls {
     this.attackButton?.setAmmoLabel(label);
   }
 
-  private pendingGestureParry = false;
+  private pendingGestureBlock = false;
 }

@@ -1,9 +1,9 @@
 import { hasComponent, query, type World } from "bitecs";
-import { Dead, NPC, NpcState, Position, Rotation, Velocity, PlayerControlled, Practice } from "../components";
+import { Dead, NPC, NpcState, Position, Rotation, Stamina, Velocity, PlayerControlled, Practice } from "../components";
 import { NPC_REGISTRY } from "../../assets/npcRegistry";
 import type { NpcArchetypeDef } from "../../assets/types";
 import { triggerAttack, triggerWeaponDraw } from "./npcAnimation";
-import { ATTACK_ACTIVE_WINDOW, ATTACK_SHAPES, UNARMED_REACH } from "./combat";
+import { ATTACK_ACTIVE_WINDOW, ATTACK_SHAPES, ATTACK_STAMINA_COST, UNARMED_REACH } from "./combat";
 import { registerMeleeSwing } from "./meleeCollision";
 
 const FOLLOW_SPEED = 2; // m/s — slower than the player's 3.2 so it doesn't ride the player's heels
@@ -207,16 +207,28 @@ function updateAggressive(eid: number, playerEid: number | undefined, archetype:
   Velocity.z[eid] = 0;
 
   NPC.attackCooldownRemaining[eid] -= dt;
-  if (NPC.drawRemaining[eid] <= 0 && NPC.attackCooldownRemaining[eid] <= 0) {
+  // Same stamina gate as the player's own tryMeleeAttack (ATTACK_STAMINA_COST.cross,
+  // since this is the one generic swing every aggressive NPC reuses) -- an
+  // NPC that's out of stamina just keeps waiting in ATTACKING with its
+  // cooldown already elapsed, ready to swing the instant it regenerates
+  // enough, rather than ever forcing a free attack through. Missing the
+  // Stamina component entirely (a hand-built test NPC, say) reads as
+  // `undefined` here (a plain array, not a real bitecs query) and skips the
+  // gate rather than blocking every attack, the same fallback
+  // tryMeleeAttack uses.
+  const hasStamina = Stamina.current[eid] !== undefined;
+  if (NPC.drawRemaining[eid] <= 0 && NPC.attackCooldownRemaining[eid] <= 0
+      && (!hasStamina || Stamina.current[eid] >= ATTACK_STAMINA_COST.cross)) {
     triggerAttack(eid);
-    const fallbackDamage = archetype.parryWeaponClass === "oneHanded" ? 7 : archetype.parryWeaponClass === "dagger" ? 5 : 3;
-    const fallbackReach = archetype.parryWeaponClass === "oneHanded" ? 1.4 : archetype.parryWeaponClass === "dagger" ? 1.0 : UNARMED_REACH;
+    const fallbackDamage = archetype.weaponClass === "oneHanded" ? 7 : archetype.weaponClass === "dagger" ? 5 : 3;
+    const fallbackReach = archetype.weaponClass === "oneHanded" ? 1.4 : archetype.weaponClass === "dagger" ? 1.0 : UNARMED_REACH;
     const shape = ATTACK_SHAPES.cross; // NPCs have no jab/cross/chop of their own -- a neutral generic swing
     // Humanoids face local +Z (see the yaw comment above), the opposite of
     // the player's own camera-only -Z convention -- registerMeleeSwing
     // takes a resolved direction rather than a bare yaw for exactly this
     // reason (see its own doc comment).
     registerMeleeSwing(eid, Math.sin(Rotation.yaw[eid]), Math.cos(Rotation.yaw[eid]), (archetype.attackReach ?? fallbackReach) * shape.reachMultiplier, shape.width, shape.height, archetype.attackDamage ?? fallbackDamage, ATTACK_ACTIVE_WINDOW.cross);
+    if (hasStamina) Stamina.current[eid] -= ATTACK_STAMINA_COST.cross;
     NPC.attackCooldownRemaining[eid] = archetype.attackCooldown ?? 1;
   }
 }

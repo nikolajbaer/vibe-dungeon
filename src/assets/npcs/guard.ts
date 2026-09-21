@@ -9,7 +9,8 @@ const guard: NpcArchetypeDef = {
   behavior: "docile",
   halfExtent: .4,
   dialogueId: "guard-greeting",
-  parryWeaponClass: "oneHanded",
+  weaponClass: "oneHanded",
+  maxStamina: 100,
   createMesh: eid => createAnimatedNpcMesh(getGuardHumanoidRig(), eid),
 };
 

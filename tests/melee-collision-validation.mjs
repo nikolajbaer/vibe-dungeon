@@ -4,10 +4,10 @@ import {createServer} from 'vite';
 const server=await createServer({server:{middlewareMode:true},appType:'custom'});
 try {
   const {addComponent,addEntity,createWorld,removeComponent}=await import('bitecs');
-  const {Carried,CharacterBody,Combat,Dead,Health,Item,NPC,NpcState,PhysicsBody,PlayerControlled,Position,Rotation,Velocity}=await server.ssrLoadModule('/src/ecs/components.ts');
+  const {Carried,CharacterBody,Combat,Dead,Health,Item,NPC,NpcState,PhysicsBody,PlayerControlled,Position,Rotation,Stamina,Velocity}=await server.ssrLoadModule('/src/ecs/components.ts');
   const {initPhysics,createPhysics,addCharacter,addCombatHitboxes,queryCombatHitboxes}=await server.ssrLoadModule('/src/physics/world.ts');
   const {registerMeleeSwing,meleeCollisionSystem,getCombatHitboxColliders}=await server.ssrLoadModule('/src/ecs/systems/meleeCollision.ts');
-  const {applyMeleeDamage,tryMeleeAttack}=await server.ssrLoadModule('/src/ecs/systems/combat.ts');
+  const {ATTACK_STAMINA_COST,applyMeleeDamage,tryMeleeAttack}=await server.ssrLoadModule('/src/ecs/systems/combat.ts');
   const {npcSystem}=await server.ssrLoadModule('/src/ecs/systems/npc.ts');
   const {default:bandit}=await server.ssrLoadModule('/src/assets/npcs/bandit.ts');
 
@@ -74,6 +74,7 @@ try {
     assert.equal(hits[0].targetEid,target);
     assert.equal(hits[0].attackerEid,attacker);
     assert.ok(['head','torso','legs'].includes(hits[0].part));
+    assert.equal(hits[0].damage,15,'melee damage is flat -- no per-part multiplier (that\'s ranged-only now)');
     assert.equal(Health.current[target],100-Math.round(hits[0].damage),'applyMeleeDamage actually lands the resolved damage');
   }
 
@@ -129,9 +130,10 @@ try {
     assert.equal(getCombatHitboxColliders().filter((c)=>c.eid===attacker).length,3,'pruning a dead target leaves a still-living combatant\'s own cylinders alone');
   }
 
-  // "Count one collision for the swing on the highest value collision
-  // cylinder": a box tall enough to overlap both torso and head must pick
-  // head, the higher-multiplier part, not an arbitrary or first-found one.
+  // "Count one collision for the swing": a box tall enough to overlap
+  // several of the target's cylinders at once still resolves to exactly
+  // one hit, and always at the swing's flat, unmultiplied damage -- melee
+  // no longer favors whichever body part it happened to land on.
   {
     const bx=nextBlock();
     const attacker=spawnCombatant(bx,{dz:0});
@@ -139,9 +141,9 @@ try {
     warmUp();
     registerMeleeSwing(attacker,0,-1,1.4,.8,3,15,.2); // 3m tall -- spans the whole target's height
     const hits=tick(1/60);
-    assert.equal(hits.length,1);
-    assert.equal(hits[0].part,'head','the highest-multiplier overlapping part wins even with torso also in range');
-    assert.ok(Math.abs(hits[0].damage-15*1.15)<1e-9,'head carries a +15% multiplier');
+    assert.equal(hits.length,1,'a swing overlapping multiple cylinders on one target still counts as a single hit');
+    assert.ok(['head','torso','legs'].includes(hits[0].part));
+    assert.equal(hits[0].damage,15,'damage stays flat no matter which of the overlapping parts resolved');
   }
 
   // Physics-layer check, independent of registerMeleeSwing's own fixed swing
@@ -174,8 +176,9 @@ try {
     const setupPlayer=(attackType,distance)=>{
       const bx=nextBlock();
       const player=spawnCombatant(bx,{dz:0});
-      addComponent(world,player,PlayerControlled);addComponent(world,player,Combat);
-      Combat.attackRecovery[player]=0;Combat.parryStartup[player]=0;Combat.parryWindow[player]=0;Combat.parryRecovery[player]=0;Combat.parryMitigation[player]=0;Combat.agility[player]=0;
+      addComponent(world,player,PlayerControlled);addComponent(world,player,Combat);addComponent(world,player,Stamina);
+      Combat.attackRecovery[player]=0;Combat.blocking[player]=0;Combat.agility[player]=0;
+      Stamina.max[player]=100;Stamina.current[player]=100;
       const sword=addEntity(world);
       addComponent(world,sword,Item);addComponent(world,sword,Carried);
       Item.itemTypeId[sword]='sword';Carried.ownerEid[sword]=player;Carried.slot[sword]='hand-right';
@@ -199,6 +202,21 @@ try {
     // (surface at 1.35m) sits inside jab's reach but outside chop's.
     assert.equal(setupPlayer('jab',1.7).length,1,'a jab\'s extended reach connects at 1.7m');
     assert.equal(setupPlayer('chop',1.7).length,0,'a chop\'s shorter reach misses the same 1.7m target');
+  }
+
+  // tryMeleeAttack refuses outright -- same as being on cooldown -- without
+  // enough stamina for the requested attack type, and deducts it on success.
+  {
+    const bx=nextBlock();
+    const player=spawnCombatant(bx,{dz:0});
+    addComponent(world,player,PlayerControlled);addComponent(world,player,Combat);addComponent(world,player,Stamina);
+    Combat.attackRecovery[player]=0;Combat.blocking[player]=0;Combat.agility[player]=0;
+    Stamina.max[player]=100;Stamina.current[player]=ATTACK_STAMINA_COST.chop-1;
+    assert.equal(tryMeleeAttack(world,'chop'),false,'too little stamina refuses the chop outright');
+    Stamina.current[player]=ATTACK_STAMINA_COST.chop;
+    assert.equal(tryMeleeAttack(world,'chop'),true,'exactly enough stamina lets the chop through');
+    assert.equal(Stamina.current[player],0,'the chop\'s full stamina cost was deducted');
+    removeComponent(world,player,PlayerControlled);
   }
 
   // NPC attack path (npc.ts's updateAggressive): an aggressive-testStyle
@@ -229,5 +247,5 @@ try {
     assert.ok(Health.current[player]<100,'the resolved swing actually damaged the player');
   }
 
-  console.log('melee swing collision, body-part priority, cylinder placement, weapon reach and NPC attack passed');
+  console.log('melee swing collision, flat damage, cylinder placement, weapon reach, stamina gating and NPC attack passed');
 } finally {await server.close();}

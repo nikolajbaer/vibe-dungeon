@@ -14,7 +14,7 @@ try {
   for(const component of [c.PlayerControlled,c.Health,c.Combat,c.Position,c.Velocity])addComponent(world,player,component);
   for(const component of [c.NPC,c.Health,c.Combat,c.Position,c.Velocity])addComponent(world,master,component);
   c.Health.current[player]=c.Health.max[player]=100;c.Health.current[master]=c.Health.max[master]=100;
-  for(const eid of [player,master]){c.Combat.attackRecovery[eid]=0;c.Combat.parryStartup[eid]=0;c.Combat.parryWindow[eid]=0;c.Combat.parryRecovery[eid]=0;c.Combat.parryMitigation[eid]=0;c.Combat.agility[eid]=0;}
+  for(const eid of [player,master]){c.Combat.attackRecovery[eid]=0;c.Combat.blocking[eid]=0;c.Combat.agility[eid]=0;}
   c.NPC.wanderTargetX[master]=c.NPC.homeX[master]=c.Position.x[master]=30;
   c.NPC.wanderTargetZ[master]=c.NPC.homeZ[master]=c.Position.z[master]=6;
   c.Velocity.x[master]=c.Velocity.z[master]=0;
