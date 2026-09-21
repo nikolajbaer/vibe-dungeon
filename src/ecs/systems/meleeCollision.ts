@@ -56,6 +56,23 @@ function ensureCombatHitboxes(world: World, physics: Physics): void {
   }
 }
 
+/** Removes a dead combatant's combat hitbox colliders from the physics
+ * world and this module's own bookkeeping -- without this, a corpse's
+ * cylinders would sit in Rapier (and keep showing up in the hitbox debug
+ * overlay) forever, since death only ever adds `Dead`, never touches
+ * `PhysicsBody` (see combat.ts's `applyMeleeDamage`/`applyRangedDamage`).
+ * `eid` stays in `registeredEids` even after this so `ensureCombatHitboxes`
+ * never tries to re-attach hitboxes to a corpse. Doesn't change hit
+ * resolution at all -- `meleeCollisionSystem` already skips `Dead` targets
+ * on its own -- this is purely cleanup. */
+function pruneDeadHitboxes(world: World, physics: Physics): void {
+  for (const [handle, owner] of colliderOwners) {
+    if (!hasComponent(world, owner.eid, Dead)) continue;
+    physics.world.removeCollider(owner.collider, true);
+    colliderOwners.delete(handle);
+  }
+}
+
 /** Every currently-attached combat hitbox collider, for the play-testing
  * debug overlay (`hitboxDebug.ts`) to draw a real wireframe cylinder at --
  * reading the collider's own `.translation()`/`.rotation()` each frame
@@ -173,6 +190,7 @@ export interface ResolvedMeleeHit {
  */
 export function meleeCollisionSystem(world: World, physics: Physics, dt: number): ResolvedMeleeHit[] {
   ensureCombatHitboxes(world, physics);
+  pruneDeadHitboxes(world, physics);
   const resolved: ResolvedMeleeHit[] = [];
   for (let i = pendingSwings.length - 1; i >= 0; i--) {
     const swing = pendingSwings[i];
