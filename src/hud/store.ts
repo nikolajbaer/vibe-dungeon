@@ -26,9 +26,27 @@ const noopActions: HudActions = {
  * `experimentalDecorators` fights Vite's esbuild-based TS transform, so the
  * functional API avoids that entirely. See README Design Notes ("HUD").
  */
+/** One in-combat enemy's health, for the small tile bars `EnemyHealthBars.tsx`
+ * draws across the top of the screen. */
+export interface EnemyHealthEntry {
+  eid: number;
+  current: number;
+  max: number;
+}
+
 class HudStore {
   healthCurrent = 100;
   healthMax = 100;
+  staminaCurrent = 100;
+  staminaMax = 100;
+  /** Every NPC currently `CHASING`/`ATTACKING` the player (see
+   * `hudSync.ts`) -- rebuilt fresh every frame, same "write unconditionally,
+   * MobX only re-renders on real change" approach `setHealth` already uses.
+   * `EnemyHealthBars.tsx` renders one small tile per entry; `inCombat` below
+   * derives from this rather than being tracked separately, so there's one
+   * source of truth for "is there a live target out there" instead of two
+   * that could drift apart. */
+  enemyHealthBars: EnemyHealthEntry[] = [];
   /** True once `healthCurrent` hits 0 (aggressive NPC archetypes can now
    * actually kill the player) — drives `DeathOverlay.tsx`. Deliberately a
    * plain derived flag set alongside `healthCurrent`/`healthMax` rather than
@@ -59,6 +77,14 @@ class HudStore {
     makeAutoObservable<this, "actions">(this, { actions: false });
   }
 
+  /** Whether the player is currently in combat -- one or more NPCs have
+   * targeted them (see `hudSync.ts`'s `CHASING`/`ATTACKING` check). A plain
+   * getter over `enemyHealthBars` rather than its own tracked field, so
+   * there's exactly one thing to keep in sync from the ECS side. */
+  get inCombat(): boolean {
+    return this.enemyHealthBars.length > 0;
+  }
+
   /** Called once from game.ts at startup, after the ECS world/player exist. */
   bindActions(actions: HudActions): void {
     this.actions = actions;
@@ -68,6 +94,18 @@ class HudStore {
     this.healthCurrent = current;
     this.healthMax = max;
     if (current <= 0) this.playerDefeated = true;
+  }
+
+  setStamina(current: number, max: number): void {
+    this.staminaCurrent = current;
+    this.staminaMax = max;
+  }
+
+  /** Replaces the whole in-combat enemy list -- called every frame from
+   * `hudSync.ts` with a freshly-built array, same "write unconditionally"
+   * approach as `setHealth` above. */
+  setCombatState(enemies: EnemyHealthEntry[]): void {
+    this.enemyHealthBars = enemies;
   }
 
   setPractice(active: boolean, points = 0, max = 0, opponentPoints = 0, opponentMax = 0): void {
