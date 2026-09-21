@@ -195,6 +195,14 @@ export const NPC = {
   moveSpeed: [] as number[],
   /** Empty for ordinary NPCs; controls combat-room behavior when present. */
   testStyle: [] as ("aggressive" | "defensive" | "passive" | undefined)[],
+  /** Which side this NPC fights on -- see `meleeCollision.ts`'s `getTeam`
+   * doc comment for the full rule (the player is always team 0; same-team
+   * entities never damage each other). Defaults to 1 (every ordinary
+   * dungeon NPC's shared "hostile to the player" team) via `getTeam`'s own
+   * `|| 1` fallback when left unset, so this never needs setting explicitly
+   * outside places -- like the combat-test sandbox -- that actually want
+   * more than one non-zero team. */
+  team: [] as number[],
 };
 
 /** Hit points. Added ahead of real combat (#16) so the HUD health bar (#23)

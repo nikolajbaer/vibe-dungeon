@@ -1,8 +1,37 @@
 import * as THREE from "three";
 import { hasComponent, query, type World } from "bitecs";
 import type { Collider } from "@dimforge/rapier3d-compat";
-import { CharacterBody, Dead, Health, PhysicsBody, Position } from "../components";
+import { CharacterBody, Dead, Health, NPC, PhysicsBody, PlayerControlled, Position } from "../components";
 import { addCombatHitboxes, queryCombatHitboxes, type CombatBodyPart, type MeleeSwingBox, type Physics } from "../../physics/world";
+
+/** Which side `eid` fights on -- the player is always 0 (there's only ever
+ * one), an NPC is whatever its own `NPC.team` says (see that field's doc
+ * comment in components.ts; defaults to 1, the shared "hostile to the
+ * player" team, if never explicitly set). A Health-bearing entity that's
+ * neither the player nor a real `NPC` -- a bare test target, say -- has no
+ * team to share with anyone: it gets a negative value derived from its own
+ * `eid`, guaranteed to differ from 0, from every positive `NPC.team`, and
+ * from every *other* untagged entity's own `-eid` -- i.e. hostile to
+ * everyone, including another untagged entity, matching how this game
+ * treated every combatant before teams existed (nothing was ever anyone's
+ * ally by default). Lives here rather than in combat.ts so both combat.ts
+ * and rangedCombat.ts -- which already import from this module one-way,
+ * see the file-top doc comment -- can use it without a circular import. */
+export function getTeam(world: World, eid: number): number {
+  if (hasComponent(world, eid, PlayerControlled)) return 0;
+  if (hasComponent(world, eid, NPC)) return NPC.team[eid] || 1;
+  return -eid;
+}
+
+/** Whether `aEid` and `bEid` are on different teams -- the one rule that
+ * decides whether either can damage the other (`meleeCollisionSystem`
+ * below, and combat.ts's `applyRangedDamage`) *and* whether an aggressive
+ * NPC will target the other at all (npc.ts's `findHostileTarget`). Same
+ * team, including two entities that never explicitly set one (both default
+ * to 1), never fight each other. */
+export function isHostileTo(world: World, aEid: number, bEid: number): boolean {
+  return getTeam(world, aEid) !== getTeam(world, bEid);
+}
 
 // Real collision-volume melee hit detection, replacing what used to be two
 // unrelated mechanisms with genuinely different fidelity: the player's own
@@ -189,11 +218,11 @@ export function registerMeleeSwing(
 export interface ResolvedMeleeHit {
   attackerEid: number;
   targetEid: number;
-  /** Whichever cylinder the swing box happened to overlap first -- no
-   * longer picked for its damage multiplier (melee hits are flat now, see
-   * `BODY_PART_DAMAGE_MULTIPLIER`'s doc comment), kept only so the hitbox
-   * debug overlay can flash the one cylinder that was actually struck
-   * rather than all three. */
+  /** Whichever cylinder the swing box happened to overlap on this target --
+   * no longer picked for its damage multiplier (melee hits are flat now,
+   * see `BODY_PART_DAMAGE_MULTIPLIER`'s doc comment), kept only so the
+   * hitbox debug overlay can flash the one cylinder that was actually
+   * struck rather than all three. */
   part: CombatBodyPart;
   /** The swing's flat damage (weapon damage x attack-type multiplier,
    * already computed by the caller) -- the caller (combat.ts's
@@ -203,17 +232,21 @@ export interface ResolvedMeleeHit {
 
 /**
  * Advances every pending swing's active window and, once its box overlaps
- * at least one valid target, resolves and removes it -- "count one
- * collision for the swing," the first valid target/part the query happens
- * to find (arbitrary among several simultaneous targets in one wide swing;
- * melee no longer favors a particular body part -- see
- * `BODY_PART_DAMAGE_MULTIPLIER`'s doc comment). A swing whose window closes
- * with no overlap is simply dropped; a miss is a miss. Doesn't apply any
- * damage itself -- returns what resolved this tick so the caller (game.ts)
- * can hand it to combat.ts's `applyMeleeDamage`, which is what actually
- * knows about block mitigation, death, and practice-mode scoring. Keeping
- * that out of this module avoids a circular import (combat.ts already
- * needs to call `registerMeleeSwing` above).
+ * at least one valid target, resolves and removes it -- every distinct
+ * target the box overlaps takes the swing's full damage (a cleave: a wide
+ * swing like a chop can catch two adjacent enemies at once, each counted
+ * separately), not just whichever one the query happens to find first.
+ * Never resolves against the attacker's own body, an already-dead target,
+ * or one on the same team (`isHostileTo`) -- a swing that only overlaps
+ * allies is just as much a miss as one that overlaps nothing, and keeps
+ * ticking down its own active window on the chance a real target steps
+ * into it before time runs out. A swing whose window closes with no valid
+ * overlap is simply dropped. Doesn't apply any damage itself -- returns
+ * what resolved this tick so the caller (game.ts) can hand it to
+ * combat.ts's `applyMeleeDamage`, which is what actually knows about block
+ * mitigation, death, and practice-mode scoring. Keeping that out of this
+ * module avoids a circular import (combat.ts already needs to call
+ * `registerMeleeSwing` above).
  */
 export function meleeCollisionSystem(world: World, physics: Physics, dt: number): ResolvedMeleeHit[] {
   ensureCombatHitboxes(world, physics);
@@ -222,16 +255,18 @@ export function meleeCollisionSystem(world: World, physics: Physics, dt: number)
   for (let i = pendingSwings.length - 1; i >= 0; i--) {
     const swing = pendingSwings[i];
     swing.remaining -= dt;
-    let hit: { eid: number; part: CombatBodyPart } | undefined;
+    const hitParts = new Map<number, CombatBodyPart>(); // targetEid -> struck part, deduped across a target's own multiple cylinders
     for (const collider of queryCombatHitboxes(physics, swing.box)) {
       const owner = colliderOwners.get(collider.handle);
       if (!owner || owner.eid === swing.attackerEid) continue; // never hit yourself
       if (hasComponent(world, owner.eid, Dead)) continue;
-      hit = { eid: owner.eid, part: owner.part };
-      break;
+      if (!isHostileTo(world, swing.attackerEid, owner.eid)) continue; // never hit an ally
+      if (!hitParts.has(owner.eid)) hitParts.set(owner.eid, owner.part);
     }
-    if (hit) {
-      resolved.push({ attackerEid: swing.attackerEid, targetEid: hit.eid, part: hit.part, damage: swing.damage });
+    if (hitParts.size > 0) {
+      for (const [targetEid, part] of hitParts) {
+        resolved.push({ attackerEid: swing.attackerEid, targetEid, part, damage: swing.damage });
+      }
       pendingSwings.splice(i, 1);
     } else if (swing.remaining <= 0) {
       pendingSwings.splice(i, 1);

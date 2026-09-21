@@ -160,7 +160,9 @@ export function buildCombatTestLevel(world: World, physics: Physics, scene: THRE
   addArcheryTarget(scene, 4.5);
 
   // Long equipment table along the north wall, leaving the west wall clear
-  // for archery targets opposite the east-side projectile barrel.
+  // for archery targets. The player now spawns right in front of this
+  // table (see `spawn` below) rather than across the room, so gearing up
+  // is the very first thing they can do.
   addBox(physics, scene, new THREE.Vector3(4.8, 0.12, 0.9), new THREE.Vector3(0, 0.78, -12.5), wood);
   for (const x of [-2.1, 2.1]) {
     addBox(physics, scene, new THREE.Vector3(0.12, 0.72, 0.12), new THREE.Vector3(x, 0.36, -12.75), wood);
@@ -175,8 +177,11 @@ export function buildCombatTestLevel(world: World, physics: Physics, scene: THRE
 
   // The projectile barrel currently contains every projectile commodity in
   // the game (bolts); future ammunition types can be added to this list.
+  // Parked just past the table's east end (0.86m clear of both the
+  // tabletop and its own ~0.34m radius) rather than across the room, so
+  // grabbing a crossbow and its ammo is one stop.
   spawnProps(world, physics, scene, [
-    { id: "barrel", x: 12.5, z: 0, contents: [{ id: "bolt", count: 50 }] },
+    { id: "barrel", x: 3.6, z: -12.5, contents: [{ id: "bolt", count: 50 }] },
   ]);
 
   for (const x of [-9, 0, 9]) {
@@ -186,7 +191,10 @@ export function buildCombatTestLevel(world: World, physics: Physics, scene: THRE
   }
 
   return {
-    spawn: { x: 0, z: 12, yaw: 0 },
+    // Right in front of the equipment table (z: -12.5), facing it (yaw 0
+    // faces -Z) -- 2m of clearance from the tabletop, close enough to walk
+    // straight up and grab a weapon as the very first thing on entering.
+    spawn: { x: 0, z: -10.5, yaw: 0 },
     sectorAt: () => "combat-test",
   };
 }

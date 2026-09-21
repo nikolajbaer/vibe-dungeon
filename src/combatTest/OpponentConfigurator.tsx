@@ -8,6 +8,16 @@ export interface OpponentConfig {
   speed: number;
   weapon: OpponentWeapon;
   style: OpponentStyle;
+  /** How many identical copies of this opponent to spawn -- laid out in a
+   * row, spaced so they never start overlapping (see bootstrap.ts's
+   * `spawnOpponent`). */
+  count: number;
+  /** Which side this whole batch fights on (`NPC.team`, components.ts) --
+   * spawning a team replaces that team's own previous batch, but leaves
+   * every other team's opponents alone, so picking a second team here (with
+   * a separate Spawn) lets two batches fight *each other* instead of only
+   * ever the player. */
+  team: number;
 }
 
 export const OPEN_OPPONENT_CONFIG_EVENT = "vibe-dungeon:open-opponent-config";
@@ -18,6 +28,8 @@ export function OpponentConfigurator({ onSpawn, onOpenChange }: { onSpawn(config
   const [speed, setSpeed] = useState(2.5);
   const [weapon, setWeapon] = useState<OpponentWeapon>("sword");
   const [style, setStyle] = useState<OpponentStyle>("aggressive");
+  const [count, setCount] = useState(1);
+  const [team, setTeam] = useState(1);
 
   useEffect(() => {
     const show = () => {
@@ -42,7 +54,7 @@ export function OpponentConfigurator({ onSpawn, onOpenChange }: { onSpawn(config
             data-testid="opponent-config-panel"
             onSubmit={(event) => {
               event.preventDefault();
-              onSpawn({ health, speed, weapon, style });
+              onSpawn({ health, speed, weapon, style, count, team });
               setOpen(false);
               onOpenChange(false);
             }}
@@ -71,6 +83,18 @@ export function OpponentConfigurator({ onSpawn, onOpenChange }: { onSpawn(config
                 <option value="aggressive">Aggressive</option>
                 <option value="defensive">Defensive</option>
                 <option value="passive">Passive</option>
+              </select>
+            </label>
+            <label class="opponent-config-field">
+              <span>Count <output>{count}</output></span>
+              <input type="range" min="1" max="4" step="1" value={count} onInput={(e) => setCount(Number(e.currentTarget.value))} />
+            </label>
+            <label class="opponent-config-field">
+              <span>Team</span>
+              <select value={team} onChange={(e) => setTeam(Number(e.currentTarget.value))}>
+                <option value="1">Team 1 (vs. you)</option>
+                <option value="2">Team 2 (vs. you and Team 1)</option>
+                <option value="3">Team 3 (vs. everyone else)</option>
               </select>
             </label>
             <div class="opponent-config-actions">
