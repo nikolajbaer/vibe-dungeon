@@ -6,7 +6,7 @@ try {
   const {addComponent,addEntity,createWorld,removeComponent}=await import('bitecs');
   const {Carried,CharacterBody,Combat,Dead,Health,Item,NPC,NpcState,PhysicsBody,PlayerControlled,Position,Rotation,Velocity}=await server.ssrLoadModule('/src/ecs/components.ts');
   const {initPhysics,createPhysics,addCharacter,addCombatHitboxes,queryCombatHitboxes}=await server.ssrLoadModule('/src/physics/world.ts');
-  const {registerMeleeSwing,meleeCollisionSystem}=await server.ssrLoadModule('/src/ecs/systems/meleeCollision.ts');
+  const {registerMeleeSwing,meleeCollisionSystem,getCombatHitboxColliders}=await server.ssrLoadModule('/src/ecs/systems/meleeCollision.ts');
   const {applyMeleeDamage,tryMeleeAttack}=await server.ssrLoadModule('/src/ecs/systems/combat.ts');
   const {npcSystem}=await server.ssrLoadModule('/src/ecs/systems/npc.ts');
   const {default:bandit}=await server.ssrLoadModule('/src/assets/npcs/bandit.ts');
@@ -110,6 +110,23 @@ try {
     registerMeleeSwing(attacker,0,-1,1.4,.8,1.1,15,.2);
     const hits=tick(1/60);
     assert.equal(hits.length,0,'a dead target is never counted as a hit');
+  }
+
+  // A dead combatant's hitbox cylinders are actually removed from the
+  // physics world (and this module's own bookkeeping), not just excluded
+  // from hit resolution -- otherwise a corpse's cylinders sit around
+  // forever and the debug overlay (which just draws whatever's still
+  // registered) keeps showing them long after the NPC died.
+  {
+    const bx=nextBlock();
+    const attacker=spawnCombatant(bx,{dz:0});
+    const target=spawnCombatant(bx,{dz:-1});
+    warmUp(); // registers both combatants' hitbox cylinders
+    assert.equal(getCombatHitboxColliders().filter((c)=>c.eid===target).length,3,'the target starts with three registered cylinders');
+    addComponent(world,target,Dead);
+    tick(1/60); // meleeCollisionSystem's pruneDeadHitboxes should now remove them
+    assert.equal(getCombatHitboxColliders().filter((c)=>c.eid===target).length,0,'a dead target\'s cylinders are pruned from the debug/query registry');
+    assert.equal(getCombatHitboxColliders().filter((c)=>c.eid===attacker).length,3,'pruning a dead target leaves a still-living combatant\'s own cylinders alone');
   }
 
   // "Count one collision for the swing on the highest value collision
