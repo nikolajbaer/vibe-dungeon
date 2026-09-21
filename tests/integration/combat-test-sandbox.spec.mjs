@@ -82,7 +82,7 @@ try {
     await page.evaluate((y) => window.__vibeDungeonDebug.setYaw(y), Math.atan2(-dx, -dz));
     let dead = false;
     for (let i = 0; i < 20 && !dead; i++) {
-      await debug("attack", "cross");
+      await debug("attack", "swing");
       await page.waitForTimeout(300);
       dead = (await debug("getNpcState")).find((n) => n.eid === npc.eid)?.dead;
     }

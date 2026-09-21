@@ -2,13 +2,20 @@ import { addComponent, hasComponent, query, type World } from "bitecs";
 import { Carried, Combat, Dead, Health, Item, NPC, NpcState, PhysicsCollider, PlayerControlled, Practice, Rotation, Stamina } from "../components";
 import { ITEM_REGISTRY } from "../../assets/itemRegistry";
 import { NPC_REGISTRY } from "../../assets/npcRegistry";
-import { isHandSlot, triggerViewmodelSwing, triggerViewmodelParry } from "./items";
+import { cancelViewmodelCharge, isHandSlot, startViewmodelCharge, triggerViewmodelSwing, triggerViewmodelParry } from "./items";
 import { triggerDeathCollapse, triggerHitReaction, triggerParry } from "./npcAnimation";
 import { flashCharacterHit, flashWeaponHit } from "./hitboxDebug";
 import { isHostileTo, registerMeleeSwing } from "./meleeCollision";
 import type { CombatBodyPart } from "../../physics/world";
 
-export type AttackType = "jab" | "cross" | "chop";
+/** Two actions, Skyrim-style: `jab` is a quick, weak, instant tap; `swing`
+ * is a held power attack -- press to start winding up (see
+ * `tryStartSwingCharge`), release to actually throw it (`releaseSwingCharge`),
+ * however long that wind-up is held. There used to be a third, `cross`, a
+ * plain instant middle-ground attack -- deleted along with the wind-up
+ * mechanic replacing it as the reason to ever pick the stronger option over
+ * a jab (risk/reward via timing, not via a separate button). */
+export type AttackType = "jab" | "swing";
 export type WeaponClass = "unarmed" | "dagger" | "oneHanded";
 
 export interface AttackProfile {
@@ -16,35 +23,51 @@ export interface AttackProfile {
   recovery: number;
 }
 
-/** Shared balance table for players and, later, NPC attack selection. */
+/** Shared balance table for players and, later, NPC attack selection.
+ * `swing`'s numbers are the old, deleted `chop`'s unchanged -- it was
+ * already the strongest/slowest option, exactly the role a held power
+ * attack should play. */
 export const ATTACK_PROFILES: Record<AttackType, AttackProfile> = {
   jab: { damageMultiplier: 0.7, recovery: 0.5 },
-  cross: { damageMultiplier: 1, recovery: 0.75 },
-  chop: { damageMultiplier: 1.35, recovery: 1 },
+  swing: { damageMultiplier: 1.35, recovery: 1 },
 };
 
 /** The melee swing box's shape per attack type (see `meleeCollision.ts`'s
  * `registerMeleeSwing`) -- `reachMultiplier` scales the equipped weapon's
  * own `meleeReach` (or `UNARMED_REACH`), `width`/`height` are absolute
- * meters. A jab thrusts further and narrower; a chop trades reach for a
- * wide arc; a cross sits between the two on every axis. NPCs (npc.ts) have
- * no jab/cross/chop distinction of their own and just reuse `cross` as a
- * neutral generic swing. */
+ * meters. A jab thrusts further and narrower; the charged swing trades
+ * reach for a wide arc, wide enough to cleave more than one adjacent target
+ * (`meleeCollisionSystem`). NPCs (npc.ts) have no jab/charged-swing
+ * distinction of their own and use their own separate, neutral generic-swing
+ * constants instead (`NPC_ATTACK_SHAPE` below) -- rebalancing what the
+ * *player's* two attacks feel like should never silently reshape every
+ * NPC's swing too. */
 export const ATTACK_SHAPES: Record<AttackType, { reachMultiplier: number; width: number; height: number }> = {
   jab: { reachMultiplier: 1.15, width: 0.5, height: 1.0 },
-  cross: { reachMultiplier: 1.0, width: 0.8, height: 1.1 },
-  chop: { reachMultiplier: 0.85, width: 1.3, height: 1.3 },
+  swing: { reachMultiplier: 0.85, width: 1.3, height: 1.3 },
 };
 
 /** How long (seconds) each attack type's swing box stays active and able to
- * land a hit -- a fraction of the attack's own `recovery` above, since the
- * box only needs to cover the actual swing, not the whole windup-to-ready
- * cycle. Exported for npc.ts, whose generic attack reuses `cross`'s. */
+ * land a hit, once thrown -- a fraction of the attack's own `recovery`
+ * above, since the box only needs to cover the actual swing, not the whole
+ * windup-to-ready cycle (and, for `swing`, not the held charge either --
+ * this only starts counting down from the moment it's released). */
 export const ATTACK_ACTIVE_WINDOW: Record<AttackType, number> = {
   jab: 0.15,
-  cross: 0.2,
-  chop: 0.25,
+  swing: 0.25,
 };
+
+/** NPCs have no jab/charged-swing distinction of their own -- every
+ * aggressive NPC's single generic attack (npc.ts's `updateAggressive`)
+ * reuses this one neutral shape/timing/stamina cost, kept as its own
+ * constants independent of the player's own `ATTACK_SHAPES`/
+ * `ATTACK_ACTIVE_WINDOW`/`ATTACK_STAMINA_COST` so that simplifying or
+ * rebalancing the player's attacks (like deleting `cross` in favor of a
+ * held `swing`, above) never silently reshapes or re-costs every NPC's
+ * swing too. These are the old, deleted `cross`'s numbers, unchanged. */
+export const NPC_ATTACK_SHAPE = { reachMultiplier: 1.0, width: 0.8, height: 1.1 };
+export const NPC_ATTACK_ACTIVE_WINDOW = 0.2;
+export const NPC_ATTACK_STAMINA_COST = 12;
 
 export const UNARMED_DAMAGE = 5;
 /** Reach (meters) for an attacker with no weapon equipped (or, for an NPC,
@@ -74,15 +97,14 @@ export const BLOCK_MITIGATION: Record<WeaponClass, number> = {
 const BLOCK_RAISE_ANIMATION_SECONDS = 0.3;
 
 /** Stamina cost of each attack type -- roughly tracks the balance table
- * above (a chop is the "power attack" analog: slow, strong, and the most
- * expensive). NPCs have no jab/cross/chop of their own and pay `cross`'s
- * cost for their one generic swing, same as they reuse its shape/damage
- * multiplier. Insufficient stamina simply refuses the attack outright
- * (`tryMeleeAttack` returns false), the same as being on cooldown. */
+ * above (`swing` is the power-attack analog: slow, strong, and the most
+ * expensive; charged by *holding*, not by paying more up front -- the cost
+ * is still only ever deducted once, on release). Insufficient stamina
+ * simply refuses the attack outright (`tryMeleeAttack`/`tryStartSwingCharge`
+ * return false), the same as being on cooldown. */
 export const ATTACK_STAMINA_COST: Record<AttackType, number> = {
   jab: 8,
-  cross: 12,
-  chop: 20,
+  swing: 20,
 };
 
 /** Stamina regenerated per second while not... doing anything special --
@@ -173,9 +195,11 @@ export function combatSystem(world: World, dt: number): void {
  *
  * Raising block (the `held && !already blocking` transition) is refused
  * mid-attack-recovery -- the same "can't parry mid-swing" gate the old
- * timed parry had -- and plays the brief "weapon comes up" flourish once;
- * releasing it (`!held`) always succeeds. Holding it down across frames
- * where it was already up is a no-op, not a repeated trigger.
+ * timed parry had -- or mid-charge (can't raise a shield with both hands
+ * committed to winding up a swing; see `tryStartSwingCharge`) -- and plays
+ * the brief "weapon comes up" flourish once; releasing it (`!held`) always
+ * succeeds. Holding it down across frames where it was already up is a
+ * no-op, not a repeated trigger.
  */
 export function setBlocking(world: World, eid: number, held: boolean): void {
   if (!hasComponent(world, eid, Combat)) return;
@@ -184,7 +208,7 @@ export function setBlocking(world: World, eid: number, held: boolean): void {
     Combat.blocking[eid] = 0;
     return;
   }
-  if (wasBlocking || Combat.attackRecovery[eid] > 0) return;
+  if (wasBlocking || Combat.attackRecovery[eid] > 0 || Combat.charging[eid] > 0) return;
   Combat.blocking[eid] = 1;
   const weapon = getEquippedWeapon(world, eid);
   if (weapon) triggerViewmodelParry(weapon.itemEid, BLOCK_RAISE_ANIMATION_SECONDS);
@@ -278,7 +302,15 @@ export function applyRangedDamage(world: World, targetEid: number, rawDamage: nu
  * resolved later, by `meleeCollisionSystem`, once its active window has had
  * a chance to overlap a target. Refuses outright -- same as being on
  * cooldown -- while blocking (can't swing with your guard up) or without
- * enough stamina for this attack type's `ATTACK_STAMINA_COST`. */
+ * enough stamina for this attack type's `ATTACK_STAMINA_COST`.
+ *
+ * `attackType: "swing"` is normally reached through `releaseSwingCharge`
+ * below, never called directly -- game.ts's own input handling always goes
+ * through the charge/release pair for a real held power attack. Calling it
+ * directly (a debug hook, a test) still works, just without ever having
+ * shown the held wind-up pose first: `triggerViewmodelSwing` notices there's
+ * no charge already in flight for the weapon and plays the whole
+ * windup-and-swing motion as one immediate clip instead. */
 export function tryMeleeAttack(world: World, attackType: AttackType = "jab"): boolean {
   const [attackerEid] = query(world, [PlayerControlled, Combat]);
   if (attackerEid === undefined || Combat.attackRecovery[attackerEid] > 0 || Combat.blocking[attackerEid] > 0) return false;
@@ -301,4 +333,55 @@ export function tryMeleeAttack(world: World, attackType: AttackType = "jab"): bo
   const yaw = Rotation.yaw[attackerEid];
   registerMeleeSwing(attackerEid, -Math.sin(yaw), -Math.cos(yaw), reach, shape.width, shape.height, damage, ATTACK_ACTIVE_WINDOW[attackType]);
   return true;
+}
+
+/**
+ * Starts charging the held power attack (Skyrim-style: hold to wind up,
+ * release to throw it, however long that wind-up ends up being) -- called
+ * on press. Raises the equipped weapon into a held windup pose
+ * (`items.ts`'s `startViewmodelCharge`) and leaves it there indefinitely,
+ * doing nothing else, until `releaseSwingCharge` actually throws the swing
+ * or `cancelSwingCharge` drops it. Refuses under the same conditions as any
+ * other attack -- on cooldown, blocking, not enough stamina for `swing`'s
+ * cost -- plus already charging (holding the button/key down across frames
+ * is a no-op here, not a repeated attempt).
+ */
+export function tryStartSwingCharge(world: World): boolean {
+  const [attackerEid] = query(world, [PlayerControlled, Combat]);
+  if (attackerEid === undefined || Combat.attackRecovery[attackerEid] > 0 || Combat.blocking[attackerEid] > 0 || Combat.charging[attackerEid] > 0) return false;
+  if (hasComponent(world, attackerEid, Stamina) && Stamina.current[attackerEid] < ATTACK_STAMINA_COST.swing) return false;
+  Combat.charging[attackerEid] = 1;
+  const weapon = getEquippedWeapon(world, attackerEid);
+  if (weapon) startViewmodelCharge(weapon.itemEid);
+  return true;
+}
+
+/**
+ * Releases a charge started by `tryStartSwingCharge`, actually throwing the
+ * swing through the normal `tryMeleeAttack` resolution path (recovery,
+ * stamina deduction, the real hit-detection box -- all of it happens here,
+ * not at charge-start, in case anything changed while it was held). A
+ * stray release with nothing charging (already cancelled, or one that
+ * arrives twice) is a harmless no-op.
+ */
+export function releaseSwingCharge(world: World): boolean {
+  const [attackerEid] = query(world, [PlayerControlled, Combat]);
+  if (attackerEid === undefined || !(Combat.charging[attackerEid] > 0)) return false;
+  Combat.charging[attackerEid] = 0;
+  return tryMeleeAttack(world, "swing");
+}
+
+/**
+ * Drops a charge started by `tryStartSwingCharge` without ever swinging --
+ * e.g. a modal (dialogue, death) opening mid-charge (game.ts). No stamina
+ * was ever spent to reach this point (that only happens on an actual
+ * release), so there's nothing to refund; this just snaps the viewmodel
+ * back to its resting pose (`items.ts`'s `cancelViewmodelCharge`).
+ */
+export function cancelSwingCharge(world: World): void {
+  const [attackerEid] = query(world, [PlayerControlled, Combat]);
+  if (attackerEid === undefined || !(Combat.charging[attackerEid] > 0)) return;
+  Combat.charging[attackerEid] = 0;
+  const weapon = getEquippedWeapon(world, attackerEid);
+  if (weapon) cancelViewmodelCharge(weapon.itemEid);
 }

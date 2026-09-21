@@ -5,14 +5,18 @@ export function isTouchDevice(): boolean {
   return "ontouchstart" in window || navigator.maxTouchPoints > 0;
 }
 
-export type CombatGesture = "jab" | "cross" | "chop" | "block";
+export type CombatGesture = "attack" | "block";
 
-/** Maps a completed attack-button drag to a combat action. Ten pixels or
- * less remains a tap; beyond that the dominant axis wins. */
-export function classifyCombatGesture(dx: number, dy: number): CombatGesture {
-  if (Math.hypot(dx, dy) <= 10) return "jab";
-  if (Math.abs(dx) > Math.abs(dy)) return dx < 0 ? "cross" : "jab";
-  return dy > 0 ? "block" : "chop";
+/** Classifies a completed attack-button drag by its vertical component. A
+ * deliberate downward swipe blocks; anything else -- a stationary tap,
+ * sideways drift, an upward nudge, whatever the finger did while holding to
+ * charge a swing -- resolves as a normal attack release. jab vs. the
+ * charged swing is no longer a gesture-shape question at all now that there
+ * are only two attack types (see combat.ts's `tryStartSwingCharge`/
+ * `releaseSwingCharge`): it's decided by hold *duration*, the same
+ * press/release edges driving desktop's mouse button. */
+export function classifyCombatGesture(dy: number): CombatGesture {
+  return dy > 20 ? "block" : "attack";
 }
 
 /**
@@ -29,14 +33,17 @@ export function classifyCombatGesture(dx: number, dy: number): CombatGesture {
 class TouchAttackButton {
   readonly el: HTMLDivElement;
   private readonly ammoEl: HTMLSpanElement;
-  private requested = false;
-  private startX = 0;
+  /** One-shot touchstart edge -- see `consumePressStart`. */
+  private pressed = false;
+  /** One-shot touchend edge, only set when the release wasn't classified as
+   * a block swipe -- see `consumeAttackRelease`. */
+  private released = false;
+  private pendingBlock = false;
   private startY = 0;
-  private gesture: CombatGesture | null = null;
   private held = false;
   private holdStartedAt = 0;
 
-  constructor(label = "JAB", modifier = "") {
+  constructor(label = "ATK", modifier = "") {
     this.el = document.createElement("div");
     this.el.className = `touch-attack-btn ${modifier}`.trim();
     const labelEl = document.createElement("span");
@@ -52,40 +59,55 @@ class TouchAttackButton {
       (e) => {
         e.preventDefault();
         const touch = e.changedTouches[0];
-        this.startX = touch.clientX;
         this.startY = touch.clientY;
         this.held = true;
         this.holdStartedAt = performance.now();
+        this.pressed = true;
       },
       { passive: false },
     );
     this.el.addEventListener("touchend", (e) => {
       e.preventDefault();
       const touch = e.changedTouches[0];
-      const dx = touch.clientX - this.startX;
       const dy = touch.clientY - this.startY;
-      this.gesture = classifyCombatGesture(dx, dy);
-      this.requested = true;
+      if (classifyCombatGesture(dy) === "block") this.pendingBlock = true;
+      else this.released = true;
       this.held = false;
     }, { passive: false });
     this.el.addEventListener("touchcancel", () => { this.held = false; });
   }
 
-  /** True once for the touch that pressed this button. */
-  consumeAttackRequest(): boolean {
-    if (this.requested) {
-      this.requested = false;
+  /** True once for the touch that pressed this button -- fires ranged, or
+   * begins the jab-vs-charged-swing hold, exactly like a mouse `mousedown`
+   * (see game.ts's shared press/release melee state machine). */
+  consumePressStart(): boolean {
+    if (this.pressed) {
+      this.pressed = false;
       return true;
     }
     return false;
   }
 
-  consumeGesture(): CombatGesture | null {
-    if (!this.requested) return null;
-    this.requested = false;
-    const gesture = this.gesture;
-    this.gesture = null;
-    return gesture;
+  /** True once for a release that wasn't a downward block swipe -- the
+   * touch equivalent of a mouse `mouseup`. */
+  consumeAttackRelease(): boolean {
+    if (this.released) {
+      this.released = false;
+      return true;
+    }
+    return false;
+  }
+
+  /** True once for a release classified as a downward block swipe -- game.ts
+   * turns this into a fixed-length block *pulse* (see
+   * `TOUCH_BLOCK_PULSE_SECONDS`), since a completed gesture has no ongoing
+   * "held" state of its own to report, unlike the keyboard's real `isDown`. */
+  consumeBlockRequest(): boolean {
+    if (this.pendingBlock) {
+      this.pendingBlock = false;
+      return true;
+    }
+    return false;
   }
 
   get holdSeconds(): number {
@@ -134,16 +156,16 @@ export class TouchControls {
     return this.lookDrag?.consumeTapRequest() ?? null;
   }
 
-  /** True once for the tap that requested a melee attack. */
-  consumeAttackRequest(): boolean {
-    return this.attackButton?.consumeAttackRequest() ?? false;
+  /** True once for the touch that pressed the ATK button -- see
+   * `TouchAttackButton.consumePressStart`. */
+  consumePressStart(): boolean {
+    return this.attackButton?.consumePressStart() ?? false;
   }
 
-  consumeAttackType(): "jab" | "cross" | "chop" | null {
-    const primaryGesture = this.attackButton?.consumeGesture();
-    if (primaryGesture && primaryGesture !== "block") return primaryGesture;
-    if (primaryGesture === "block") this.pendingGestureBlock = true;
-    return null;
+  /** True once for a release that wasn't a block swipe -- see
+   * `TouchAttackButton.consumeAttackRelease`. */
+  consumeAttackRelease(): boolean {
+    return this.attackButton?.consumeAttackRelease() ?? false;
   }
 
   /** True once for the completed swipe-down gesture -- game.ts turns this
@@ -151,11 +173,7 @@ export class TouchControls {
    * since a completed gesture has no ongoing "held" state of its own to
    * report, unlike the keyboard's real `isDown`. */
   consumeBlockRequest(): boolean {
-    if (this.pendingGestureBlock) {
-      this.pendingGestureBlock = false;
-      return true;
-    }
-    return false;
+    return this.attackButton?.consumeBlockRequest() ?? false;
   }
 
   get aimHoldSeconds(): number {
@@ -165,6 +183,4 @@ export class TouchControls {
   setAmmoLabel(label?: string): void {
     this.attackButton?.setAmmoLabel(label);
   }
-
-  private pendingGestureBlock = false;
 }

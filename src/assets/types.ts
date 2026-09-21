@@ -203,8 +203,10 @@ export interface FurnitureAssetDef<P = unknown> {
  * instance runs: `"docile"` stays on today's LOITERING/FOLLOWING wander,
  * with `dialogueId` (if set) making an interact open dialogue instead of
  * toggling follow (see `dialogueId`'s own doc comment); `"aggressive"` adds
- * CHASING/ATTACKING, driven by the `aggro*`/`attack*`/`chaseSpeed`/
- * `leashRange` fields below, all required together for that behavior.
+ * CHASING/ATTACKING, driven by the `aggro*`/`attack*`/`chaseSpeed` fields
+ * below, all required together for that behavior. A chase itself never
+ * leashes on distance (see `npc.ts`'s `updateAggressive`) -- it gives up
+ * only once the target leaves whatever sector the NPC is currently in.
  */
 export interface NpcArchetypeDef {
   id: string;
@@ -257,13 +259,6 @@ export interface NpcArchetypeDef {
    * follow speeds in `npc.ts`, since only aggressive archetypes need to
    * tune it for balance. */
   chaseSpeed?: number;
-  /** Aggressive only: once further than this from `NPC.homeX/homeZ` while
-   * `CHASING`/`ATTACKING`, give up and return to `LOITERING` (re-anchoring
-   * home where it stopped, same as a docile archetype dropping out of
-   * `FOLLOWING`) — otherwise a hostile could chase the player across the
-   * entire reachable map once the doors between are open (doors never
-   * auto-close; see `ecs/systems/doors.ts`). */
-  leashRange?: number;
   /** Builds this instance's mesh. `eid` is threaded through to
    * `createAnimatedNpcMesh` (`ecs/systems/npcAnimation.ts`), which stamps
    * it onto the mesh as `userData.eid` for the interact/melee raycasts. */
