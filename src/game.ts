@@ -1,8 +1,8 @@
 import * as THREE from "three";
 import Stats from "three/examples/jsm/libs/stats.module.js";
-import { addComponent, addEntity, createWorld, hasComponent, removeComponent } from "bitecs";
+import { addComponent, addEntity, createWorld, hasComponent } from "bitecs";
 import { query } from "bitecs";
-import { Position, Velocity, Rotation, CharacterBody, DynamicBody, PhysicsBody, PhysicsCollider, PhysicsRotation, RenderOffsetY, PlayerControlled, Object3DRef, Door, Dead, DeathSector, Health, CarryCapacity, Combat, Practice, NPC, NpcState, Item, Carried, Readable, Container, Stackable } from "./ecs/components";
+import { Position, Velocity, Rotation, CharacterBody, DynamicBody, PhysicsBody, PhysicsCollider, PhysicsRotation, RenderOffsetY, PlayerControlled, Object3DRef, Door, Dead, DeathSector, Health, CarryCapacity, Combat, Practice, NPC, Item, Carried, Readable, Container, Stackable } from "./ecs/components";
 import { getPlayerMoveSpeed, inputSystem, setPlayerMoveSpeed } from "./ecs/systems/input";
 import { characterSystem, physicsSyncSystem, teleportCharacter } from "./ecs/systems/character";
 import { dynamicSyncSystem } from "./ecs/systems/dynamics";
@@ -18,8 +18,7 @@ import { BASE_CARRY_WEIGHT, equipItem, equipToOpenHandSlot, giveItem, isHandSlot
 import { syncSystem } from "./ecs/systems/sync";
 import { hudSync } from "./ecs/systems/hudSync";
 import { buildLevel } from "./level/level";
-import { dropCarriedItem, spawnNpcs } from "./level/spawning";
-import { buildCombatTestLevel } from "./level/combatTestLevel";
+import { dropCarriedItem } from "./level/spawning";
 import { floorForY } from "./level/tiles";
 import { ALL_ITEM_SPAWNS } from "./level/rooms";
 import { Keyboard } from "./input/keyboard";
@@ -39,8 +38,7 @@ import { mountContainer } from "./container/mount";
 import { containerSync } from "./container/sync";
 import { containerStore, type ContainerActions } from "./container/store";
 import { generateItemIcons } from "./assets/itemIcons";
-import { mountOpponentConfigurator, openOpponentConfigurator } from "./combatTest/mount";
-import type { OpponentConfig, OpponentWeapon } from "./combatTest/OpponentConfigurator";
+import { buildCombatTestLevel, CombatTestSandbox, COMBAT_TEST_CARRY_WEIGHT } from "./combatTest/bootstrap";
 
 const EYE_HEIGHT = 1.6; // camera height above the player's feet
 // How far in front of the player (meters) and how far above their feet a
@@ -196,7 +194,7 @@ export function startGame(container: HTMLElement, options: StartGameOptions = {}
   Object3DRef[player] = camera;
   Health.current[player] = 100;
   Health.max[player] = 100;
-  CarryCapacity.maxWeight[player] = gameMode === "combat-test" ? 100 : BASE_CARRY_WEIGHT;
+  CarryCapacity.maxWeight[player] = gameMode === "combat-test" ? COMBAT_TEST_CARRY_WEIGHT : BASE_CARRY_WEIGHT;
   Combat.attackRecovery[player] = 0;
   Combat.parryStartup[player] = 0;
   Combat.parryWindow[player] = 0;
@@ -622,40 +620,8 @@ export function startGame(container: HTMLElement, options: StartGameOptions = {}
   mountDialogue(container);
   mountNotice(container);
   mountContainer(container);
-  let combatConfigOpen = false;
-  let activeTestOpponent: number | undefined;
-  let testOpponentDeathTime = 0;
-  let testMatTriggerArmed = true;
-  const removeTestOpponent = (eid: number) => {
-    Object3DRef[eid]?.removeFromParent();
-    PhysicsBody[eid]?.setEnabled(false);
-    DeathSector.sectorId[eid] = undefined;
-    NPC.testStyle[eid] = undefined;
-    if (hasComponent(world, eid, NPC)) removeComponent(world, eid, NPC);
-    if (activeTestOpponent === eid) activeTestOpponent = undefined;
-  };
-  const spawnTestOpponent = (config: OpponentConfig) => {
-    if (activeTestOpponent !== undefined) removeTestOpponent(activeTestOpponent);
-    const archetypeForWeapon: Record<OpponentWeapon, string> = {
-      unarmed: "villager",
-      dagger: "bandit",
-      sword: "guard",
-      wooden_sword: "weapons-master",
-    };
-    const [eid] = spawnNpcs(world, physics, scene, [{ id: archetypeForWeapon[config.weapon], x: 0, z: -2 }]);
-    activeTestOpponent = eid;
-    testOpponentDeathTime = 0;
-    Health.current[eid] = config.health;
-    Health.max[eid] = config.health;
-    NPC.moveSpeed[eid] = config.speed;
-    NPC.testStyle[eid] = config.style;
-    NPC.provocationHits[eid] = config.style === "defensive" ? 1 : 0;
-    NPC.provoked[eid] = config.style === "aggressive" ? 1 : 0;
-    Combat.agility[eid] = config.style === "defensive" ? 0.7 : config.style === "aggressive" ? 0.2 : 0;
-  };
-  if (gameMode === "combat-test") {
-    mountOpponentConfigurator(container, spawnTestOpponent, (open) => { combatConfigOpen = open; });
-  }
+  const combatTest = gameMode === "combat-test" ? new CombatTestSandbox(world, physics, scene, player) : undefined;
+  combatTest?.mount(container);
   mountInGameMenu(container, {
     initialFov: baseFov,
     initialAmbient: ambientLight.intensity,
@@ -734,7 +700,7 @@ export function startGame(container: HTMLElement, options: StartGameOptions = {}
     // "not open yet" value (this was the actual villager-killing bug: a tap
     // that opened dialogue and a same-frame attack both used one value
     // computed before the dialogue existed).
-    const isModalActive = () => dialogueStore.isOpen || noticeStore.isOpen || containerStore.isOpen || hudStore.playerDefeated || combatConfigOpen;
+    const isModalActive = () => dialogueStore.isOpen || noticeStore.isOpen || containerStore.isOpen || hudStore.playerDefeated || (combatTest?.combatConfigOpen ?? false);
 
     const modalActive = isModalActive();
     if (modalActive) {
@@ -774,34 +740,7 @@ export function startGame(container: HTMLElement, options: StartGameOptions = {}
       if (steps === MAX_PHYSICS_STEPS_PER_FRAME) accumulator = 0;
       resolvePractice();
     }
-    if (gameMode === "combat-test") {
-      const onTestMat = Math.abs(Position.x[player]) <= 9 && Math.abs(Position.z[player]) <= 9;
-      if (onTestMat && testMatTriggerArmed) {
-        testMatTriggerArmed = false;
-        openOpponentConfigurator();
-      }
-      // Hysteresis prevents cancelling near the lip from immediately
-      // retriggering due to tiny character-controller position changes.
-      const clearedTestMat = Math.abs(Position.x[player]) >= 9.5 || Math.abs(Position.z[player]) >= 9.5;
-      if (clearedTestMat) testMatTriggerArmed = true;
-      // Combat test defeats are non-terminal: stop the opponent, restore the
-      // player immediately, and leave the opponent available for inspection.
-      if (Health.current[player] <= 0 || hasComponent(world, player, Dead)) {
-        Health.current[player] = Health.max[player];
-        if (hasComponent(world, player, Dead)) removeComponent(world, player, Dead);
-        if (activeTestOpponent !== undefined && hasComponent(world, activeTestOpponent, NPC)) {
-          NPC.testStyle[activeTestOpponent] = "passive";
-          NPC.provoked[activeTestOpponent] = 0;
-          NPC.state[activeTestOpponent] = NpcState.LOITERING;
-          Velocity.x[activeTestOpponent] = 0;
-          Velocity.z[activeTestOpponent] = 0;
-        }
-      }
-      if (activeTestOpponent !== undefined && hasComponent(world, activeTestOpponent, Dead)) {
-        testOpponentDeathTime += dt;
-        if (testOpponentDeathTime >= 5) removeTestOpponent(activeTestOpponent);
-      }
-    }
+    combatTest?.update(dt);
     // Runs every frame regardless of `modalActive` — see its own doc
     // comment for why a death/hit one-shot has to keep playing through a
     // pause even though ambient idle/walk freezes with everything else.
