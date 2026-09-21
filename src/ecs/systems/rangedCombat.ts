@@ -1,6 +1,6 @@
 import * as THREE from "three";
 import { addComponent, addEntity, hasComponent, query, type World } from "bitecs";
-import { Carried, Dead, Health, Item, Object3DRef, PlayerControlled, Position, Stackable, Viewmodel } from "../components";
+import { Carried, Dead, Health, Item, Object3DRef, PhysicsBody, PlayerControlled, Position, Stackable, Viewmodel } from "../components";
 import { ITEM_REGISTRY } from "../../assets/itemRegistry";
 import type { ItemAssetDef } from "../../assets/types";
 import { isHandSlot } from "./items";
@@ -41,6 +41,14 @@ const BOLT_GRAVITY = 4;
 const BOLT_LENGTH = .55;
 const BOLT_TIP_OFFSET = .32;
 const BOLT_PROTRUDING_FRACTION = .75;
+// A bolt that fails to embed (shouldEmbedProjectile false -- too slow, or no
+// hit) instead clatters off as a normal dynamic prop. Real deflections don't
+// all look identical, so its outgoing velocity is a damped reflection off
+// the surface normal plus a bit of random scatter/spin, not a motionless
+// drop at the impact point.
+const BOLT_BOUNCE_RESTITUTION = .35; // fraction of incoming speed kept after the bounce
+const BOLT_BOUNCE_SCATTER = 1.2; // m/s of random velocity added per axis
+const BOLT_BOUNCE_SPIN = 12; // rad/s of random angular velocity per axis
 
 export function getEquippedRangedWeapon(world: World, ownerEid: number): EquippedRangedWeapon | undefined {
   for (const itemEid of query(world, [Item, Carried])) {
@@ -76,6 +84,19 @@ export function shouldEmbedProjectile(speed: number, hasImpact: boolean): boolea
 export function embeddedBoltOriginOffset(): number {
   const embeddedLength = BOLT_LENGTH * (1 - BOLT_PROTRUDING_FRACTION);
   return embeddedLength - BOLT_TIP_OFFSET;
+}
+
+/** The deterministic part of a failed-embed bounce: `incoming` reflected off
+ * `normal` (both world-space, `normal` unit length) and damped by
+ * `BOLT_BOUNCE_RESTITUTION`. `makeRecoverableBolt` adds random scatter/spin
+ * on top of this so repeated bounces don't all look identical -- kept out of
+ * this function so the reflection math itself stays a plain, testable
+ * function, the same shape as `embeddedBoltOriginOffset` above. */
+export function reflectBounceVelocity(incoming: THREE.Vector3, normal: THREE.Vector3): THREE.Vector3 {
+  return incoming
+    .clone()
+    .sub(normal.clone().multiplyScalar(2 * incoming.dot(normal)))
+    .multiplyScalar(BOLT_BOUNCE_RESTITUTION);
 }
 
 export type RangedFireResult = "not-ranged" | "fired" | "reloading" | "no-ammo";
@@ -143,6 +164,16 @@ function makeRecoverableBolt(world: World, physics: Physics, scene: THREE.Scene,
     addComponent(world, eid, Position);
     addComponent(world, eid, Object3DRef);
     const direction = bolt.velocity.clone().normalize();
+    // `bolt.mesh` was parented directly to the scene throughout flight, so
+    // its position/quaternion track *world*-space coordinates, not (0,0,0)
+    // local like a freshly-created item mesh. `withPickupHitbox` wraps it in
+    // a new group without touching either -- reset both to identity here so
+    // the group's own transform (set below) is the only thing placing it,
+    // exactly like every other item's world body. Skipping this left the
+    // final position offset by wherever in the world the bolt happened to
+    // be mid-flight, sometimes many meters from the actual impact point.
+    bolt.mesh.position.set(0, 0, 0);
+    bolt.mesh.quaternion.identity();
     const group = withPickupHitbox(bolt.mesh, eid);
     group.position.copy(hit.point).addScaledVector(direction, embeddedBoltOriginOffset());
     group.quaternion.setFromUnitVectors(new THREE.Vector3(0, 0, 1), direction);
@@ -155,6 +186,25 @@ function makeRecoverableBolt(world: World, physics: Physics, scene: THREE.Scene,
   } else {
     const p = hit?.point ?? bolt.position;
     buildItemWorldBody(world, physics, scene, eid, ITEM_REGISTRY.bolt, p.x, p.y, p.z);
+    // A bolt that fails to embed clatters off instead of just materializing
+    // motionless at the impact point -- reflect its incoming velocity off
+    // the surface it hit (`hit.normal` is in the surface's *local* space,
+    // per three.js's Mesh.raycast, so it needs the object's own rotation
+    // applied to mean anything in world space), damped down and given some
+    // random scatter/spin so repeated bounces don't all look identical.
+    const body = PhysicsBody[eid];
+    if (body) {
+      const normal = hit?.normal ? hit.normal.clone().transformDirection(hit.object.matrixWorld) : new THREE.Vector3(0, 1, 0);
+      const reflected = reflectBounceVelocity(bolt.velocity, normal);
+      reflected.x += (Math.random() - 0.5) * BOLT_BOUNCE_SCATTER;
+      reflected.y += Math.random() * BOLT_BOUNCE_SCATTER * 0.5; // biased upward, not into the floor
+      reflected.z += (Math.random() - 0.5) * BOLT_BOUNCE_SCATTER;
+      body.setLinvel({ x: reflected.x, y: reflected.y, z: reflected.z }, true);
+      body.setAngvel(
+        { x: (Math.random() - 0.5) * BOLT_BOUNCE_SPIN, y: (Math.random() - 0.5) * BOLT_BOUNCE_SPIN, z: (Math.random() - 0.5) * BOLT_BOUNCE_SPIN },
+        true,
+      );
+    }
   }
 }
 
