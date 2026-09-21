@@ -36,6 +36,11 @@ const flyingBolts: FlyingBolt[] = [];
 const raycaster = new THREE.Raycaster();
 const UP = new THREE.Vector3(0, 1, 0);
 const BOLT_GRAVITY = 4;
+// createBoltMesh spans roughly local Z -0.23..+0.32. Placing its origin this
+// far behind the contact point leaves 75% of the complete bolt visible.
+const BOLT_LENGTH = .55;
+const BOLT_TIP_OFFSET = .32;
+const BOLT_PROTRUDING_FRACTION = .75;
 
 export function getEquippedRangedWeapon(world: World, ownerEid: number): EquippedRangedWeapon | undefined {
   for (const itemEid of query(world, [Item, Carried])) {
@@ -65,7 +70,12 @@ export function getRangedAmmoLabel(world: World, ownerEid: number): string | und
 }
 
 export function shouldEmbedProjectile(speed: number, hasImpact: boolean): boolean {
-  return hasImpact && speed >= 1;
+  return hasImpact && speed >= .25;
+}
+
+export function embeddedBoltOriginOffset(): number {
+  const embeddedLength = BOLT_LENGTH * (1 - BOLT_PROTRUDING_FRACTION);
+  return embeddedLength - BOLT_TIP_OFFSET;
 }
 
 export type RangedFireResult = "not-ranged" | "fired" | "reloading" | "no-ammo";
@@ -90,7 +100,10 @@ export function tryFireRanged(world: World, camera: THREE.Camera, scene: THREE.S
 
   const direction = new THREE.Vector3();
   camera.getWorldDirection(direction).normalize();
-  const position = camera.position.clone().addScaledVector(direction, .45);
+  // Begin the swept path at the camera instead of in front of it. The old
+  // .45m muzzle offset could place a bolt on the far side of a nearby wall,
+  // so the first frame never saw the impact.
+  const position = camera.getWorldPosition(new THREE.Vector3());
   const ammoDef = ITEM_REGISTRY[equipped.def.rangedWeapon.ammoItemTypeId];
   const mesh = ammoDef.createWorldMesh();
   mesh.position.copy(position);
@@ -131,7 +144,7 @@ function makeRecoverableBolt(world: World, physics: Physics, scene: THREE.Scene,
     addComponent(world, eid, Object3DRef);
     const direction = bolt.velocity.clone().normalize();
     const group = withPickupHitbox(bolt.mesh, eid);
-    group.position.copy(hit.point).addScaledVector(direction, .08);
+    group.position.copy(hit.point).addScaledVector(direction, embeddedBoltOriginOffset());
     group.quaternion.setFromUnitVectors(new THREE.Vector3(0, 0, 1), direction);
     Position.x[eid] = group.position.x;
     Position.y[eid] = group.position.y;

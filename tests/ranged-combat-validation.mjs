@@ -12,9 +12,10 @@ try {
 
   assert.equal(crossbow.rangedWeapon.reloadSeconds,1.5);
   assert.equal(crossbow.rangedWeapon.maxRange,12);
-  assert.equal(ranged.shouldEmbedProjectile(1,true),true);
-  assert.equal(ranged.shouldEmbedProjectile(.99,true),false);
+  assert.equal(ranged.shouldEmbedProjectile(.25,true),true);
+  assert.equal(ranged.shouldEmbedProjectile(.249,true),false);
   assert.equal(ranged.shouldEmbedProjectile(20,false),false);
+  assert.ok(Math.abs(ranged.embeddedBoltOriginOffset() - -.1825) < 1e-9,'75% of bolt remains outside impact surface');
 
   const world=createWorld(),player=addEntity(world),weapon=addEntity(world),ammo=addEntity(world);
   addComponent(world,player,PlayerControlled);
@@ -27,15 +28,17 @@ try {
   const scene=new THREE.Scene(),camera=new THREE.PerspectiveCamera();
   camera.position.set(0,1.5,0);camera.lookAt(0,1.5,-1);camera.updateMatrixWorld(true);
   const wood=new THREE.Mesh(new THREE.BoxGeometry(1,1,0.1),new THREE.MeshBasicMaterial());
-  wood.position.set(0,1.5,-1.3);wood.userData.surfaceMaterial='wood';scene.add(wood);scene.updateMatrixWorld(true);
+  wood.position.set(0,1.5,-.2);wood.userData.surfaceMaterial='wood';scene.add(wood);scene.updateMatrixWorld(true);
 
   assert.equal(ranged.tryFireRanged(world,camera,scene),'fired');
   assert.equal(Stackable.count[ammo],2,'one bolt consumed');
   assert.equal(ranged.tryFireRanged(world,camera,scene),'reloading','reload gates immediate second shot');
   ranged.rangedCombatSystem(world,{},scene,.1);scene.updateMatrixWorld(true);
   const recovered=query(world,[Item,Object3DRef,Stackable]).find(eid=>eid!==ammo);
-  assert.notEqual(recovered,undefined,'wood impact becomes a recoverable world bolt');
+  assert.notEqual(recovered,undefined,'close wall impact becomes a recoverable world bolt');
   assert.equal(Object3DRef[recovered].parent,wood,'bolt stays embedded in the wood it hit');
+  const embeddedWorldPosition=new THREE.Vector3();Object3DRef[recovered].getWorldPosition(embeddedWorldPosition);
+  assert.ok(embeddedWorldPosition.z > wood.position.z,'embedded bolt origin stays outside the close wall');
   assert.equal(pickUpItem(world,recovered,player),'picked-up');
   assert.equal(Stackable.count[ammo],3,'recovered bolt merges back into ammo stack');
 
