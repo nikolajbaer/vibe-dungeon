@@ -28,15 +28,24 @@ export function classifyCombatGesture(dx: number, dy: number): CombatGesture {
  */
 class TouchAttackButton {
   readonly el: HTMLDivElement;
+  private readonly ammoEl: HTMLSpanElement;
   private requested = false;
   private startX = 0;
   private startY = 0;
   private gesture: CombatGesture | null = null;
+  private held = false;
+  private holdStartedAt = 0;
 
   constructor(label = "JAB", modifier = "") {
     this.el = document.createElement("div");
     this.el.className = `touch-attack-btn ${modifier}`.trim();
-    this.el.textContent = label;
+    const labelEl = document.createElement("span");
+    labelEl.textContent = label;
+    this.el.appendChild(labelEl);
+    this.ammoEl = document.createElement("span");
+    this.ammoEl.className = "touch-attack-ammo";
+    this.ammoEl.hidden = true;
+    this.el.appendChild(this.ammoEl);
 
     this.el.addEventListener(
       "touchstart",
@@ -45,6 +54,8 @@ class TouchAttackButton {
         const touch = e.changedTouches[0];
         this.startX = touch.clientX;
         this.startY = touch.clientY;
+        this.held = true;
+        this.holdStartedAt = performance.now();
       },
       { passive: false },
     );
@@ -55,7 +66,9 @@ class TouchAttackButton {
       const dy = touch.clientY - this.startY;
       this.gesture = classifyCombatGesture(dx, dy);
       this.requested = true;
+      this.held = false;
     }, { passive: false });
+    this.el.addEventListener("touchcancel", () => { this.held = false; });
   }
 
   /** True once for the touch that pressed this button. */
@@ -73,6 +86,15 @@ class TouchAttackButton {
     const gesture = this.gesture;
     this.gesture = null;
     return gesture;
+  }
+
+  get holdSeconds(): number {
+    return this.held ? (performance.now() - this.holdStartedAt) / 1000 : 0;
+  }
+
+  setAmmoLabel(label?: string): void {
+    this.ammoEl.hidden = !label;
+    this.ammoEl.textContent = label ?? "";
   }
 }
 
@@ -130,6 +152,14 @@ export class TouchControls {
       return true;
     }
     return false;
+  }
+
+  get aimHoldSeconds(): number {
+    return this.attackButton?.holdSeconds ?? 0;
+  }
+
+  setAmmoLabel(label?: string): void {
+    this.attackButton?.setAmmoLabel(label);
   }
 
   private pendingGestureParry = false;
