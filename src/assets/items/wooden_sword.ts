@@ -22,6 +22,7 @@ const woodenSword: ItemAssetDef = {
   icon: "🪵",
   slot: "hand",
   meleeDamage: 5,
+  meleeReach: 1.4,
   mass: 1.2,
   createWorldMesh: createWoodenSword,
   createViewmodelMesh: () => {

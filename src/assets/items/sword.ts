@@ -137,6 +137,7 @@ const sword: ItemAssetDef = {
   icon: "🗡️",
   slot: "hand",
   meleeDamage: 15,
+  meleeReach: 1.4,
   mass: 3, // a real blade has heft — it thuds down rather than skittering
   createWorldMesh: () => createSwordMesh(),
   createViewmodelMesh: () => {

@@ -1,9 +1,13 @@
 import * as THREE from "three";
-import { hasComponent, query, type World } from "bitecs";
-import { Carried, Dead, Health, Item, Object3DRef, PlayerControlled, Viewmodel } from "../components";
-import { ITEM_REGISTRY } from "../../assets/itemRegistry";
-import { isHandSlot } from "./items";
-import { getNpcWeaponMesh } from "./npcAnimation";
+import { getCombatHitboxColliders, getPendingSwingBoxes } from "./meleeCollision";
+import type { CombatBodyPart, MeleeSwingBox } from "../../physics/world";
+
+// Draws the *real* melee collision geometry meleeCollision.ts actually tests
+// against -- a wireframe cylinder per combat hitbox (reading each collider's
+// own live translation/rotation/radius/halfHeight straight from Rapier, so
+// this can never drift out of sync with what a swing is really testing) and
+// a wireframe box for every currently-active swing. A play-testing aid (the
+// debug-menu toggle), not a gameplay system.
 
 /** How long (seconds) a hitbox stays red after a scored hit before fading
  * back to white -- long enough to actually see on a real monitor, short
@@ -11,20 +15,26 @@ import { getNpcWeaponMesh } from "./npcAnimation";
 const FLASH_SECONDS = 0.25;
 const WHITE = 0xffffff;
 const RED = 0xff0000;
+const CYLINDER_SEGMENTS = 12;
 
 let enabled = false;
-/** `char:<eid>` for a combatant's own bounding box, `weapon:<eid>` for the
- * melee weapon *currently equipped by* combatant `eid` -- keyed by the
- * wielder, not the item, since only one such box exists per combatant at a
- * time and the wielder's eid is what a scored hit already carries. */
-const helpers = new Map<string, THREE.BoxHelper>();
+const cylinderHelpers = new Map<string, THREE.LineSegments>(); // key: `${eid}:${part}`
+const boxHelpers = new Map<number, THREE.LineSegments>(); // key: attackerEid
+/** A swing's box after it's no longer pending (resolved or expired) --
+ * kept around only so a landed hit's box can keep rendering, red, for its
+ * flash's remaining lifetime instead of vanishing the instant it connects. */
+const lastBoxByAttacker = new Map<number, MeleeSwingBox>();
+/** Shared flash-timer namespace: `char:<eid>:<part>` and `weapon:<attackerEid>`. */
 const flashRemaining = new Map<string, number>();
 
 export function setHitboxDebugEnabled(value: boolean): void {
   enabled = value;
   if (!enabled) {
-    for (const helper of helpers.values()) helper.removeFromParent();
-    helpers.clear();
+    for (const helper of cylinderHelpers.values()) disposeHelper(helper);
+    for (const helper of boxHelpers.values()) disposeHelper(helper);
+    cylinderHelpers.clear();
+    boxHelpers.clear();
+    lastBoxByAttacker.clear();
     flashRemaining.clear();
   }
 }
@@ -33,91 +43,111 @@ export function isHitboxDebugEnabled(): boolean {
   return enabled;
 }
 
-/** Flashes the struck combatant's own hitbox red -- call only for a hit that
+/** Flashes the struck combatant's hitbox red -- call only for a hit that
  * actually lands unparried (mirrors `applyMeleeDamage`'s own "was this a
  * real, visible hit" gate, `mitigation === 0`, the same one that decides
- * whether to play the hit-reaction animation). */
-export function flashCharacterHit(eid: number): void {
-  flashRemaining.set(`char:${eid}`, FLASH_SECONDS);
+ * whether to play the hit-reaction animation). Flashes just the struck
+ * `part`'s own cylinder when known (the real swing-resolution path always
+ * knows this); omitted entirely, flashes all three -- keeps this useful for
+ * the handful of direct `applyMeleeDamage` calls in tests that have no real
+ * swing (and thus no body part) behind them at all. */
+export function flashCharacterHit(eid: number, part?: CombatBodyPart): void {
+  const parts: CombatBodyPart[] = part ? [part] : ["head", "torso", "legs"];
+  for (const p of parts) flashRemaining.set(`char:${eid}:${p}`, FLASH_SECONDS);
 }
 
-/** Flashes the attacker's currently-equipped melee weapon red. Ranged
- * weapons never call this -- `tryFireRanged`/`rangedCombatSystem` don't
- * import this module at all, matching the "not for ranged weapons" scope of
- * the visualization itself (see `meleeWeaponMesh` below, which only ever
- * finds a weapon with `meleeDamage`, never a `rangedWeapon`). */
+/** Flashes the attacker's just-landed swing box red. Ranged weapons never
+ * call this -- `tryFireRanged`/`rangedCombatSystem` don't import this
+ * module at all, matching the "not for ranged weapons" scope of the whole
+ * visualization (melee-only `registerMeleeSwing`/`meleeCollisionSystem` are
+ * this module's only source of boxes to draw in the first place). */
 export function flashWeaponHit(attackerEid: number): void {
   flashRemaining.set(`weapon:${attackerEid}`, FLASH_SECONDS);
 }
 
-/** The world mesh of whatever melee weapon `eid` currently has equipped in
- * a hand slot, or `undefined` if it has none equipped (unarmed, or only a
- * non-melee item like the lantern or crossbow). Deliberately separate from
- * combat.ts's own `getEquippedWeapon` (which also resolves damage/weapon
- * class) rather than exported and shared, so this debug-only module and the
- * real combat system don't end up importing each other. */
-function meleeWeaponMesh(world: World, eid: number): THREE.Object3D | undefined {
-  let best: { itemEid: number; damage: number } | undefined;
-  for (const itemEid of query(world, [Item, Carried])) {
-    if (Carried.ownerEid[itemEid] !== eid || !isHandSlot(Carried.slot[itemEid])) continue;
-    const def = ITEM_REGISTRY[Item.itemTypeId[itemEid]];
-    if (def?.meleeDamage === undefined) continue;
-    if (!best || def.meleeDamage > best.damage) best = { itemEid, damage: def.meleeDamage };
-  }
-  if (!best) return undefined;
-  if (hasComponent(world, eid, PlayerControlled)) return Viewmodel[best.itemEid];
-  // An NPC's weapon mesh lives inside its own rig (see `createAnimatedNpcMesh`
-  // in npcAnimation.ts), toggled visible only once actually drawn -- a
-  // sheathed weapon isn't "equipped" in any hitbox-worthy sense yet.
-  const mesh = getNpcWeaponMesh(eid);
-  return mesh?.visible ? mesh : undefined;
+function disposeHelper(helper: THREE.LineSegments): void {
+  helper.removeFromParent();
+  helper.geometry.dispose();
+  (helper.material as THREE.Material).dispose();
 }
 
-function syncHelper(key: string, target: THREE.Object3D | undefined, scene: THREE.Scene, dt: number): void {
-  let helper = helpers.get(key);
-  if (!target) {
-    if (helper) { helper.removeFromParent(); helpers.delete(key); flashRemaining.delete(key); }
-    return;
-  }
-  if (!helper) {
-    helper = new THREE.BoxHelper(target, WHITE);
-    helpers.set(key, helper);
-    scene.add(helper);
-  }
-  helper.update();
+/** Decrements `key`'s flash timer by `dt` and colors `helper` accordingly --
+ * shared by both the cylinder and box helpers below. */
+function applyFlash(helper: THREE.LineSegments, key: string, dt: number): void {
   const remaining = Math.max(0, (flashRemaining.get(key) ?? 0) - dt);
   if (remaining > 0) flashRemaining.set(key, remaining); else flashRemaining.delete(key);
   (helper.material as THREE.LineBasicMaterial).color.setHex(remaining > 0 ? RED : WHITE);
 }
 
-/** Keeps a white (red-while-flashing) wireframe box over every living
- * combatant and, separately, over whatever melee weapon each currently has
- * equipped -- a play-testing aid (per the debug-menu toggle) for seeing
- * exactly what `tryMeleeAttack`'s raycast is actually going to hit, not a
- * gameplay system. No-ops entirely while disabled. */
-export function hitboxDebugSystem(world: World, scene: THREE.Scene, dt: number): void {
-  if (!enabled) return;
-  const live = new Set<string>();
-  for (const eid of query(world, [Health, Object3DRef])) {
-    if (hasComponent(world, eid, Dead)) continue;
-    const obj = Object3DRef[eid];
-    if (!obj) continue;
-    // The player's own `Object3DRef` is the camera itself (see game.ts),
-    // not a visible body -- nothing to box around, and no player would ever
-    // see their own hitbox in first person anyway. Their weapon (viewmodel)
-    // is still worth showing below.
-    if (!hasComponent(world, eid, PlayerControlled)) {
-      const charKey = `char:${eid}`;
-      live.add(charKey);
-      syncHelper(charKey, obj, scene, dt);
-    }
-
-    const weaponKey = `weapon:${eid}`;
-    const weapon = meleeWeaponMesh(world, eid);
-    if (weapon) live.add(weaponKey);
-    syncHelper(weaponKey, weapon, scene, dt);
+function syncBoxHelper(attackerEid: number, box: MeleeSwingBox, scene: THREE.Scene, dt: number): void {
+  let helper = boxHelpers.get(attackerEid);
+  if (!helper) {
+    helper = new THREE.LineSegments(new THREE.EdgesGeometry(new THREE.BoxGeometry(1, 1, 1)), new THREE.LineBasicMaterial({ color: WHITE }));
+    boxHelpers.set(attackerEid, helper);
+    scene.add(helper);
   }
-  for (const key of Array.from(helpers.keys())) {
-    if (!live.has(key)) syncHelper(key, undefined, scene, dt);
+  // A swing's box dimensions can differ from the last one this same
+  // attacker threw (a different weapon or attack type), so the geometry
+  // itself -- not just position/rotation -- has to be rebuilt every time.
+  helper.geometry.dispose();
+  helper.geometry = new THREE.EdgesGeometry(new THREE.BoxGeometry(box.hx * 2, box.hy * 2, box.hz * 2));
+  helper.position.set(box.cx, box.cy, box.cz);
+  helper.quaternion.set(box.rotation.x, box.rotation.y, box.rotation.z, box.rotation.w);
+  applyFlash(helper, `weapon:${attackerEid}`, dt);
+}
+
+/** Keeps a white (red-while-flashing) wireframe cylinder over every combat
+ * hitbox and a wireframe box over every currently-active melee swing --
+ * both real collision geometry, read straight from Rapier, not an
+ * approximation of it. No-ops entirely while disabled. */
+export function hitboxDebugSystem(scene: THREE.Scene, dt: number): void {
+  if (!enabled) return;
+
+  const liveCylinderKeys = new Set<string>();
+  for (const { eid, part, collider } of getCombatHitboxColliders()) {
+    const key = `char:${eid}:${part}`;
+    liveCylinderKeys.add(key);
+    let helper = cylinderHelpers.get(key);
+    if (!helper) {
+      const geometry = new THREE.EdgesGeometry(new THREE.CylinderGeometry(collider.radius(), collider.radius(), collider.halfHeight() * 2, CYLINDER_SEGMENTS));
+      helper = new THREE.LineSegments(geometry, new THREE.LineBasicMaterial({ color: WHITE }));
+      cylinderHelpers.set(key, helper);
+      scene.add(helper);
+    }
+    const t = collider.translation();
+    const r = collider.rotation();
+    helper.position.set(t.x, t.y, t.z);
+    helper.quaternion.set(r.x, r.y, r.z, r.w);
+    applyFlash(helper, key, dt);
+  }
+  for (const [key, helper] of Array.from(cylinderHelpers)) {
+    if (!liveCylinderKeys.has(key)) {
+      disposeHelper(helper);
+      cylinderHelpers.delete(key);
+      flashRemaining.delete(key);
+    }
+  }
+
+  const liveAttackerEids = new Set<number>();
+  for (const { attackerEid, box } of getPendingSwingBoxes()) {
+    liveAttackerEids.add(attackerEid);
+    lastBoxByAttacker.set(attackerEid, box);
+    syncBoxHelper(attackerEid, box, scene, dt);
+  }
+  for (const [attackerEid, box] of Array.from(lastBoxByAttacker)) {
+    if (liveAttackerEids.has(attackerEid)) continue;
+    // No longer pending (resolved or expired this tick or earlier) -- if it
+    // just landed, flashWeaponHit already armed this key's timer, so keep
+    // showing its last box, red, for that flash's remaining lifetime rather
+    // than yanking it away the instant it connects. A miss (never flashed)
+    // has nothing left to show and disappears immediately.
+    if ((flashRemaining.get(`weapon:${attackerEid}`) ?? 0) > 0) {
+      syncBoxHelper(attackerEid, box, scene, dt);
+    } else {
+      const helper = boxHelpers.get(attackerEid);
+      if (helper) disposeHelper(helper);
+      boxHelpers.delete(attackerEid);
+      lastBoxByAttacker.delete(attackerEid);
+    }
   }
 }

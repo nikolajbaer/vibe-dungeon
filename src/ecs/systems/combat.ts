@@ -1,10 +1,11 @@
-import * as THREE from "three";
 import { addComponent, hasComponent, query, type World } from "bitecs";
-import { Carried, Combat, Dead, Health, Item, NPC, NpcState, Object3DRef, PlayerControlled, Practice } from "../components";
+import { Carried, Combat, Dead, Health, Item, NPC, NpcState, PlayerControlled, Practice, Rotation } from "../components";
 import { ITEM_REGISTRY } from "../../assets/itemRegistry";
-import { isHandSlot, triggerViewmodelParry, triggerViewmodelSwing } from "./items";
+import { isHandSlot, triggerViewmodelSwing, triggerViewmodelParry } from "./items";
 import { triggerDeathCollapse, triggerHitReaction, triggerParry } from "./npcAnimation";
 import { flashCharacterHit, flashWeaponHit } from "./hitboxDebug";
+import { registerMeleeSwing } from "./meleeCollision";
+import type { CombatBodyPart } from "../../physics/world";
 
 export type AttackType = "jab" | "cross" | "chop";
 export type WeaponClass = "unarmed" | "dagger" | "oneHanded";
@@ -21,7 +22,35 @@ export const ATTACK_PROFILES: Record<AttackType, AttackProfile> = {
   chop: { damageMultiplier: 1.35, recovery: 1 },
 };
 
+/** The melee swing box's shape per attack type (see `meleeCollision.ts`'s
+ * `registerMeleeSwing`) -- `reachMultiplier` scales the equipped weapon's
+ * own `meleeReach` (or `UNARMED_REACH`), `width`/`height` are absolute
+ * meters. A jab thrusts further and narrower; a chop trades reach for a
+ * wide arc; a cross sits between the two on every axis. NPCs (npc.ts) have
+ * no jab/cross/chop distinction of their own and just reuse `cross` as a
+ * neutral generic swing. */
+export const ATTACK_SHAPES: Record<AttackType, { reachMultiplier: number; width: number; height: number }> = {
+  jab: { reachMultiplier: 1.15, width: 0.5, height: 1.0 },
+  cross: { reachMultiplier: 1.0, width: 0.8, height: 1.1 },
+  chop: { reachMultiplier: 0.85, width: 1.3, height: 1.3 },
+};
+
+/** How long (seconds) each attack type's swing box stays active and able to
+ * land a hit -- a fraction of the attack's own `recovery` above, since the
+ * box only needs to cover the actual swing, not the whole windup-to-ready
+ * cycle. Exported for npc.ts, whose generic attack reuses `cross`'s. */
+export const ATTACK_ACTIVE_WINDOW: Record<AttackType, number> = {
+  jab: 0.15,
+  cross: 0.2,
+  chop: 0.25,
+};
+
 export const UNARMED_DAMAGE = 5;
+/** Reach (meters) for an attacker with no weapon equipped (or, for an NPC,
+ * no `attackReach` and no `parryWeaponClass` to derive one from) -- the
+ * same "sensible unarmed default" role `UNARMED_DAMAGE` already plays for
+ * damage. */
+export const UNARMED_REACH = 0.9;
 export const PARRY_MITIGATION: Record<WeaponClass, number> = {
   unarmed: 0.3,
   dagger: 0.5,
@@ -30,14 +59,11 @@ export const PARRY_MITIGATION: Record<WeaponClass, number> = {
 export const PARRY_STARTUP = 0.1;
 export const PARRY_WINDOW = 0.28;
 export const PARRY_RECOVERY = 0.75;
-const MELEE_RANGE = 2;
-
-const raycaster = new THREE.Raycaster();
-const forward = new THREE.Vector3();
 
 interface EquippedWeapon {
   itemEid: number;
   damage: number;
+  reach: number;
   weaponClass: WeaponClass;
 }
 
@@ -50,6 +76,7 @@ function getEquippedWeapon(world: World, attackerEid: number): EquippedWeapon | 
     const candidate: EquippedWeapon = {
       itemEid: eid,
       damage: def.meleeDamage,
+      reach: def.meleeReach ?? UNARMED_REACH,
       weaponClass: def.id === "dagger" ? "dagger" : "oneHanded",
     };
     if (!best || candidate.damage > best.damage) best = candidate;
@@ -101,7 +128,7 @@ export function tryParry(world: World, defenderEid?: number): boolean {
 }
 
 /** Applies one resolved hit and returns the actual post-parry damage. */
-export function applyMeleeDamage(world: World, targetEid: number, rawDamage: number, attackerEid?: number): number {
+export function applyMeleeDamage(world: World, targetEid: number, rawDamage: number, attackerEid?: number, part?: CombatBodyPart): number {
   if (!hasComponent(world, targetEid, Health) || hasComponent(world, targetEid, Dead)) return 0;
   if (hasComponent(world, targetEid, Combat)
       && Combat.parryRecovery[targetEid] <= 0
@@ -124,7 +151,7 @@ export function applyMeleeDamage(world: World, targetEid: number, rawDamage: num
   // aid only, see hitboxDebug.ts) never fires for a hit the defender
   // actually blocked.
   if (mitigation === 0) {
-    flashCharacterHit(targetEid);
+    flashCharacterHit(targetEid, part);
     if (attackerEid !== undefined) flashWeaponHit(attackerEid);
   }
   if (hasComponent(world, targetEid, Practice) && Practice.active[targetEid]) {
@@ -168,33 +195,30 @@ export function applyRangedDamage(world: World, targetEid: number, rawDamage: nu
   return damage;
 }
 
-/** Attempts a player attack. Damage is immediate in phase 1; recovery gates
- * subsequent attacks and matches the balance table above. */
-export function tryMeleeAttack(world: World, camera: THREE.Camera, attackType: AttackType = "jab"): boolean {
+/** Attempts a player attack: on success, queues a melee swing box (see
+ * `meleeCollision.ts`) along the player's current facing (`Rotation.yaw`,
+ * which `inputSystem` already keeps in lockstep with the camera — no camera
+ * parameter needed here anymore). Recovery gates subsequent attacks and
+ * matches the balance table above; whether the swing actually connects is
+ * resolved later, by `meleeCollisionSystem`, once its active window has had
+ * a chance to overlap a target. */
+export function tryMeleeAttack(world: World, attackType: AttackType = "jab"): boolean {
   const [attackerEid] = query(world, [PlayerControlled, Combat]);
   if (attackerEid === undefined || Combat.attackRecovery[attackerEid] > 0 || Combat.parryRecovery[attackerEid] > 0) return false;
 
   const profile = ATTACK_PROFILES[attackType];
+  const shape = ATTACK_SHAPES[attackType];
   const weapon = getEquippedWeapon(world, attackerEid);
   Combat.attackRecovery[attackerEid] = profile.recovery;
   if (weapon) triggerViewmodelSwing(weapon.itemEid, attackType, profile.recovery);
 
-  const targets: THREE.Object3D[] = [];
-  for (const eid of query(world, [Health, Object3DRef])) {
-    if (hasComponent(world, eid, Dead)) continue;
-    const obj = Object3DRef[eid];
-    if (obj && obj !== (camera as unknown as THREE.Object3D)) targets.push(obj);
-  }
-  if (targets.length === 0) return false;
-
-  camera.getWorldDirection(forward);
-  raycaster.set(camera.position, forward);
-  raycaster.far = MELEE_RANGE;
-  const hit = raycaster.intersectObjects(targets, true)[0];
-  const hitEid = hit?.object.userData.eid as number | undefined;
-  if (hitEid === undefined) return false;
-
+  const reach = (weapon?.reach ?? UNARMED_REACH) * shape.reachMultiplier;
   const damage = Math.round((weapon?.damage ?? UNARMED_DAMAGE) * profile.damageMultiplier);
-  applyMeleeDamage(world, hitEid, damage, attackerEid);
+  // The player has no body mesh at all (`Object3DRef` is the camera --
+  // see game.ts), so `Rotation.yaw` here means exactly what inputSystem's
+  // own forward vector means: local -Z at yaw 0 (see registerMeleeSwing's
+  // doc comment for why this can't be assumed inside that shared function).
+  const yaw = Rotation.yaw[attackerEid];
+  registerMeleeSwing(attackerEid, -Math.sin(yaw), -Math.cos(yaw), reach, shape.width, shape.height, damage, ATTACK_ACTIVE_WINDOW[attackType]);
   return true;
 }

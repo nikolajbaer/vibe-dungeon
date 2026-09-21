@@ -93,9 +93,24 @@ export const MAX_SLOPE_CLIMB_DEGREES = 50;
 const GROUP_LEVEL = 0x0001;
 const GROUP_CHARACTER = 0x0002;
 const GROUP_PROP = 0x0004;
+// Melee hit detection (see meleeCollision.ts) is its own pair of groups,
+// deliberately isolated from movement collision entirely: a body-part
+// hitbox is a sensor (never solid, never pushes anything) that exists only
+// to be found by a weapon swing's query, and a swing itself is never a real
+// collider at all (see `queryCombatHitboxes` below) — just an ad hoc shape
+// tested against this group once per frame. Neither one should ever show up
+// in a level/character/prop collision pair.
+const GROUP_COMBAT_HITBOX = 0x0008;
+const GROUP_COMBAT_WEAPON = 0x0010;
 const LEVEL_GROUPS = (GROUP_LEVEL << 16) | (GROUP_LEVEL | GROUP_CHARACTER | GROUP_PROP);
 export const CHARACTER_GROUPS = (GROUP_CHARACTER << 16) | (GROUP_LEVEL | GROUP_PROP);
 const PROP_GROUPS = (GROUP_PROP << 16) | (GROUP_LEVEL | GROUP_CHARACTER | GROUP_PROP);
+const COMBAT_HITBOX_GROUPS = (GROUP_COMBAT_HITBOX << 16) | GROUP_COMBAT_WEAPON;
+/** Not attached to any real collider — passed as the `filterGroups` argument
+ * to a query (`queryCombatHitboxes`), which treats it as "the groups a
+ * collider making this query would have" for the same bidirectional
+ * membership/filter match a real collider pair uses. */
+const COMBAT_WEAPON_QUERY_GROUPS = (GROUP_COMBAT_WEAPON << 16) | GROUP_COMBAT_HITBOX;
 
 /** What a character "weighs" when it shoves a dynamic body. Not a real mass
  * — the character controller is kinematic and never itself pushed — just the
@@ -374,4 +389,105 @@ export function addDynamicBox(
     body,
   );
   return body;
+}
+
+/** Which third of a character's height a combat hitbox cylinder covers —
+ * see `meleeCollision.ts`, which maps each one to its own damage multiplier
+ * and turns "which cylinders did this swing's box overlap" into "which one
+ * actually got hit." */
+export type CombatBodyPart = "head" | "torso" | "legs";
+
+/** Fraction of total character height (feet to crown) each part covers,
+ * bottom to top — rough humanoid proportions, not anatomically exact, and
+ * shared by every archetype (including the player) since they're all close
+ * enough in build that a per-archetype table isn't worth the bookkeeping. */
+const LEGS_HEIGHT_FRACTION = 0.45;
+const TORSO_HEIGHT_FRACTION = 0.40;
+// The remaining ~15% is the head.
+
+/**
+ * Attaches three sensor cylinders (legs/torso/head) to an existing
+ * character's rigid body — `addCharacter`'s own return value — stacked
+ * bottom to top and sized off the same `radius`/`halfHeight` the movement
+ * capsule already uses. Purely queried, never solid: they ride along for
+ * free with the character's own kinematic movement (no separate sync system
+ * needed) but can never push anything or be pushed, and their dedicated
+ * collision group (see `COMBAT_HITBOX_GROUPS` above) keeps them out of every
+ * other collision pair in the game.
+ *
+ * `addCharacter` puts the body's own origin at the capsule's *center*
+ * (`feetY + capsuleCenterOffset(...)`), not its feet — every offset here is
+ * local to that center, computed once from the same two numbers.
+ */
+export function addCombatHitboxes(physics: Physics, body: RigidBody, radius: number, halfHeight: number): { collider: Collider; part: CombatBodyPart }[] {
+  const R = rapier();
+  const centerToCrown = capsuleCenterOffset(radius, halfHeight); // == center-to-feet too, by symmetry
+  const totalHeight = centerToCrown * 2;
+  const legsHeight = totalHeight * LEGS_HEIGHT_FRACTION;
+  const torsoHeight = totalHeight * TORSO_HEIGHT_FRACTION;
+  const headHeight = totalHeight - legsHeight - torsoHeight;
+  const feetY = -centerToCrown; // relative to the body's own origin
+
+  const parts: { part: CombatBodyPart; y: number; halfHeight: number }[] = [
+    { part: "legs", y: feetY + legsHeight / 2, halfHeight: legsHeight / 2 },
+    { part: "torso", y: feetY + legsHeight + torsoHeight / 2, halfHeight: torsoHeight / 2 },
+    { part: "head", y: feetY + legsHeight + torsoHeight + headHeight / 2, halfHeight: headHeight / 2 },
+  ];
+
+  return parts.map(({ part, y, halfHeight: h }) => {
+    const collider = physics.world.createCollider(
+      R.ColliderDesc.cylinder(h, radius)
+        .setTranslation(0, y, 0)
+        .setSensor(true)
+        .setCollisionGroups(COMBAT_HITBOX_GROUPS),
+      body,
+    );
+    return { collider, part };
+  });
+}
+
+/** A melee weapon swing's hit-detection volume — an axis-unaligned box (its
+ * own `rotation`, since it's oriented to the attacker's facing) tested
+ * against every combat hitbox cylinder currently overlapping it. Never a
+ * real collider (see `queryCombatHitboxes`'s doc comment) — just numbers a
+ * caller hands to a query. */
+export interface MeleeSwingBox {
+  cx: number;
+  cy: number;
+  cz: number;
+  rotation: Quat;
+  hx: number;
+  hy: number;
+  hz: number;
+}
+
+/**
+ * Every combat hitbox cylinder (see `addCombatHitboxes`) currently
+ * overlapping `box`, as raw Rapier `Collider`s — the caller (`meleeCollision.ts`,
+ * which owns the collider-handle -> (eid, body part) side table `addCombatHitboxes`
+ * hands back) maps each one back to whose hitbox it actually is.
+ *
+ * Deliberately a one-off shape query rather than a real collider on a real
+ * body: a weapon swing has no persistent presence in the physics world at
+ * all, so there's nothing to create before the swing and nothing to clean up
+ * after it — the box's numbers are computed once by the caller (see
+ * `meleeCollision.ts`'s "held fixed for the whole swing" rationale) and
+ * simply handed to this query every frame the swing is still active.
+ */
+export function queryCombatHitboxes(physics: Physics, box: MeleeSwingBox): Collider[] {
+  const R = rapier();
+  const shape = new R.Cuboid(box.hx, box.hy, box.hz);
+  const hits: Collider[] = [];
+  physics.world.intersectionsWithShape(
+    { x: box.cx, y: box.cy, z: box.cz },
+    box.rotation,
+    shape,
+    (collider) => {
+      hits.push(collider);
+      return true;
+    },
+    undefined,
+    COMBAT_WEAPON_QUERY_GROUPS,
+  );
+  return hits;
 }
