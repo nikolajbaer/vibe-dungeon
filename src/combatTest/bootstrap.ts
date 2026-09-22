@@ -1,9 +1,9 @@
 import * as THREE from "three";
 import { hasComponent, removeComponent, type World } from "bitecs";
-import { Combat, Dead, DeathSector, Health, NPC, NpcState, Object3DRef, PhysicsBody, PhysicsCollider, Position, Velocity } from "../ecs/components";
+import { Combat, Dead, DeathSector, Health, NPC, NpcState, Object3DRef, PhysicsBody, PhysicsCollider, Velocity } from "../ecs/components";
 import { CHARACTER_GROUPS, type Physics } from "../physics/world";
 import { spawnNpcs } from "../level/spawning";
-import { mountOpponentConfigurator, openOpponentConfigurator } from "./mount";
+import { mountOpponentConfigurator } from "./mount";
 import type { OpponentConfig, OpponentWeapon } from "./OpponentConfigurator";
 
 export { buildCombatTestLevel } from "../level/combatTestLevel";
@@ -34,7 +34,8 @@ const CORPSE_LINGER_SECONDS = 5;
 
 /** The distinct game mode `game.ts` boots into when started with
  * `mode: "combat-test"` (see `mountOpponentConfigurator`/`OpponentConfigurator`):
- * a flat sparring mat where stepping onto it opens a panel to configure and
+ * a flat sparring mat, its own "Configure opponent" button (always on
+ * screen, `OpponentConfigurator.tsx`) opening a panel to configure and
  * spawn one or more practice opponents, defeats never end the session (the
  * player is immediately restored so testing can continue), and a defeated
  * batch's corpses stick around briefly for inspection before clearing
@@ -62,11 +63,6 @@ export class CombatTestSandbox {
    * `CORPSE_LINGER_SECONDS`. Reset back to `undefined` by any new spawn,
    * since that always means the bout isn't won yet. */
   private allDefeatedTime: number | undefined;
-  /** Debounces the test-mat trigger with hysteresis (armed again only once
-   * the player has stepped well clear of the mat) so standing right at its
-   * edge can't repeatedly reopen the panel from tiny character-controller
-   * position jitter. */
-  private testMatTriggerArmed = true;
 
   constructor(private world: World, private physics: Physics, private scene: THREE.Scene, private playerEid: number) {}
 
@@ -121,19 +117,6 @@ export class CombatTestSandbox {
    * where the equivalent logic used to live inline. */
   update(dt: number): void {
     const player = this.playerEid;
-    const onTestMat = Math.abs(Position.x[player]) <= 9 && Math.abs(Position.z[player]) <= 9;
-    // Only auto-pop the configurator on a *fresh* entry -- if opponents are
-    // already spawned (mid-fight, or just lingering as corpses waiting to
-    // clear), stepping back onto the mat is normal movement during that
-    // fight, not a request to reconfigure it, and shouldn't yank the panel
-    // up over the action. The "Configure opponent" button (see
-    // OpponentConfigurator.tsx) is always still there to open it on purpose.
-    if (onTestMat && this.testMatTriggerArmed && this.opponentsByTeam.size === 0) {
-      this.testMatTriggerArmed = false;
-      openOpponentConfigurator();
-    }
-    const clearedTestMat = Math.abs(Position.x[player]) >= 9.5 || Math.abs(Position.z[player]) >= 9.5;
-    if (clearedTestMat) this.testMatTriggerArmed = true;
 
     // Combat test defeats are non-terminal: stop every opponent, restore
     // the player immediately, and leave the opponents available for inspection.

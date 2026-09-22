@@ -18,6 +18,53 @@ export const FOLLOW_STOP_DISTANCE = 2; // meters — target follow distance, dir
 const WANDER_SPEED = 0.5; // m/s — slow, idle-looking amble
 const WANDER_RADIUS = 1.5; // meters around home
 const WANDER_STOP_DISTANCE = 0.15; // meters — "close enough" to a wander target
+
+/** How close (meters) another NPC has to be before `seekTarget` starts
+ * steering away from it -- comfortably past two capsules' combined radius
+ * (the widest archetype, `guard`/`weapons-master`, is 0.4m each, so 0.8m of
+ * actual contact) so the nudge kicks in *before* two chasers are already
+ * touching, not after. Sized against the combat-test sandbox's own spawn
+ * spacing (`combatTest/bootstrap.ts`'s `OPPONENT_ROW_SPACING`, 1.3m) --
+ * exactly the case this exists for: a whole row of aggressive opponents
+ * converging on one point (the player) with no separation would otherwise
+ * wedge the outer members behind their own row-mates, since Rapier's
+ * character-vs-character collision (`CHARACTER_GROUPS`) makes them solid to
+ * each other and a pure straight-line seek has nothing telling it to go
+ * around. */
+const SEPARATION_RADIUS = 1.5;
+/** Weight of the away-from-neighbors nudge relative to the straight-line
+ * pull toward the target -- large enough to reliably break a multi-NPC jam
+ * (confirmed by hand against the combat-test sandbox: without this, a row
+ * of 4+ aggressive opponents could freeze solid for several real seconds
+ * mid-chase, only breaking loose once the player wandered close enough to
+ * change everyone's approach angle) without visibly bending a lone chaser's
+ * path when nothing is actually crowding it -- `seekTarget` renormalizes to
+ * the caller's own `speed` either way, so this only ever changes direction,
+ * never how fast an NPC closes in. */
+const SEPARATION_STRENGTH = 1.2;
+
+/** Sums a unit push-away vector from every other NPC within
+ * `SEPARATION_RADIUS`, weighted linearly by how close it is (strongest at
+ * zero distance, fading to nothing at the radius) -- the standard "boid
+ * separation" term, just enough to nudge a crowd apart without any real
+ * pathfinding. Zero (the identity offset) when nothing else is nearby, so a
+ * lone NPC's seek direction is completely unaffected. */
+function separationFrom(world: World, eid: number): { x: number; z: number } {
+  let x = 0, z = 0;
+  for (const otherEid of query(world, [NPC, Position])) {
+    if (otherEid === eid) continue;
+    const dx = Position.x[eid] - Position.x[otherEid];
+    const dz = Position.z[eid] - Position.z[otherEid];
+    const dist = Math.hypot(dx, dz);
+    if (dist > 0 && dist < SEPARATION_RADIUS) {
+      const weight = (SEPARATION_RADIUS - dist) / SEPARATION_RADIUS;
+      x += (dx / dist) * weight;
+      z += (dz / dist) * weight;
+    }
+  }
+  return { x, z };
+}
+
 const WANDER_PAUSE_MIN = 1.5; // seconds
 const WANDER_PAUSE_MAX = 4; // seconds
 
@@ -118,7 +165,7 @@ export function npcSystem(world: World, dt: number, sectorAt: SectorAt): void {
     }
 
     if (NPC.state[eid] === NpcState.FOLLOWING && playerEid !== undefined) {
-      seekTarget(eid, playerEid, FOLLOW_SPEED, FOLLOW_STOP_DISTANCE);
+      seekTarget(world, eid, playerEid, FOLLOW_SPEED, FOLLOW_STOP_DISTANCE);
     } else {
       wander(eid, dt);
     }
@@ -129,8 +176,13 @@ export function npcSystem(world: World, dt: number, sectorAt: SectorAt): void {
  * `stopDistance` — shared by docile `FOLLOWING` (always the player) and
  * aggressive `CHASING` (whatever `findHostileTarget` picked, which just
  * uses its own `chaseSpeed`/`attackRange` instead of
- * `FOLLOW_SPEED`/`FOLLOW_STOP_DISTANCE`). */
-function seekTarget(eid: number, targetEid: number, speed: number, stopDistance: number): void {
+ * `FOLLOW_SPEED`/`FOLLOW_STOP_DISTANCE`). Blends in `separationFrom`'s
+ * push-away-from-neighbors term before renormalizing to `speed`, so a crowd
+ * of NPCs converging on the same point steers around each other instead of
+ * wedging solid (see `SEPARATION_RADIUS`'s own doc comment) -- this only
+ * ever bends the direction, never the speed a lone, uncrowded NPC already
+ * moved at. */
+function seekTarget(world: World, eid: number, targetEid: number, speed: number, stopDistance: number): void {
   const dx = Position.x[targetEid] - Position.x[eid];
   const dz = Position.z[targetEid] - Position.z[eid];
   const dist = Math.hypot(dx, dz);
@@ -141,8 +193,12 @@ function seekTarget(eid: number, targetEid: number, speed: number, stopDistance:
     return;
   }
 
-  Velocity.x[eid] = (dx / dist) * speed;
-  Velocity.z[eid] = (dz / dist) * speed;
+  const sep = separationFrom(world, eid);
+  const dirX = dx / dist + sep.x * SEPARATION_STRENGTH;
+  const dirZ = dz / dist + sep.z * SEPARATION_STRENGTH;
+  const dirLen = Math.hypot(dirX, dirZ) || 1;
+  Velocity.x[eid] = (dirX / dirLen) * speed;
+  Velocity.z[eid] = (dirZ / dirLen) * speed;
 }
 
 /**
@@ -288,7 +344,7 @@ function updateAggressive(world: World, eid: number, archetype: NpcArchetypeDef,
 
   if (distToTarget > attackRange) {
     NPC.state[eid] = NpcState.CHASING;
-    seekTarget(eid, targetEid, NPC.moveSpeed[eid] || archetype.chaseSpeed || FOLLOW_SPEED, attackRange);
+    seekTarget(world, eid, targetEid, NPC.moveSpeed[eid] || archetype.chaseSpeed || FOLLOW_SPEED, attackRange);
     return;
   }
 

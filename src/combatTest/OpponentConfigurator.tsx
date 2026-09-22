@@ -1,4 +1,4 @@
-import { useEffect, useState } from "preact/hooks";
+import { useState } from "preact/hooks";
 
 export type OpponentStyle = "aggressive" | "defensive" | "passive";
 export type OpponentWeapon = "unarmed" | "dagger" | "sword" | "wooden_sword";
@@ -20,8 +20,6 @@ export interface OpponentConfig {
   team: number;
 }
 
-export const OPEN_OPPONENT_CONFIG_EVENT = "vibe-dungeon:open-opponent-config";
-
 export function OpponentConfigurator({ onSpawn, onOpenChange }: { onSpawn(config: OpponentConfig): void; onOpenChange(open: boolean): void }) {
   const [open, setOpen] = useState(false);
   const [health, setHealth] = useState(60);
@@ -30,15 +28,6 @@ export function OpponentConfigurator({ onSpawn, onOpenChange }: { onSpawn(config
   const [style, setStyle] = useState<OpponentStyle>("aggressive");
   const [count, setCount] = useState(1);
   const [team, setTeam] = useState(1);
-
-  useEffect(() => {
-    const show = () => {
-      setOpen(true);
-      onOpenChange(true);
-    };
-    window.addEventListener(OPEN_OPPONENT_CONFIG_EVENT, show);
-    return () => window.removeEventListener(OPEN_OPPONENT_CONFIG_EVENT, show);
-  }, [onOpenChange]);
 
   return (
     <div class="opponent-config-root">

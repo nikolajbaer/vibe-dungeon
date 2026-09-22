@@ -469,6 +469,8 @@ export function startGame(container: HTMLElement, options: StartGameOptions = {}
         y: Position.y[eid],
         z: Position.z[eid],
         health: Health.current[eid],
+        vx: Velocity.x[eid],
+        vz: Velocity.z[eid],
         dead: hasComponent(world, eid, Dead),
         meshInScene: Object3DRef[eid]?.parent !== null,
         // Issue #59: the sector it died in (until corpseCleanupSystem clears

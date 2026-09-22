@@ -1,9 +1,5 @@
 import { render } from "preact";
-import { OPEN_OPPONENT_CONFIG_EVENT, OpponentConfigurator, type OpponentConfig } from "./OpponentConfigurator";
-
-export function openOpponentConfigurator(): void {
-  window.dispatchEvent(new Event(OPEN_OPPONENT_CONFIG_EVENT));
-}
+import { OpponentConfigurator, type OpponentConfig } from "./OpponentConfigurator";
 
 export function mountOpponentConfigurator(
   container: HTMLElement,
