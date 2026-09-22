@@ -39,7 +39,16 @@ const crossbow: ItemAssetDef = {
   slot: "hand",
   mass: 3.4,
   twoHanded: true,
-  rangedWeapon: { ammoItemTypeId: "bolt", damage: 18, reloadSeconds: 1.5, projectileSpeed: 18, maxRange: 12 },
+  // projectileSpeed/maxRange are tuned against the combat-test arena
+  // (combatTestLevel.ts): a 30m room with archery targets mounted flush on
+  // the far wall, so a shot fired from clear across it -- the whole point
+  // of a practice range -- needs real reach. The old 18 m/s / 12m combo cut
+  // a bolt's flight short well before it ever reached the far wall (it just
+  // ran out of range mid-air and dropped, never embedding); 34 m/s covers
+  // the room's ~29m interior span in a little over a second with only a
+  // couple meters of gravity drop, and 40m of range leaves real margin
+  // rather than cutting it exactly at the wall.
+  rangedWeapon: { ammoItemTypeId: "bolt", damage: 18, reloadSeconds: 1.5, projectileSpeed: 34, maxRange: 40 },
   createWorldMesh: createCrossbowMesh,
   createViewmodelMesh: () => {
     const mesh = createCrossbowMesh();
