@@ -59,12 +59,6 @@ const DEBUG_HEALTH_STEP = 10; // debug-only nudge, see `[`/`]` handling below
 /** RPG groundwork -- see `ecs/components.ts`'s `Stamina`. A flat default for
  * now; a future leveling/perk system is the intended place to grow this. */
 const PLAYER_MAX_STAMINA = 100;
-/** How long (seconds) a completed touch block gesture (see
- * `touchControls.ts`'s `consumeBlockRequest`) holds block up for -- touch
- * has no real "held" input the way `keyboard.isDown` does, so a completed
- * swipe instead simulates a fixed-length hold. */
-const TOUCH_BLOCK_PULSE_SECONDS = 0.6;
-
 /** How long (seconds) the melee attack button/key needs to stay held before
  * it commits to charging the power swing instead of resolving as a quick
  * jab on release -- see the shared press/release melee state machine in
@@ -725,11 +719,6 @@ export function startGame(container: HTMLElement, options: StartGameOptions = {}
   // player was just trying to talk to.
   let meleeMousePressed = false;
   let meleeMouseReleased = false;
-  // Real-time seconds left on a touch block gesture's fixed-length pulse
-  // (see `TOUCH_BLOCK_PULSE_SECONDS`) -- unlike the press/release edges
-  // above this isn't a one-shot flag, since block needs a continuous "still
-  // held" state every frame, not just the instant it was requested.
-  let touchBlockPulseRemaining = 0;
   if (!isTouchDevice()) {
     renderer.domElement.addEventListener("mousedown", (e) => {
       if (e.button === 0 && pointerLook.locked) meleeMousePressed = true;
@@ -918,14 +907,11 @@ export function startGame(container: HTMLElement, options: StartGameOptions = {}
     // would fire a shot the player never actually meant to take.
     if (isModalActive() && meleePressWasRanged) meleePressWasRanged = false;
     // Skyrim-style held block, not an edge-triggered press: `setBlocking`
-    // runs every frame with the input's *current* state (keyboard.isDown, a
-    // real hold) OR'd with a touch block gesture's fixed-length pulse (touch
-    // has no true "held" primitive for this button -- see
-    // TOUCH_BLOCK_PULSE_SECONDS) rather than only reacting to the instant
-    // block starts, so releasing the key/gesture actually lowers the guard.
-    if (touch.consumeBlockRequest()) touchBlockPulseRemaining = TOUCH_BLOCK_PULSE_SECONDS;
-    touchBlockPulseRemaining = Math.max(0, touchBlockPulseRemaining - dt);
-    const wantsBlock = !isModalActive() && (keyboard.isDown("KeyF") || touchBlockPulseRemaining > 0);
+    // runs every frame with the input's *current* state -- keyboard.isDown,
+    // or the dedicated touch block button's own real held state
+    // (`touch.isBlockHeld()`) -- rather than only reacting to the instant
+    // block starts, so releasing the key/button actually lowers the guard.
+    const wantsBlock = !isModalActive() && (keyboard.isDown("KeyF") || touch.isBlockHeld());
     setBlocking(world, player, wantsBlock);
     resolvePractice();
     viewmodelSwingSystem(dt);

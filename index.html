@@ -36,8 +36,8 @@
       }
       .touch-attack-btn {
         position: fixed;
-        right: 20px;
-        bottom: 20px;
+        right: 55px;
+        bottom: 65px;
         width: 90px;
         height: 90px;
         border-radius: 50%;
@@ -56,6 +56,30 @@
       }
       .touch-attack-btn:active {
         background: rgba(217, 67, 63, 0.5);
+        border-color: rgba(255, 255, 255, 0.6);
+      }
+      .touch-block-btn {
+        position: fixed;
+        right: 20px;
+        bottom: 20px;
+        width: 54px;
+        height: 54px;
+        border-radius: 50%;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        background: rgba(255, 255, 255, 0.12);
+        border: 2px solid rgba(255, 255, 255, 0.35);
+        color: rgba(255, 255, 255, 0.75);
+        font: 700 11px/1 system-ui, sans-serif;
+        letter-spacing: 0.05em;
+        touch-action: none;
+        user-select: none;
+        -webkit-user-select: none;
+        z-index: 30;
+      }
+      .touch-block-btn:active {
+        background: rgba(63, 122, 217, 0.5);
         border-color: rgba(255, 255, 255, 0.6);
       }
       .touch-attack-ammo {
