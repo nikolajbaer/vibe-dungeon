@@ -33,11 +33,14 @@ try {
   const spawnPos = await debug("getPlayerPosition");
   assert(Math.abs(spawnPos.x - 0) < 0.01 && Math.abs(spawnPos.z - -10.5) < 0.01, `player spawns in front of the weapon table (${spawnPos.x}, ${spawnPos.z})`);
 
-  // --- Stepping onto the sparring mat opens the opponent configurator ---
+  // --- The "Configure opponent" button opens the panel (the old
+  // "stepping onto the mat auto-opens it" trigger was removed -- the
+  // always-on-screen button already covers opening it) ---
   await debug("teleportPlayer", 0, 0, 0);
   await page.waitForTimeout(300);
+  await page.click('[data-testid="opponent-config-open"]');
   await page.waitForSelector('[data-testid="opponent-config-panel"]');
-  assert(true, "stepping onto the test mat opened the opponent configurator");
+  assert(true, "the Configure opponent button opened the opponent configurator");
 
   async function setRange(nth, value) {
     const input = page.locator('[data-testid="opponent-config-panel"] input[type="range"]').nth(nth);
@@ -94,8 +97,7 @@ try {
 
   // --- two different teams actually fight each other ---
   // Every prior spawn closed the panel (onSpawn's own setOpen(false)); the
-  // "Configure opponent" button re-opens it without needing to re-trigger
-  // the mat's own proximity/hysteresis logic.
+  // "Configure opponent" button re-opens it.
   await page.click('[data-testid="opponent-config-open"]');
   await page.waitForSelector('[data-testid="opponent-config-panel"]');
   await setRange(0, 60); // health back up from the 10 used to speed up the kill test above
