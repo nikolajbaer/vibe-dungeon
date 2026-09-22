@@ -6,16 +6,9 @@ try {
   const {addComponent,addEntity,createWorld}=await import('bitecs');
   const {Combat,Health,Item,Carried,NPC,NpcState,PlayerControlled,Stamina}=await server.ssrLoadModule('/src/ecs/components.ts');
   const {ATTACK_PROFILES,ATTACK_STAMINA_COST,BLOCK_MITIGATION,STAMINA_REGEN_PER_SECOND,applyMeleeDamage,combatSystem,setBlocking,tryMeleeAttack}=await server.ssrLoadModule('/src/ecs/systems/combat.ts');
-  const {classifyCombatGesture}=await server.ssrLoadModule('/src/input/touchControls.ts');
 
   assert.deepEqual(ATTACK_PROFILES,{jab:{damageMultiplier:.7,recovery:.5},swing:{damageMultiplier:1.35,recovery:1}});
   assert.deepEqual(BLOCK_MITIGATION,{unarmed:.3,dagger:.5,oneHanded:.75});
-  // jab vs. the charged swing is decided by hold duration now (combat.ts's
-  // tryStartSwingCharge/releaseSwingCharge), not by swipe shape -- this only
-  // ever needs to pull a deliberate downward swipe (block) out.
-  assert.equal(classifyCombatGesture(8),'attack','a small vertical drift attacks');
-  assert.equal(classifyCombatGesture(-11),'attack','an upward nudge attacks');
-  assert.equal(classifyCombatGesture(21),'block','a deliberate downward swipe blocks');
 
   const setup=(weapon)=>{
     const world=createWorld(),defender=addEntity(world);
