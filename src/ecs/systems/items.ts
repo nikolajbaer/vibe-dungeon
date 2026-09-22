@@ -549,37 +549,42 @@ export interface ViewmodelTuning {
    * the charge is actually held (see `viewmodelSwingSystem`'s "swing"
    * branch). */
   chargeRaiseSeconds: number;
-  /** How far to the wound-up side (meters) the charged swing pulls back to
-   * while held -- a right-handed swing chambers up and crossed toward the
-   * right (see `handSign` in `viewmodelSwingSystem`), a left-handed one
-   * toward the left, then releases in a full diagonal cut down and across
-   * to the *opposite* side -- a real committed power-swing wind-up (think
-   * cocking a bat back over one shoulder), not a small twitch. */
-  sweepWind: number;
-  /** How far *past* the resting center (meters) the release's
-   * follow-through carries at its peak -- deliberately much wider than
-   * `sweepWind`, large enough that the weapon's own origin (at its grip --
-   * see `VIEWMODEL_OFFSET`'s doc comment) travels off the edge of the
-   * screen during the cut, not just its blade tip. */
-  sweepReach: number;
-  /** Upward drift (meters) while winding up -- chambering the swing raises
-   * the weapon up before it cuts down. */
-  sweepRiseWind: number;
-  /** Downward drift (meters, negative) at the release's follow-through
-   * peak -- the cut continues down and across rather than staying level,
-   * so the weapon ends up low and to the side rather than swinging flat. */
-  sweepDropPeak: number;
-  /** Yaw (radians) the blade turns toward while winding up/following
-   * through -- what actually sells "the blade is cutting sideways" rather
-   * than just the hilt translating in a straight line; `handSign` flips it
-   * to always wind up opposite the follow-through side. */
-  sweepYawWind: number;
-  sweepYawReach: number;
-  /** Roll (radians) layered on top of the yaw above, same wind/reach shape
-   * -- gives the blade a bit of a slicing tilt rather than staying
-   * perfectly flat through the whole arc. */
-  sweepRollWind: number;
-  sweepRollReach: number;
+  /**
+   * The swing's whole shape is three poses, each declared as [x,y,z]
+   * position and [pitch,yaw,roll] rotation *deltas* from the resting
+   * `VIEWMODEL_OFFSET` pose, for a right-handed hold -- `handSign` in
+   * `viewmodelSwingSystem` mirrors position's X and rotation's yaw/roll for
+   * a left-handed one (position's Y/Z and rotation's pitch apply
+   * unmirrored), the same convention every other hand-relative pose in
+   * this file uses:
+   *
+   * - `swingChamber*`: the fully wound-up pose, reached gradually over
+   *   `chargeRaiseSeconds` while charging -- crossed over the body toward
+   *   the off-hand side, blade pointing away across the chest, hilt pulled
+   *   in toward screen-center. The release always starts here.
+   * - `swingMid*`, reached at `swingMidT` (0..1) through the release: the
+   *   swing's extended midpoint, blade carried through to point roughly
+   *   straight ahead.
+   * - `swingEnd*`, reached at `swingEndT` (0..1, after `swingMidT`): the
+   *   follow-through's peak, carried on through to the strong-hand side --
+   *   far enough that the weapon's own grip (see `VIEWMODEL_OFFSET`'s doc
+   *   comment) travels off the edge of the screen, not just the blade tip.
+   *
+   * `viewmodelSwingSystem` eases chamber -> mid across `[0, swingMidT]` of
+   * the release, mid -> end across `[swingMidT, swingEndT]`, then eases
+   * end back to the *exact* resting pose across `[swingEndT, 1]` -- so a
+   * dramatic off-screen follow-through still always finishes cleanly at
+   * rest (see this file's header comment on why that matters), the settle
+   * back just isn't one of the three poses above.
+   */
+  swingChamberPos: THREE.Vector3Tuple;
+  swingChamberRot: THREE.EulerTuple;
+  swingMidPos: THREE.Vector3Tuple;
+  swingMidRot: THREE.EulerTuple;
+  swingMidT: number;
+  swingEndPos: THREE.Vector3Tuple;
+  swingEndRot: THREE.EulerTuple;
+  swingEndT: number;
   /** How long (seconds) the held block's guard pose takes to rise once
    * block starts, and to lower once it releases -- fast enough to feel
    * like raising a guard on purpose, not a delayed reaction. */
@@ -609,14 +614,14 @@ const DEFAULT_TUNING: Readonly<ViewmodelTuning> = {
   stabDistance: 0.35,
   stabInward: 0.06,
   chargeRaiseSeconds: 0.15,
-  sweepWind: 0.26,
-  sweepReach: 0.62,
-  sweepRiseWind: 0.09,
-  sweepDropPeak: -0.28,
-  sweepYawWind: 0.67,
-  sweepYawReach: 1.0,
-  sweepRollWind: 0.2,
-  sweepRollReach: 0.55,
+  swingChamberPos: [-0.24, 0.04, 0.05],
+  swingChamberRot: [0, 0, 0],
+  swingMidPos: [0.05, 0.15, -0.35],
+  swingMidRot: [0, 0.42, -0.23],
+  swingMidT: 0.45,
+  swingEndPos: [0.1, -0.05, -0.2],
+  swingEndRot: [0, 2.15, -1.75],
+  swingEndT: 0.8,
   blockRaiseSeconds: 0.15,
   blockLowerSeconds: 0.15,
   blockRaise: 0.14,
@@ -815,6 +820,36 @@ function applyViewmodelPose(mesh: THREE.Object3D, swing: SwingState, dt: number,
   if (t >= 1) swing.blendFrom = undefined;
 }
 
+function lerp(a: number, b: number, t: number): number {
+  return a + (b - a) * t;
+}
+
+function lerpPose(a: { pos: THREE.Vector3Tuple; rot: THREE.EulerTuple }, b: { pos: THREE.Vector3Tuple; rot: THREE.EulerTuple }, t: number): { pos: THREE.Vector3Tuple; rot: THREE.EulerTuple } {
+  return {
+    pos: [lerp(a.pos[0], b.pos[0], t), lerp(a.pos[1], b.pos[1], t), lerp(a.pos[2], b.pos[2], t)],
+    rot: [lerp(a.rot[0], b.rot[0], t), lerp(a.rot[1], b.rot[1], t), lerp(a.rot[2], b.rot[2], t)],
+  };
+}
+
+/** Smoothstep -- eases both ends of a 0..1 span (accelerate out, decelerate
+ * in) rather than the constant-velocity feel a plain `lerp` has, used for
+ * every leg of the swing's chamber -> mid -> end -> rest path below. */
+function ease(t: number): number {
+  return t * t * (3 - 2 * t);
+}
+
+/** Applies `deltaPos`/`deltaRot` (declared for a right-handed hold, see
+ * `ViewmodelTuning`'s `swingChamberPos` doc comment) on top of `base` for
+ * the given `handSign` -- position's X and rotation's yaw/roll mirror,
+ * position's Y/Z and rotation's pitch don't, the same convention `block`'s
+ * pose below uses via `inwardSign`. */
+function mirroredPose(base: { pos: THREE.Vector3Tuple; rot: THREE.EulerTuple }, deltaPos: THREE.Vector3Tuple, deltaRot: THREE.EulerTuple, handSign: number): { pos: THREE.Vector3Tuple; rot: THREE.EulerTuple } {
+  return {
+    pos: [base.pos[0] + handSign * deltaPos[0], base.pos[1] + deltaPos[1], base.pos[2] + deltaPos[2]],
+    rot: [base.rot[0] + deltaRot[0], base.rot[1] + handSign * deltaRot[1], base.rot[2] + handSign * deltaRot[2]],
+  };
+}
+
 /**
  * Advances every active weapon animation, driving each item's `Viewmodel`
  * mesh through whichever of jab/swing/block/cancel it's currently in
@@ -831,14 +866,15 @@ function applyViewmodelPose(mesh: THREE.Object3D, swing: SwingState, dt: number,
  *   screen-center), `rotation` stays exactly at its resting
  *   `VIEWMODEL_OFFSET` pose throughout, which is what makes it read as the
  *   blade driving point-first rather than swinging through an arc.
- * - **swing**: the held power attack -- chambers up and toward one side
- *   (`SWEEP_WIND`/`SWEEP_RISE_WIND`, `handSign` below), then on release
- *   cuts down and across to a wide follow-through on the *other* side
- *   (`SWEEP_REACH`/`SWEEP_DROP_PEAK`) -- far enough that the weapon's own
- *   grip travels off the edge of the screen, not just its blade tip.
- *   `handSign` mirrors which side is which by hand, so a right-handed
- *   weapon chambers right and cuts down-and-left and a left-handed one is
- *   the exact mirror.
+ * - **swing**: the held power attack -- chambers crossed over the body
+ *   (`tuning.swingChamberPos`/`Rot`) while held, then on release carries
+ *   through an extended midpoint (`swingMid*`, reached at `swingMidT`) to a
+ *   wide follow-through on the strong-hand side (`swingEnd*`, reached at
+ *   `swingEndT`) -- far enough that the weapon's own grip travels off the
+ *   edge of the screen, not just its blade tip -- before easing back to
+ *   rest. `handSign` (`mirroredPose`) mirrors which side is which by hand,
+ *   so a right-handed weapon chambers left-across-the-body and follows
+ *   through to the right, and a left-handed one is the exact mirror.
  * - **block**: a genuinely held guard (`startViewmodelBlock`/
  *   `stopViewmodelBlock`) raised toward chest height, pulled in across the
  *   body, and rolled toward horizontal for as long as block is actually
@@ -903,30 +939,35 @@ export function viewmodelSwingSystem(dt: number): void {
     }
 
     if (swing.attackType === "swing") {
+      const chamberPose = mirroredPose(base, tuning.swingChamberPos, tuning.swingChamberRot, handSign);
       if (swing.charging) {
-        // Held phase: chamber up and toward handSign's side and then just
-        // sit there, however long the charge is actually held -- no sweep
-        // motion at all yet (that's the release phase below, which always
-        // starts from exactly this same fully-chambered chamber=1 pose).
+        // Held phase: ease into the chambered pose and then just sit there,
+        // however long the charge is actually held -- no swing motion at
+        // all yet (that's the release phase below, which always starts
+        // from exactly this same fully-chambered pose).
         swing.chargeElapsed += dt;
-        const chamber = Math.min(1, swing.chargeElapsed / tuning.chargeRaiseSeconds);
-        applyViewmodelPose(mesh, swing, dt,
-          [base.pos[0] + handSign * tuning.sweepWind * chamber, base.pos[1] + tuning.sweepRiseWind * chamber, base.pos[2]],
-          [base.rot[0], base.rot[1] + handSign * tuning.sweepYawWind * chamber, base.rot[2] + handSign * tuning.sweepRollWind * chamber]);
+        const t = ease(Math.min(1, swing.chargeElapsed / tuning.chargeRaiseSeconds));
+        const raised = lerpPose(base, chamberPose, t);
+        applyViewmodelPose(mesh, swing, dt, raised.pos, raised.rot);
         continue;
       }
-      // Release phase: the chambered weapon cuts down and across to a wide
-      // follow-through on the opposite side and settles back to rest --
-      // chamber unwinds 1 -> 0 across the same span arc sweeps through its
-      // own 0 -> 1 -> 0, so both hit their resting values (chamber=0,
-      // arc=0) together right as the swing finishes.
+      // Release phase: chamber -> mid -> end -> rest, each leg eased
+      // independently -- see `ViewmodelTuning.swingChamberPos`'s doc
+      // comment for why the settle back to rest isn't itself one of the
+      // three tuned poses.
       swing.elapsed += dt;
       const releaseT = Math.min(1, swing.elapsed / swing.duration);
-      const chamber = 1 - releaseT;
-      const arc = Math.sin(releaseT * Math.PI);
-      applyViewmodelPose(mesh, swing, dt,
-        [base.pos[0] + handSign * tuning.sweepWind * chamber - handSign * tuning.sweepReach * arc, base.pos[1] + tuning.sweepRiseWind * chamber + tuning.sweepDropPeak * arc, base.pos[2]],
-        [base.rot[0], base.rot[1] + handSign * tuning.sweepYawWind * chamber - handSign * tuning.sweepYawReach * arc, base.rot[2] + handSign * tuning.sweepRollWind * chamber - handSign * tuning.sweepRollReach * arc]);
+      const midPose = mirroredPose(base, tuning.swingMidPos, tuning.swingMidRot, handSign);
+      const endPose = mirroredPose(base, tuning.swingEndPos, tuning.swingEndRot, handSign);
+      let pose: { pos: THREE.Vector3Tuple; rot: THREE.EulerTuple };
+      if (releaseT <= tuning.swingMidT) {
+        pose = lerpPose(chamberPose, midPose, ease(releaseT / Math.max(1e-4, tuning.swingMidT)));
+      } else if (releaseT <= tuning.swingEndT) {
+        pose = lerpPose(midPose, endPose, ease((releaseT - tuning.swingMidT) / Math.max(1e-4, tuning.swingEndT - tuning.swingMidT)));
+      } else {
+        pose = lerpPose(endPose, base, ease((releaseT - tuning.swingEndT) / Math.max(1e-4, 1 - tuning.swingEndT)));
+      }
+      applyViewmodelPose(mesh, swing, dt, pose.pos, pose.rot);
       if (releaseT >= 1) activeSwings.splice(i, 1);
       continue;
     }

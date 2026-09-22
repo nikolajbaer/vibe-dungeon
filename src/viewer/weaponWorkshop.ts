@@ -136,70 +136,128 @@ addEventListener("keyup", (e) => {
 
 // -- Live tuning sliders ------------------------------------------------------
 
+// `index` is set for a [x,y,z]/[pitch,yaw,roll] tuple field (ViewmodelTuning's
+// swingChamberPos/Rot/swingMidPos/Rot/swingEndPos/Rot) to pick which of its
+// three components this one slider edits; omitted for a plain scalar field.
 interface SliderSpec {
   key: keyof ViewmodelTuning;
+  index?: 0 | 1 | 2;
   label: string;
   min: number;
   max: number;
   step: number;
 }
+interface SliderGroup {
+  title: string;
+  sliders: SliderSpec[];
+}
 
-const SLIDERS: SliderSpec[] = [
-  { key: "swingDuration", label: "Swing/jab duration (s)", min: 0.05, max: 2, step: 0.01 },
-  { key: "stabDistance", label: "Jab distance (m)", min: 0, max: 1, step: 0.01 },
-  { key: "stabInward", label: "Jab inward drift (m)", min: 0, max: 0.3, step: 0.005 },
-  { key: "chargeRaiseSeconds", label: "Charge raise time (s)", min: 0.02, max: 1, step: 0.01 },
-  { key: "sweepWind", label: "Chamber translate (m)", min: 0, max: 1, step: 0.01 },
-  { key: "sweepReach", label: "Release reach (m)", min: 0, max: 1.5, step: 0.01 },
-  { key: "sweepRiseWind", label: "Chamber rise (m)", min: -0.5, max: 0.5, step: 0.01 },
-  { key: "sweepDropPeak", label: "Release drop (m)", min: -1, max: 0.5, step: 0.01 },
-  { key: "sweepYawWind", label: "Chamber yaw (rad)", min: 0, max: 3, step: 0.01 },
-  { key: "sweepYawReach", label: "Release yaw (rad)", min: 0, max: 3, step: 0.01 },
-  { key: "sweepRollWind", label: "Chamber roll (rad)", min: -2, max: 2, step: 0.01 },
-  { key: "sweepRollReach", label: "Release roll (rad)", min: -2, max: 2, step: 0.01 },
-  { key: "blockRaiseSeconds", label: "Block raise time (s)", min: 0.02, max: 1, step: 0.01 },
-  { key: "blockLowerSeconds", label: "Block lower time (s)", min: 0.02, max: 1, step: 0.01 },
-  { key: "blockRaise", label: "Block raise (m)", min: 0, max: 0.5, step: 0.01 },
-  { key: "blockInward", label: "Block inward (m)", min: 0, max: 0.5, step: 0.01 },
-  { key: "blockForward", label: "Block forward (m)", min: 0, max: 0.5, step: 0.01 },
-  { key: "blockPitch", label: "Block pitch (rad)", min: -1, max: 1, step: 0.01 },
-  { key: "blockRoll", label: "Block roll (rad)", min: -2, max: 2, step: 0.01 },
-  { key: "blendSeconds", label: "Blend time (s)", min: 0, max: 0.5, step: 0.01 },
+const SLIDER_GROUPS: SliderGroup[] = [
+  {
+    title: "Jab / block / blend",
+    sliders: [
+      { key: "swingDuration", label: "Swing/jab duration (s)", min: 0.05, max: 2, step: 0.01 },
+      { key: "stabDistance", label: "Jab distance (m)", min: 0, max: 1, step: 0.01 },
+      { key: "stabInward", label: "Jab inward drift (m)", min: 0, max: 0.3, step: 0.005 },
+      { key: "blockRaiseSeconds", label: "Block raise time (s)", min: 0.02, max: 1, step: 0.01 },
+      { key: "blockLowerSeconds", label: "Block lower time (s)", min: 0.02, max: 1, step: 0.01 },
+      { key: "blockRaise", label: "Block raise (m)", min: 0, max: 0.5, step: 0.01 },
+      { key: "blockInward", label: "Block inward (m)", min: 0, max: 0.5, step: 0.01 },
+      { key: "blockForward", label: "Block forward (m)", min: 0, max: 0.5, step: 0.01 },
+      { key: "blockPitch", label: "Block pitch (rad)", min: -1, max: 1, step: 0.01 },
+      { key: "blockRoll", label: "Block roll (rad)", min: -2, max: 2, step: 0.01 },
+      { key: "blendSeconds", label: "Blend time (s)", min: 0, max: 0.5, step: 0.01 },
+    ],
+  },
+  {
+    title: "Swing: chamber (held)",
+    sliders: [
+      { key: "chargeRaiseSeconds", label: "Chamber raise time (s)", min: 0.02, max: 1, step: 0.01 },
+      { key: "swingChamberPos", index: 0, label: "Chamber X (m)", min: -1, max: 1, step: 0.01 },
+      { key: "swingChamberPos", index: 1, label: "Chamber Y (m)", min: -1, max: 1, step: 0.01 },
+      { key: "swingChamberPos", index: 2, label: "Chamber Z (m)", min: -1, max: 1, step: 0.01 },
+      { key: "swingChamberRot", index: 0, label: "Chamber pitch (rad)", min: -2, max: 2, step: 0.01 },
+      { key: "swingChamberRot", index: 1, label: "Chamber yaw (rad)", min: -3, max: 3, step: 0.01 },
+      { key: "swingChamberRot", index: 2, label: "Chamber roll (rad)", min: -3, max: 3, step: 0.01 },
+    ],
+  },
+  {
+    title: "Swing: mid (release midpoint)",
+    sliders: [
+      { key: "swingMidT", label: "Mid reached at (0..1)", min: 0.05, max: 0.95, step: 0.01 },
+      { key: "swingMidPos", index: 0, label: "Mid X (m)", min: -1, max: 1, step: 0.01 },
+      { key: "swingMidPos", index: 1, label: "Mid Y (m)", min: -1, max: 1, step: 0.01 },
+      { key: "swingMidPos", index: 2, label: "Mid Z (m)", min: -1, max: 1, step: 0.01 },
+      { key: "swingMidRot", index: 0, label: "Mid pitch (rad)", min: -2, max: 2, step: 0.01 },
+      { key: "swingMidRot", index: 1, label: "Mid yaw (rad)", min: -3, max: 3, step: 0.01 },
+      { key: "swingMidRot", index: 2, label: "Mid roll (rad)", min: -3, max: 3, step: 0.01 },
+    ],
+  },
+  {
+    title: "Swing: end (follow-through)",
+    sliders: [
+      { key: "swingEndT", label: "End reached at (0..1)", min: 0.05, max: 0.98, step: 0.01 },
+      { key: "swingEndPos", index: 0, label: "End X (m)", min: -1.5, max: 1.5, step: 0.01 },
+      { key: "swingEndPos", index: 1, label: "End Y (m)", min: -1, max: 1, step: 0.01 },
+      { key: "swingEndPos", index: 2, label: "End Z (m)", min: -1, max: 1, step: 0.01 },
+      { key: "swingEndRot", index: 0, label: "End pitch (rad)", min: -2, max: 2, step: 0.01 },
+      { key: "swingEndRot", index: 1, label: "End yaw (rad)", min: -3, max: 3, step: 0.01 },
+      { key: "swingEndRot", index: 2, label: "End roll (rad)", min: -3, max: 3, step: 0.01 },
+    ],
+  },
 ];
 
-const slidersEl = document.querySelector<HTMLDivElement>("#sliders")!;
-const inputs = new Map<keyof ViewmodelTuning, HTMLInputElement>();
-const values = new Map<keyof ViewmodelTuning, HTMLSpanElement>();
-for (const spec of SLIDERS) {
-  const row = document.createElement("div");
-  row.className = "slider-row";
-  const label = document.createElement("label");
-  const name = document.createElement("span");
-  name.textContent = spec.label;
-  const value = document.createElement("span");
-  label.append(name, value);
-  const input = document.createElement("input");
-  input.type = "range";
-  input.min = String(spec.min);
-  input.max = String(spec.max);
-  input.step = String(spec.step);
-  input.oninput = () => {
-    const num = Number(input.value);
-    value.textContent = num.toFixed(3);
+function readSlider(current: ViewmodelTuning, spec: SliderSpec): number {
+  const value = current[spec.key];
+  return spec.index !== undefined ? (value as number[])[spec.index] : (value as number);
+}
+
+function patchSlider(spec: SliderSpec, num: number): void {
+  if (spec.index === undefined) {
     setViewmodelTuning({ [spec.key]: num } as Partial<ViewmodelTuning>);
-  };
-  row.append(label, input);
-  slidersEl.append(row);
-  inputs.set(spec.key, input);
-  values.set(spec.key, value);
+    return;
+  }
+  const tuple = [...(getViewmodelTuning()[spec.key] as number[])] as [number, number, number];
+  tuple[spec.index] = num;
+  setViewmodelTuning({ [spec.key]: tuple } as Partial<ViewmodelTuning>);
+}
+
+const slidersEl = document.querySelector<HTMLDivElement>("#sliders")!;
+const rows: { spec: SliderSpec; input: HTMLInputElement; value: HTMLSpanElement }[] = [];
+for (const group of SLIDER_GROUPS) {
+  const heading = document.createElement("h3");
+  heading.textContent = group.title;
+  slidersEl.append(heading);
+  for (const spec of group.sliders) {
+    const row = document.createElement("div");
+    row.className = "slider-row";
+    const label = document.createElement("label");
+    const name = document.createElement("span");
+    name.textContent = spec.label;
+    const value = document.createElement("span");
+    label.append(name, value);
+    const input = document.createElement("input");
+    input.type = "range";
+    input.min = String(spec.min);
+    input.max = String(spec.max);
+    input.step = String(spec.step);
+    input.oninput = () => {
+      const num = Number(input.value);
+      value.textContent = num.toFixed(3);
+      patchSlider(spec, num);
+    };
+    row.append(label, input);
+    slidersEl.append(row);
+    rows.push({ spec, input, value });
+  }
 }
 
 function syncSliders(): void {
   const current = getViewmodelTuning();
-  for (const spec of SLIDERS) {
-    const value = current[spec.key];
-    inputs.get(spec.key)!.value = String(value);
-    values.get(spec.key)!.textContent = value.toFixed(3);
+  for (const { spec, input, value } of rows) {
+    const num = readSlider(current, spec);
+    input.value = String(num);
+    value.textContent = num.toFixed(3);
   }
 }
 syncSliders();
@@ -210,7 +268,24 @@ document.querySelector<HTMLButtonElement>("#reset")!.onclick = () => {
 
 // -- Debug hook, status readout and render loop ------------------------------
 
-Object.assign(window, { weaponWorkshop: { getState: getViewmodelAnimationDebugState, camera, scene } });
+// `setTuning`/`getTuning` let a script (Playwright) retune numbers directly
+// without driving the sliders, for fast iterate-and-screenshot passes.
+Object.assign(window, {
+  weaponWorkshop: {
+    getState: getViewmodelAnimationDebugState,
+    getTuning: getViewmodelTuning,
+    setTuning: (patch: Partial<ViewmodelTuning>) => {
+      setViewmodelTuning(patch);
+      syncSliders();
+    },
+    resetTuning: () => {
+      resetViewmodelTuning();
+      syncSliders();
+    },
+    camera,
+    scene,
+  },
+});
 
 const statusEl = document.querySelector<HTMLDivElement>("#status")!;
 const clock = new THREE.Clock();
