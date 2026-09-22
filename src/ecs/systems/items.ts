@@ -499,33 +499,36 @@ const STAB_INWARD = 0.06; // meters, drifts toward screen-center at the peak
 const CHARGE_RAISE_SECONDS = 0.15;
 
 /** How far to the wound-up side (meters) the charged swing pulls back to
- * while held -- a right-handed swing winds up crossed over to the left
- * (see `handSign` in `viewmodelSwingSystem`), a left-handed one to the
- * right, the same "cross the body, then cut outward" shape a real forehand
- * swing has. */
-const SWEEP_WIND = 0.14;
+ * while held -- a right-handed swing chambers up and crossed toward the
+ * right (see `handSign` in `viewmodelSwingSystem`), a left-handed one
+ * toward the left, then releases in a full diagonal cut down and across to
+ * the *opposite* side -- a real committed power-swing wind-up (think
+ * cocking a bat back over one shoulder), not a small twitch. */
+const SWEEP_WIND = 0.26;
 /** How far *past* the resting center (meters) the release's follow-through
- * carries at its peak -- deliberately much wider than `SWEEP_WIND` so the
- * swing clearly reads as a wide horizontal cut sweeping across the screen,
- * not a small twitch back toward center. */
-const SWEEP_REACH = 0.34;
-/** Slight upward drift (meters) while winding up. */
-const SWEEP_RISE_WIND = 0.05;
-/** Slight *additional* upward drift (meters) at the release's follow-through
- * peak -- "mostly horizontal, a little upward" rather than a level cut, per
- * how a real forehand slash tends to rise slightly through the swing. */
-const SWEEP_RISE_PEAK = 0.08;
+ * carries at its peak -- deliberately much wider than `SWEEP_WIND`, large
+ * enough that the weapon's own origin (at its grip -- see
+ * `VIEWMODEL_OFFSET`'s doc comment) travels off the edge of the screen
+ * during the cut, not just its blade tip. */
+const SWEEP_REACH = 0.62;
+/** Upward drift (meters) while winding up -- chambering the swing raises
+ * the weapon up before it cuts down. */
+const SWEEP_RISE_WIND = 0.09;
+/** Downward drift (meters, negative) at the release's follow-through peak
+ * -- the cut continues down and across rather than staying level, so the
+ * weapon ends up low and to the side rather than swinging flat. */
+const SWEEP_DROP_PEAK = -0.28;
 /** Yaw (radians) the blade turns toward while winding up/following through
  * -- what actually sells "the blade is cutting sideways" rather than just
  * the hilt translating in a straight line; `handSign` flips it to always
  * wind up opposite the follow-through side. */
-const SWEEP_YAW_WIND = 0.32;
-const SWEEP_YAW_REACH = 0.5;
+const SWEEP_YAW_WIND = 0.67;
+const SWEEP_YAW_REACH = 1.0;
 /** Roll (radians) layered on top of the yaw above, same wind/reach shape --
  * gives the blade a bit of a slicing tilt rather than staying perfectly
  * flat through the whole arc. */
-const SWEEP_ROLL_WIND = 0.12;
-const SWEEP_ROLL_REACH = 0.3;
+const SWEEP_ROLL_WIND = 0.2;
+const SWEEP_ROLL_REACH = 0.55;
 
 /** How long (seconds) the held block's guard pose takes to rise once block
  * starts, and to lower once it releases -- fast enough to feel like raising
@@ -731,13 +734,14 @@ function applyViewmodelPose(mesh: THREE.Object3D, swing: SwingState, dt: number,
  *   screen-center), `rotation` stays exactly at its resting
  *   `VIEWMODEL_OFFSET` pose throughout, which is what makes it read as the
  *   blade driving point-first rather than swinging through an arc.
- * - **swing**: the held power attack -- winds up crossed toward one side
- *   (`SWEEP_WIND`, `handSign` below), then on release sweeps across to a
- *   wide follow-through on the *other* side (`SWEEP_REACH`) with a touch of
- *   upward drift, a real horizontal cut rather than an overhead chop.
+ * - **swing**: the held power attack -- chambers up and toward one side
+ *   (`SWEEP_WIND`/`SWEEP_RISE_WIND`, `handSign` below), then on release
+ *   cuts down and across to a wide follow-through on the *other* side
+ *   (`SWEEP_REACH`/`SWEEP_DROP_PEAK`) -- far enough that the weapon's own
+ *   grip travels off the edge of the screen, not just its blade tip.
  *   `handSign` mirrors which side is which by hand, so a right-handed
- *   weapon winds up left and cuts rightward and a left-handed one is the
- *   exact mirror.
+ *   weapon chambers right and cuts down-and-left and a left-handed one is
+ *   the exact mirror.
  * - **block**: a genuinely held guard (`startViewmodelBlock`/
  *   `stopViewmodelBlock`) raised toward chest height, pulled in across the
  *   body, and rolled toward horizontal for as long as block is actually
@@ -766,10 +770,10 @@ export function viewmodelSwingSystem(dt: number): void {
     // hand-right sits at a positive resting X, hand-left at negative — this
     // sign always points back toward screen-center regardless of which hand.
     const inwardSign = slot === "hand-right" ? -1 : 1;
-    // Which side a swing winds up on versus follows through toward -- the
-    // opposite sense from inwardSign, since a right-handed cut starts
-    // crossed over to the left (inward) and follows through rightward
-    // (outward), the mirror image for a left-handed one.
+    // Which side a swing chambers toward versus follows through toward --
+    // a right-handed cut winds up to the right (handSign positive) and
+    // follows through down-and-left, the mirror image for a left-handed
+    // one.
     const handSign = slot === "hand-right" ? 1 : -1;
     const base = VIEWMODEL_OFFSET[slot];
 
@@ -803,18 +807,18 @@ export function viewmodelSwingSystem(dt: number): void {
 
     if (swing.attackType === "swing") {
       if (swing.charging) {
-        // Held phase: wind up crossed toward handSign's start side and then
-        // just sit there, however long the charge is actually held -- no
-        // sweep motion at all yet (that's the release phase below, which
-        // always starts from exactly this same fully-wound chamber=1 pose).
+        // Held phase: chamber up and toward handSign's side and then just
+        // sit there, however long the charge is actually held -- no sweep
+        // motion at all yet (that's the release phase below, which always
+        // starts from exactly this same fully-chambered chamber=1 pose).
         swing.chargeElapsed += dt;
         const chamber = Math.min(1, swing.chargeElapsed / CHARGE_RAISE_SECONDS);
         applyViewmodelPose(mesh, swing, dt,
-          [base.pos[0] - handSign * SWEEP_WIND * chamber, base.pos[1] + SWEEP_RISE_WIND * chamber, base.pos[2]],
-          [base.rot[0], base.rot[1] - handSign * SWEEP_YAW_WIND * chamber, base.rot[2] - handSign * SWEEP_ROLL_WIND * chamber]);
+          [base.pos[0] + handSign * SWEEP_WIND * chamber, base.pos[1] + SWEEP_RISE_WIND * chamber, base.pos[2]],
+          [base.rot[0], base.rot[1] + handSign * SWEEP_YAW_WIND * chamber, base.rot[2] + handSign * SWEEP_ROLL_WIND * chamber]);
         continue;
       }
-      // Release phase: the wound-up weapon sweeps across to a wide
+      // Release phase: the chambered weapon cuts down and across to a wide
       // follow-through on the opposite side and settles back to rest --
       // chamber unwinds 1 -> 0 across the same span arc sweeps through its
       // own 0 -> 1 -> 0, so both hit their resting values (chamber=0,
@@ -824,8 +828,8 @@ export function viewmodelSwingSystem(dt: number): void {
       const chamber = 1 - releaseT;
       const arc = Math.sin(releaseT * Math.PI);
       applyViewmodelPose(mesh, swing, dt,
-        [base.pos[0] - handSign * SWEEP_WIND * chamber + handSign * SWEEP_REACH * arc, base.pos[1] + SWEEP_RISE_WIND * chamber + SWEEP_RISE_PEAK * arc, base.pos[2]],
-        [base.rot[0], base.rot[1] - handSign * SWEEP_YAW_WIND * chamber + handSign * SWEEP_YAW_REACH * arc, base.rot[2] - handSign * SWEEP_ROLL_WIND * chamber + handSign * SWEEP_ROLL_REACH * arc]);
+        [base.pos[0] + handSign * SWEEP_WIND * chamber - handSign * SWEEP_REACH * arc, base.pos[1] + SWEEP_RISE_WIND * chamber + SWEEP_DROP_PEAK * arc, base.pos[2]],
+        [base.rot[0], base.rot[1] + handSign * SWEEP_YAW_WIND * chamber - handSign * SWEEP_YAW_REACH * arc, base.rot[2] + handSign * SWEEP_ROLL_WIND * chamber - handSign * SWEEP_ROLL_REACH * arc]);
       if (releaseT >= 1) activeSwings.splice(i, 1);
       continue;
     }
