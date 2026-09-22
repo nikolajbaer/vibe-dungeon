@@ -114,10 +114,14 @@ const BLOCK_RAISE_ANIMATION_SECONDS = 0.3;
  * expensive; charged by *holding*, not by paying more up front -- the cost
  * is still only ever deducted once, on release). Insufficient stamina
  * simply refuses the attack outright (`tryMeleeAttack`/`tryStartSwingCharge`
- * return false), the same as being on cooldown. */
+ * return false), the same as being on cooldown. Sized against the player's
+ * 100 max stamina (game.ts's `PLAYER_MAX_STAMINA`) so throwing out attacks
+ * back-to-back burns out fast: five jabs in a row exactly zeroes it (5*20),
+ * three swings leaves only 1 (100-33-33-33), one short of a fourth --
+ * stamina has to actually be managed, not just a light tax on spam. */
 export const ATTACK_STAMINA_COST: Record<AttackType, number> = {
-  jab: 8,
-  swing: 20,
+  jab: 20,
+  swing: 33,
 };
 
 /** Stamina regenerated per second while not... doing anything special --
