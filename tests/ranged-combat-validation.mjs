@@ -13,7 +13,7 @@ try {
   const ranged=await server.ssrLoadModule('/src/ecs/systems/rangedCombat.ts');
 
   assert.equal(crossbow.rangedWeapon.reloadSeconds,1.5);
-  assert.equal(crossbow.rangedWeapon.maxRange,12);
+  assert.equal(crossbow.rangedWeapon.maxRange,40);
   assert.equal(ranged.shouldEmbedProjectile(.25,true),true);
   assert.equal(ranged.shouldEmbedProjectile(.249,true),false);
   assert.equal(ranged.shouldEmbedProjectile(20,false),false);
@@ -151,9 +151,9 @@ try {
   addComponent(world2,ammo2,Item);addComponent(world2,ammo2,Carried);addComponent(world2,ammo2,Stackable);
   Item.itemTypeId[ammo2]='bolt';Carried.ownerEid[ammo2]=player2;Carried.slot[ammo2]='inventory';Stackable.count[ammo2]=1;
   assert.equal(ranged.tryFireRanged(world2,camera2,scene2),'fired');
-  // 12m at 18m/s is under a second of flight even with gravity pulling it down.
+  // 40m at 34m/s is a bit over a second of flight even with gravity pulling it down.
   let clatteredEid;
-  for(let t=0;t<1.5 && clatteredEid===undefined;t+=.02){
+  for(let t=0;t<2.5 && clatteredEid===undefined;t+=.02){
     ranged.rangedCombatSystem(world2,physics,scene2,.02);
     clatteredEid=query(world2,[Item,PhysicsBody]).find(eid=>eid!==ammo2);
   }
