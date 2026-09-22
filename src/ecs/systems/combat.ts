@@ -2,7 +2,7 @@ import { addComponent, hasComponent, query, type World } from "bitecs";
 import { Carried, Combat, Dead, Health, Item, NPC, NpcState, PhysicsCollider, PlayerControlled, Practice, Rotation, Stamina } from "../components";
 import { ITEM_REGISTRY } from "../../assets/itemRegistry";
 import { NPC_REGISTRY } from "../../assets/npcRegistry";
-import { cancelViewmodelCharge, isHandSlot, startViewmodelCharge, triggerViewmodelSwing, triggerViewmodelParry } from "./items";
+import { cancelViewmodelCharge, isHandSlot, startViewmodelBlock, startViewmodelCharge, stopViewmodelBlock, triggerViewmodelSwing } from "./items";
 import { triggerDeathCollapse, triggerHitReaction, triggerParry } from "./npcAnimation";
 import { flashCharacterHit, flashWeaponHit } from "./hitboxDebug";
 import { isHostileTo, registerMeleeSwing } from "./meleeCollision";
@@ -101,14 +101,6 @@ export const BLOCK_MITIGATION: Record<WeaponClass, number> = {
   oneHanded: 0.75,
 };
 
-/** Purely cosmetic -- how long the first-person weapon's "guard raised"
- * flourish plays when block starts (see `setBlocking`). The actual
- * mitigation lasts exactly as long as `Combat.blocking` is set, independent
- * of this; a genuinely held guard *pose* (rather than a brief raise-then-
- * settle animation) is a follow-up animation-system improvement, not
- * something this constant tries to fake. */
-const BLOCK_RAISE_ANIMATION_SECONDS = 0.3;
-
 /** Stamina cost of each attack type -- roughly tracks the balance table
  * above (`swing` is the power-attack analog: slow, strong, and the most
  * expensive; charged by *holding*, not by paying more up front -- the cost
@@ -205,30 +197,35 @@ export function combatSystem(world: World, dt: number): void {
 /**
  * Sets whether `eid` is currently holding block (Skyrim-style: a plain held
  * state, not a timed window to land) -- called every frame from game.ts
- * with the real-time state of the block input (`keyboard.isDown`, or a
- * touch block gesture's own pulse), not edge-triggered like the old
- * `tryParry` was, since block needs to track "still held" every frame, not
- * just the moment it started.
+ * with the real-time state of the block input (`keyboard.isDown`, or the
+ * touch block button's own real held state), not edge-triggered like the
+ * old `tryParry` was, since block needs to track "still held" every frame,
+ * not just the moment it started.
  *
  * Raising block (the `held && !already blocking` transition) is refused
  * mid-attack-recovery -- the same "can't parry mid-swing" gate the old
  * timed parry had -- or mid-charge (can't raise a shield with both hands
- * committed to winding up a swing; see `tryStartSwingCharge`) -- and plays
- * the brief "weapon comes up" flourish once; releasing it (`!held`) always
- * succeeds. Holding it down across frames where it was already up is a
- * no-op, not a repeated trigger.
+ * committed to winding up a swing; see `tryStartSwingCharge`) -- and raises
+ * the weapon into a held guard pose (`startViewmodelBlock`) that stays up
+ * for as long as blocking does; releasing it (`!held`) lowers that pose
+ * back down (`stopViewmodelBlock`) and always succeeds. Holding it down
+ * across frames where it was already up is a no-op, not a repeated trigger.
  */
 export function setBlocking(world: World, eid: number, held: boolean): void {
   if (!hasComponent(world, eid, Combat)) return;
   const wasBlocking = Combat.blocking[eid] > 0;
   if (!held) {
+    if (wasBlocking) {
+      const weapon = getEquippedWeapon(world, eid);
+      if (weapon) stopViewmodelBlock(weapon.itemEid);
+    }
     Combat.blocking[eid] = 0;
     return;
   }
   if (wasBlocking || Combat.attackRecovery[eid] > 0 || Combat.charging[eid] > 0) return;
   Combat.blocking[eid] = 1;
   const weapon = getEquippedWeapon(world, eid);
-  if (weapon) triggerViewmodelParry(weapon.itemEid, BLOCK_RAISE_ANIMATION_SECONDS);
+  if (weapon) startViewmodelBlock(weapon.itemEid);
   triggerParry(eid);
 }
 

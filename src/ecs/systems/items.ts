@@ -488,7 +488,7 @@ export function unequipItem(world: World, itemEid: number): void {
   }
 }
 
-const SWING_DURATION = 0.22; // seconds, roundtrip
+const SWING_DURATION = 0.26; // seconds, roundtrip
 const STAB_DISTANCE = 0.35; // meters, how far forward the blade thrusts at the peak
 const STAB_INWARD = 0.06; // meters, drifts toward screen-center at the peak
 /** How long (seconds) the charged swing's held pose takes to rise into its
@@ -498,25 +498,109 @@ const STAB_INWARD = 0.06; // meters, drifts toward screen-center at the peak
  * branch). */
 const CHARGE_RAISE_SECONDS = 0.15;
 
+/** How far to the wound-up side (meters) the charged swing pulls back to
+ * while held -- a right-handed swing winds up crossed over to the left
+ * (see `handSign` in `viewmodelSwingSystem`), a left-handed one to the
+ * right, the same "cross the body, then cut outward" shape a real forehand
+ * swing has. */
+const SWEEP_WIND = 0.14;
+/** How far *past* the resting center (meters) the release's follow-through
+ * carries at its peak -- deliberately much wider than `SWEEP_WIND` so the
+ * swing clearly reads as a wide horizontal cut sweeping across the screen,
+ * not a small twitch back toward center. */
+const SWEEP_REACH = 0.34;
+/** Slight upward drift (meters) while winding up. */
+const SWEEP_RISE_WIND = 0.05;
+/** Slight *additional* upward drift (meters) at the release's follow-through
+ * peak -- "mostly horizontal, a little upward" rather than a level cut, per
+ * how a real forehand slash tends to rise slightly through the swing. */
+const SWEEP_RISE_PEAK = 0.08;
+/** Yaw (radians) the blade turns toward while winding up/following through
+ * -- what actually sells "the blade is cutting sideways" rather than just
+ * the hilt translating in a straight line; `handSign` flips it to always
+ * wind up opposite the follow-through side. */
+const SWEEP_YAW_WIND = 0.32;
+const SWEEP_YAW_REACH = 0.5;
+/** Roll (radians) layered on top of the yaw above, same wind/reach shape --
+ * gives the blade a bit of a slicing tilt rather than staying perfectly
+ * flat through the whole arc. */
+const SWEEP_ROLL_WIND = 0.12;
+const SWEEP_ROLL_REACH = 0.3;
+
+/** How long (seconds) the held block's guard pose takes to rise once block
+ * starts, and to lower once it releases -- fast enough to feel like raising
+ * a guard on purpose, not a delayed reaction. */
+const BLOCK_RAISE_SECONDS = 0.15;
+const BLOCK_LOWER_SECONDS = 0.15;
+/** Held-guard pose deltas from resting, all reaching full strength at
+ * `BLOCK_RAISE_SECONDS`: raised toward chest/face height, pulled in toward
+ * screen-center ("across the body"), and rolled hard enough toward
+ * horizontal that the blade reads as a raised guard rather than its normal
+ * resting angle. */
+const BLOCK_RAISE = 0.14;
+const BLOCK_INWARD = 0.09;
+const BLOCK_FORWARD = 0.08;
+const BLOCK_PITCH = 0.22;
+const BLOCK_ROLL = 1.1;
+
+/** How long (seconds) a freshly-interrupted animation blends from wherever
+ * the viewmodel actually was into the new one's own trajectory, instead of
+ * snapping -- see `applyViewmodelPose`. Short enough to still feel
+ * responsive; long enough to hide the pop when, say, a held block is
+ * released straight into a swing, or a charge is cancelled mid-raise. */
+const BLEND_SECONDS = 0.08;
+
 interface SwingState {
   itemEid: number;
   elapsed: number;
-  attackType: import("./combat").AttackType | "parry";
+  attackType: import("./combat").AttackType | "block" | "cancel";
   duration: number;
-  /** True only for a `"swing"` entry that's still being held (see
-   * `startViewmodelCharge`) -- while true, `viewmodelSwingSystem` drives the
-   * raised pose from `chargeElapsed` below instead of `elapsed`/`duration`,
-   * and the entry never expires on its own no matter how long it's held. */
+  /** True only for a `"swing"`/`"block"` entry that's still being held (see
+   * `startViewmodelCharge`/`startViewmodelBlock`) -- while true,
+   * `viewmodelSwingSystem` drives the raised pose from `chargeElapsed` below
+   * instead of `elapsed`/`duration`, and the entry never expires on its own
+   * no matter how long it's held. */
   charging: boolean;
-  /** Seconds spent charging so far -- only ever read while `charging` is
-   * true; irrelevant (and unused) once released. */
+  /** Seconds spent charging/held so far -- only ever read while `charging`
+   * is true; irrelevant (and unused) once released. */
   chargeElapsed: number;
+  /** The viewmodel's actual pose at the instant this entry was created, or
+   * `undefined` once the blend into this entry's own trajectory has
+   * finished (or never needed one -- see `applyViewmodelPose`'s doc
+   * comment). Left unset when a state continues seamlessly out of another
+   * (e.g. a charge releasing into its own swing, which always starts at
+   * exactly the pose the held charge already ended at). */
+  blendFrom?: { pos: THREE.Vector3Tuple; rot: THREE.EulerTuple };
+  /** Seconds into the blend above -- only meaningful while `blendFrom` is
+   * set. */
+  blendElapsed: number;
+}
+
+/** The viewmodel's current actual transform, for a fresh `SwingState` to
+ * blend in from (`applyViewmodelPose`) -- `undefined` for an item with no
+ * viewmodel mesh right now (unarmed, or unequipped mid-animation), in which
+ * case there's nothing to blend from and the caller just skips it. */
+function captureBlendFrom(itemEid: number): { pos: THREE.Vector3Tuple; rot: THREE.EulerTuple } | undefined {
+  const mesh = Viewmodel[itemEid];
+  if (!mesh) return undefined;
+  return { pos: [mesh.position.x, mesh.position.y, mesh.position.z], rot: [mesh.rotation.x, mesh.rotation.y, mesh.rotation.z] };
 }
 
 /** Items currently mid-swing (see `triggerViewmodelSwing`/
  * `viewmodelSwingSystem` below) — a plain array since there's realistically
  * at most one or two entries (one per hand) at once. */
 const activeSwings: SwingState[] = [];
+
+/** Debug/test hook (see `window.__vibeDungeonDebug.getViewmodelAnimationState`
+ * in game.ts) exposing every active viewmodel animation's own clock --
+ * lets automated (Playwright) testing wait for a specific animation phase
+ * (e.g. "charge is at least half-raised", "release is past its midpoint")
+ * by polling actual progress, rather than guessing a wall-clock delay that
+ * a slow/throttled render loop can blow straight through in a single
+ * frame. */
+export function getViewmodelAnimationDebugState(): { itemEid: number; attackType: string; charging: boolean; elapsed: number; duration: number; chargeElapsed: number }[] {
+  return activeSwings.map((s) => ({ itemEid: s.itemEid, attackType: s.attackType, charging: s.charging, elapsed: s.elapsed, duration: s.duration, chargeElapsed: s.chargeElapsed }));
+}
 
 /** Starts (or restarts, if already swinging) a weapon-swing animation for
  * `itemEid`'s viewmodel — called from `tryMeleeAttack` (combat.ts) on every
@@ -536,20 +620,18 @@ const activeSwings: SwingState[] = [];
 export function triggerViewmodelSwing(itemEid: number, attackType: import("./combat").AttackType = "jab", duration = SWING_DURATION): void {
   const existing = activeSwings.find((s) => s.itemEid === itemEid);
   if (existing?.charging) {
+    // Continuing straight out of a held charge/block -- already sitting in
+    // exactly this release's own start pose, so no blend-in needed.
     existing.charging = false;
     existing.elapsed = 0;
     existing.attackType = attackType;
     existing.duration = duration;
+    existing.blendFrom = undefined;
     return;
   }
-  if (existing) Object.assign(existing, { elapsed: 0, chargeElapsed: 0, attackType, duration, charging: false });
-  else activeSwings.push({ itemEid, elapsed: 0, chargeElapsed: 0, attackType, duration, charging: false });
-}
-
-export function triggerViewmodelParry(itemEid: number, duration: number): void {
-  const existing = activeSwings.find((s) => s.itemEid === itemEid);
-  if (existing) Object.assign(existing, { elapsed: 0, chargeElapsed: 0, attackType: "parry" as const, duration, charging: false });
-  else activeSwings.push({ itemEid, elapsed: 0, chargeElapsed: 0, attackType: "parry", duration, charging: false });
+  const blendFrom = captureBlendFrom(itemEid);
+  if (existing) Object.assign(existing, { elapsed: 0, chargeElapsed: 0, attackType, duration, charging: false, blendFrom, blendElapsed: 0 });
+  else activeSwings.push({ itemEid, elapsed: 0, chargeElapsed: 0, attackType, duration, charging: false, blendFrom, blendElapsed: 0 });
 }
 
 /** Starts holding `itemEid`'s viewmodel raised in the charged-swing windup
@@ -558,42 +640,118 @@ export function triggerViewmodelParry(itemEid: number, duration: number): void {
  * called again for the same item (the release, see its own doc comment
  * above) or `cancelViewmodelCharge` drops it. */
 export function startViewmodelCharge(itemEid: number): void {
+  const blendFrom = captureBlendFrom(itemEid);
   const existing = activeSwings.find((s) => s.itemEid === itemEid);
-  if (existing) Object.assign(existing, { elapsed: 0, chargeElapsed: 0, attackType: "swing" as const, duration: 0, charging: true });
-  else activeSwings.push({ itemEid, elapsed: 0, chargeElapsed: 0, attackType: "swing", duration: 0, charging: true });
+  if (existing) Object.assign(existing, { elapsed: 0, chargeElapsed: 0, attackType: "swing" as const, duration: 0, charging: true, blendFrom, blendElapsed: 0 });
+  else activeSwings.push({ itemEid, elapsed: 0, chargeElapsed: 0, attackType: "swing", duration: 0, charging: true, blendFrom, blendElapsed: 0 });
 }
 
 /** Cancels a charge started by `startViewmodelCharge` without ever
- * swinging -- e.g. a modal opening mid-charge (game.ts) -- snapping the
- * viewmodel straight back to its resting pose rather than playing out any
- * part of the swing. */
+ * swinging -- e.g. a modal opening mid-charge (game.ts) -- easing the
+ * viewmodel back to its resting pose (see `applyViewmodelPose`) rather than
+ * playing out any part of the swing or snapping instantly. */
 export function cancelViewmodelCharge(itemEid: number): void {
   const i = activeSwings.findIndex((s) => s.itemEid === itemEid && s.charging);
   if (i === -1) return;
-  activeSwings.splice(i, 1);
-  const slot = Carried.slot[itemEid];
-  const mesh = Viewmodel[itemEid];
-  if (mesh && isHandSlot(slot)) {
-    const base = VIEWMODEL_OFFSET[slot];
-    mesh.position.set(...base.pos);
-    mesh.rotation.set(...base.rot);
+  const blendFrom = captureBlendFrom(itemEid);
+  activeSwings[i] = { itemEid, elapsed: 0, chargeElapsed: 0, attackType: "cancel", duration: 0, charging: false, blendFrom, blendElapsed: 0 };
+}
+
+/** Starts (or keeps) holding `itemEid`'s viewmodel raised in the block guard
+ * pose -- called every frame block is held (`combat.ts`'s `setBlocking`), a
+ * no-op once already raised so the held pose doesn't keep resetting its own
+ * rise timer while the block key just stays down. */
+export function startViewmodelBlock(itemEid: number): void {
+  const existing = activeSwings.find((s) => s.itemEid === itemEid);
+  if (existing?.attackType === "block" && existing.charging) return;
+  const blendFrom = captureBlendFrom(itemEid);
+  if (existing) Object.assign(existing, { elapsed: 0, chargeElapsed: 0, attackType: "block" as const, duration: 0, charging: true, blendFrom, blendElapsed: 0 });
+  else activeSwings.push({ itemEid, elapsed: 0, chargeElapsed: 0, attackType: "block", duration: 0, charging: true, blendFrom, blendElapsed: 0 });
+}
+
+/** Lowers a guard raised by `startViewmodelBlock` back to resting over
+ * `BLOCK_LOWER_SECONDS` -- called once block releases (`combat.ts`'s
+ * `setBlocking`). */
+export function stopViewmodelBlock(itemEid: number): void {
+  const existing = activeSwings.find((s) => s.itemEid === itemEid && s.attackType === "block" && s.charging);
+  if (!existing) return;
+  existing.charging = false;
+  existing.elapsed = 0;
+  existing.duration = BLOCK_LOWER_SECONDS;
+}
+
+/** Applies `swing`'s computed target pose to `mesh` for this frame --
+ * directly, unless `swing.blendFrom` is still set, in which case it eases
+ * from that captured starting pose into `targetPos`/`targetRot` over
+ * `BLEND_SECONDS` first. Every phase below (charge, block, release, jab,
+ * cancel) computes its own target purely as a function of the
+ * thing this adds is *how* that target gets applied for the first instant
+ * after a new animation interrupts whatever the viewmodel was previously
+ * doing, so switching from one attack into another (or into/out of a held
+ * block) blends rather than pops. Once the blend window elapses,
+ * `blendFrom` clears itself and every later frame this frame's `else`
+ * branch runs directly again, so this costs nothing once an animation is
+ * already underway. */
+function applyViewmodelPose(mesh: THREE.Object3D, swing: SwingState, dt: number, targetPos: THREE.Vector3Tuple, targetRot: THREE.EulerTuple): void {
+  const from = swing.blendFrom;
+  if (!from) {
+    mesh.position.set(...targetPos);
+    mesh.rotation.set(...targetRot);
+    return;
   }
+  swing.blendElapsed += dt;
+  const t = Math.min(1, swing.blendElapsed / BLEND_SECONDS);
+  const eased = 1 - (1 - t) * (1 - t); // ease-out: fast at first, settles into the target rather than arriving linearly
+  mesh.position.set(
+    from.pos[0] + (targetPos[0] - from.pos[0]) * eased,
+    from.pos[1] + (targetPos[1] - from.pos[1]) * eased,
+    from.pos[2] + (targetPos[2] - from.pos[2]) * eased,
+  );
+  mesh.rotation.set(
+    from.rot[0] + (targetRot[0] - from.rot[0]) * eased,
+    from.rot[1] + (targetRot[1] - from.rot[1]) * eased,
+    from.rot[2] + (targetRot[2] - from.rot[2]) * eased,
+  );
+  if (t >= 1) swing.blendFrom = undefined;
 }
 
 /**
- * Advances every active weapon attack, animating each attacking item's
- * `Viewmodel` mesh straight out toward the reticle and back — a forward
- * stab/thrust, not a rotated chop: only `position` moves (further along
- * -Z, camera-forward, plus a slight drift toward screen-center), `rotation`
- * stays exactly at its resting `VIEWMODEL_OFFSET` pose throughout, which is
- * what makes it read as the blade driving point-first rather than swinging
- * through an arc. Eases in and out via `sin(t * PI)` (0 at both ends, 1 at
- * the midpoint) so it doesn't snap at either end. Reads `Carried.slot` each
- * frame (rather than caching the hand at swing-start) so re-equipping
- * mid-swing doesn't leave the mesh animating around a stale offset. Must
- * run every frame (called unconditionally from game.ts's loop, not just
- * when attacking) so an attack already in progress keeps advancing on
- * frames with no new input.
+ * Advances every active weapon animation, driving each item's `Viewmodel`
+ * mesh through whichever of jab/swing/block/cancel it's currently in
+ * (see each trigger function's own doc comment for when each starts).
+ * Reads `Carried.slot` each frame (rather than caching the hand at
+ * swing-start) so re-equipping mid-animation doesn't leave the mesh
+ * animating around a stale offset. Must run every frame (called
+ * unconditionally from game.ts's loop, not just when attacking) so an
+ * animation already in progress keeps advancing on frames with no new
+ * input.
+ *
+ * - **jab**: a forward stab/thrust, not a swing -- only `position` moves
+ *   (further along -Z, camera-forward, plus a slight drift toward
+ *   screen-center), `rotation` stays exactly at its resting
+ *   `VIEWMODEL_OFFSET` pose throughout, which is what makes it read as the
+ *   blade driving point-first rather than swinging through an arc.
+ * - **swing**: the held power attack -- winds up crossed toward one side
+ *   (`SWEEP_WIND`, `handSign` below), then on release sweeps across to a
+ *   wide follow-through on the *other* side (`SWEEP_REACH`) with a touch of
+ *   upward drift, a real horizontal cut rather than an overhead chop.
+ *   `handSign` mirrors which side is which by hand, so a right-handed
+ *   weapon winds up left and cuts rightward and a left-handed one is the
+ *   exact mirror.
+ * - **block**: a genuinely held guard (`startViewmodelBlock`/
+ *   `stopViewmodelBlock`) raised toward chest height, pulled in across the
+ *   body, and rolled toward horizontal for as long as block is actually
+ *   held -- not a fixed-length animation at all, driven the same "held,
+ *   resets on release" way `swing`'s own charge is.
+ * - **cancel**: no motion of its own -- just eases back to the resting pose
+ *   via `applyViewmodelPose`'s blend and then removes itself, for a charge
+ *   dropped without ever swinging (`cancelViewmodelCharge`).
+ *
+ * Eases in and out via `sin(t * PI)` (0 at both ends, 1 at the midpoint) so
+ * a one-shot animation doesn't snap at either end; `applyViewmodelPose`
+ * additionally smooths the first instant of *any* phase change (see its own
+ * doc comment) so interrupting one animation with another blends instead of
+ * popping.
  */
 export function viewmodelSwingSystem(dt: number): void {
   for (let i = activeSwings.length - 1; i >= 0; i--) {
@@ -608,44 +766,77 @@ export function viewmodelSwingSystem(dt: number): void {
     // hand-right sits at a positive resting X, hand-left at negative — this
     // sign always points back toward screen-center regardless of which hand.
     const inwardSign = slot === "hand-right" ? -1 : 1;
+    // Which side a swing winds up on versus follows through toward -- the
+    // opposite sense from inwardSign, since a right-handed cut starts
+    // crossed over to the left (inward) and follows through rightward
+    // (outward), the mirror image for a left-handed one.
+    const handSign = slot === "hand-right" ? 1 : -1;
     const base = VIEWMODEL_OFFSET[slot];
+
+    if (swing.attackType === "cancel") {
+      applyViewmodelPose(mesh, swing, dt, base.pos, base.rot);
+      if (!swing.blendFrom) activeSwings.splice(i, 1);
+      continue;
+    }
+
+    if (swing.attackType === "block") {
+      if (swing.charging) {
+        // Held phase: rise into the guard and then just sit there, however
+        // long block is actually held.
+        swing.chargeElapsed += dt;
+        const raise = Math.min(1, swing.chargeElapsed / BLOCK_RAISE_SECONDS);
+        applyViewmodelPose(mesh, swing, dt,
+          [base.pos[0] + inwardSign * BLOCK_INWARD * raise, base.pos[1] + BLOCK_RAISE * raise, base.pos[2] + BLOCK_FORWARD * raise],
+          [base.rot[0] + BLOCK_PITCH * raise, base.rot[1], base.rot[2] + inwardSign * BLOCK_ROLL * raise]);
+        continue;
+      }
+      // Release lowers the guard back to resting over BLOCK_LOWER_SECONDS.
+      swing.elapsed += dt;
+      const t = Math.min(1, swing.elapsed / swing.duration);
+      const lower = 1 - t;
+      applyViewmodelPose(mesh, swing, dt,
+        [base.pos[0] + inwardSign * BLOCK_INWARD * lower, base.pos[1] + BLOCK_RAISE * lower, base.pos[2] + BLOCK_FORWARD * lower],
+        [base.rot[0] + BLOCK_PITCH * lower, base.rot[1], base.rot[2] + inwardSign * BLOCK_ROLL * lower]);
+      if (t >= 1) activeSwings.splice(i, 1);
+      continue;
+    }
 
     if (swing.attackType === "swing") {
       if (swing.charging) {
-        // Held phase: rise into the windup and then just sit there, however
-        // long the charge is actually held -- no forward swing motion at all
-        // yet (that's the release phase below, which always starts from
-        // exactly this same fully-raised chamber=1 pose).
+        // Held phase: wind up crossed toward handSign's start side and then
+        // just sit there, however long the charge is actually held -- no
+        // sweep motion at all yet (that's the release phase below, which
+        // always starts from exactly this same fully-wound chamber=1 pose).
         swing.chargeElapsed += dt;
         const chamber = Math.min(1, swing.chargeElapsed / CHARGE_RAISE_SECONDS);
-        mesh.position.set(base.pos[0], base.pos[1] + .12 * chamber, base.pos[2]);
-        mesh.rotation.set(base.rot[0] - .95 * chamber, base.rot[1], base.rot[2]);
+        applyViewmodelPose(mesh, swing, dt,
+          [base.pos[0] - handSign * SWEEP_WIND * chamber, base.pos[1] + SWEEP_RISE_WIND * chamber, base.pos[2]],
+          [base.rot[0], base.rot[1] - handSign * SWEEP_YAW_WIND * chamber, base.rot[2] - handSign * SWEEP_ROLL_WIND * chamber]);
         continue;
       }
-      // Release phase: the raised weapon swings through and settles back to
-      // rest -- chamber unwinds 1 -> 0 across the same span arc sweeps
-      // through its own 0 -> 1 -> 0, so both hit their resting values
-      // (chamber=0, arc=0) together right as the swing finishes.
+      // Release phase: the wound-up weapon sweeps across to a wide
+      // follow-through on the opposite side and settles back to rest --
+      // chamber unwinds 1 -> 0 across the same span arc sweeps through its
+      // own 0 -> 1 -> 0, so both hit their resting values (chamber=0,
+      // arc=0) together right as the swing finishes.
       swing.elapsed += dt;
       const releaseT = Math.min(1, swing.elapsed / swing.duration);
       const chamber = 1 - releaseT;
       const arc = Math.sin(releaseT * Math.PI);
-      mesh.position.set(base.pos[0] + inwardSign * .08 * arc, base.pos[1] + .12 * chamber - .16 * arc, base.pos[2] - .16 * arc);
-      mesh.rotation.set(base.rot[0] - .95 * chamber + 1.7 * arc, base.rot[1], base.rot[2] + inwardSign * .22 * arc);
+      applyViewmodelPose(mesh, swing, dt,
+        [base.pos[0] - handSign * SWEEP_WIND * chamber + handSign * SWEEP_REACH * arc, base.pos[1] + SWEEP_RISE_WIND * chamber + SWEEP_RISE_PEAK * arc, base.pos[2]],
+        [base.rot[0], base.rot[1] - handSign * SWEEP_YAW_WIND * chamber + handSign * SWEEP_YAW_REACH * arc, base.rot[2] - handSign * SWEEP_ROLL_WIND * chamber + handSign * SWEEP_ROLL_REACH * arc]);
       if (releaseT >= 1) activeSwings.splice(i, 1);
       continue;
     }
 
+    // "jab"
     swing.elapsed += dt;
     const t = Math.min(1, swing.elapsed / swing.duration);
     const arc = Math.sin(t * Math.PI);
-    if (swing.attackType === "parry") {
-      mesh.position.set(base.pos[0] + inwardSign * .20 * arc, base.pos[1] + .15 * arc, base.pos[2] - .06 * arc);
-      mesh.rotation.set(base.rot[0] - .25 * arc, base.rot[1] + inwardSign * .75 * arc, base.rot[2] + inwardSign * 1.15 * arc);
-    } else { // "jab"
-      mesh.position.set(base.pos[0] + inwardSign * STAB_INWARD * arc, base.pos[1], base.pos[2] - arc * STAB_DISTANCE);
-      mesh.rotation.set(...base.rot);
-    }
+    applyViewmodelPose(mesh, swing, dt,
+      [base.pos[0] + inwardSign * STAB_INWARD * arc, base.pos[1], base.pos[2] - arc * STAB_DISTANCE],
+      base.rot);
 
     if (t >= 1) activeSwings.splice(i, 1);
   }

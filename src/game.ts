@@ -16,7 +16,7 @@ import { practiceSystem, startPractice } from "./ecs/systems/practice";
 import { npcSystem, toggleNpcFollow } from "./ecs/systems/npc";
 import { getNpcAnimationDebugState, npcAnimationSystem } from "./ecs/systems/npcAnimation";
 import { corpseCleanupSystem, MIN_LINGER_SECONDS } from "./ecs/systems/corpseCleanup";
-import { BASE_CARRY_WEIGHT, equipItem, equipToOpenHandSlot, giveItem, isHandSlot, unequipItem, viewmodelSwingSystem, wouldExceedCarryWeight, wouldExceedInventorySlots } from "./ecs/systems/items";
+import { BASE_CARRY_WEIGHT, equipItem, equipToOpenHandSlot, getViewmodelAnimationDebugState, giveItem, isHandSlot, unequipItem, viewmodelSwingSystem, wouldExceedCarryWeight, wouldExceedInventorySlots } from "./ecs/systems/items";
 import { syncSystem } from "./ecs/systems/sync";
 import { hudSync } from "./ecs/systems/hudSync";
 import { buildLevel } from "./level/level";
@@ -514,6 +514,7 @@ export function startGame(container: HTMLElement, options: StartGameOptions = {}
       maxStamina: Stamina.max[player],
     }),
     getRangedCombatState: () => getRangedCombatDebugState(),
+    getViewmodelAnimationState: () => getViewmodelAnimationDebugState(),
     getPracticeState: () => ({
       active: hasComponent(world, player, Practice) && !!Practice.active[player],
       points: Practice.points[player] ?? 0,
