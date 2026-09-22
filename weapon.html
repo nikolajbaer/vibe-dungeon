@@ -1,0 +1,32 @@
+<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Weapon workshop</title><style>
+html,body{margin:0;height:100%;overflow:hidden;background:#11131a;color:#ebeff6;font:14px system-ui}
+canvas{display:block}
+header{position:absolute;top:12px;left:12px;display:flex;flex-direction:column;gap:8px;background:rgba(20,24,34,.85);padding:12px 14px;border-radius:8px;max-width:260px}
+h1{font-size:16px;margin:0}
+h2{font-size:13px;margin:0 0 8px;display:flex;justify-content:space-between;align-items:center}
+.row{display:flex;gap:8px;flex-wrap:wrap}
+button,select{font:inherit;padding:7px 10px;border:1px solid #516077;border-radius:6px;background:#263246;color:white;cursor:pointer}
+button.held{background:#d9433f;border-color:#ff8f8c}
+#status{font-size:12px;color:#aab9cd;white-space:pre}
+#tuning{position:absolute;top:12px;right:12px;background:rgba(20,24,34,.85);padding:12px 14px;border-radius:8px;width:280px;max-height:calc(100vh - 24px);overflow-y:auto}
+#tuning button{padding:3px 8px;font-size:12px}
+.slider-row{margin-bottom:8px}
+.slider-row label{font-size:11px;color:#aab9cd;display:flex;justify-content:space-between}
+.slider-row input[type=range]{width:100%}
+footer{position:absolute;bottom:10px;left:12px;color:#aab9cd;font-size:12px;pointer-events:none}
+</style></head><body>
+<header>
+  <h1>Weapon workshop</h1>
+  <div class="row"><select id="weapon"></select><select id="hand"><option value="hand-right">Right hand</option><option value="hand-left">Left hand</option></select></div>
+  <div class="row">
+    <button id="jab">Jab</button>
+    <button id="swing">Swing (hold)</button>
+    <button id="cancel">Cancel charge</button>
+    <button id="block">Block (hold)</button>
+  </div>
+  <div id="status"></div>
+</header>
+<div id="tuning"><h2>Tuning <button id="reset">Reset</button></h2><div id="sliders"></div></div>
+<footer>J jab &middot; hold Space or Swing to charge/release &middot; hold F or Block to guard</footer>
+<script type="module" src="/src/viewer/weaponWorkshop.ts"></script>
+</body></html>
