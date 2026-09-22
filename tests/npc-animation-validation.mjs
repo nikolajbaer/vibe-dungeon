@@ -25,18 +25,26 @@ try {
     const state=()=>animation.getNpcAnimationDebugState(eid);
     tick(.1);assert.equal(state().activeClip,'idle');
     const before=state().mixerTime;tick(.2,true);assert.equal(state().mixerTime,before);
-    Velocity.z[eid]=1;tick(.1);animation.triggerHitReaction(eid);tick(.9);
+    Velocity.z[eid]=1;tick(.1);animation.triggerHitReaction(eid);
+    assert.equal(animation.isMovementLocked(eid),true,'a hit-reaction flinch has no leg animation -- movement locks while it plays');
+    tick(.9);
     assert.equal(state().activeClip,'walk');assert.equal(state().walkWeight,1);
     assert.equal(state().idleWeight,0);
+    assert.equal(animation.isMovementLocked(eid),false,'movement unlocks again once the flinch finishes');
     Velocity.z[eid]=0;tick(.3);assert.equal(state().activeClip,'idle');
     if(role==='bandit') {
       assert(animation.triggerWeaponDraw(eid));tick(.1);assert.equal(state().activeClip,'draw');assert.equal(state().weaponVisible,false);
+      assert.equal(animation.isMovementLocked(eid),true,'drawWeapon keys no leg bones at all -- moving during it would slide, not walk');
       tick(.2);assert.equal(state().weaponVisible,true);tick(.3);
+      assert.equal(animation.isMovementLocked(eid),false,'movement unlocks again once the draw finishes');
       NPC.state[eid]=3;tick(.3);assert.equal(state().activeClip,'combatIdle');
       animation.triggerAttack(eid);tick(.2);assert.equal(state().activeClip,'attack');
+      assert.equal(animation.isMovementLocked(eid),false,'attack (weaponJab) *does* carry its own leg-lunge keyframes -- never locked');
       tick(1.7);assert.equal(state().activeClip,'combatIdle');
       animation.triggerParry(eid);tick(.2);assert.equal(state().activeClip,'parry');
+      assert.equal(animation.isMovementLocked(eid),true,'parry keys no leg bones either -- locked the same as draw/hit');
       tick(.9);assert.equal(state().activeClip,'combatIdle');
+      assert.equal(animation.isMovementLocked(eid),false);
       NPC.state[eid]=0;tick(.3);assert.equal(state().activeClip,'idle');
     }
     animation.triggerHitReaction(eid);tick(.1);animation.triggerDeathCollapse(eid);tick(3,true);

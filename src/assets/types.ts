@@ -74,6 +74,14 @@ export interface ItemAssetDef {
     projectileSpeed: number;
     maxRange: number;
   };
+  /** True for a `slot: "hand"` item that needs both hands -- equipping one
+   * (`ecs/systems/items.ts`'s `equipItem`) unequips whatever's currently in
+   * *either* hand first, and while it's equipped `findOpenHandSlot` reports
+   * neither hand as open, so nothing else can be equipped alongside it (the
+   * crossbow: no bracing a dagger in the off-hand while it's drawn). A
+   * one-handed item never needs to check this on itself -- only on whatever
+   * it might be displacing. */
+  twoHanded?: boolean;
   /** Builds this item's in-world pickup mesh. Call once per usage site —
    * every mesh factory in this repo is cheap enough not to need caching/
    * sharing across instances (each caller may want to scale or reposition

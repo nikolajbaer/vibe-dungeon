@@ -122,7 +122,13 @@ export class CombatTestSandbox {
   update(dt: number): void {
     const player = this.playerEid;
     const onTestMat = Math.abs(Position.x[player]) <= 9 && Math.abs(Position.z[player]) <= 9;
-    if (onTestMat && this.testMatTriggerArmed) {
+    // Only auto-pop the configurator on a *fresh* entry -- if opponents are
+    // already spawned (mid-fight, or just lingering as corpses waiting to
+    // clear), stepping back onto the mat is normal movement during that
+    // fight, not a request to reconfigure it, and shouldn't yank the panel
+    // up over the action. The "Configure opponent" button (see
+    // OpponentConfigurator.tsx) is always still there to open it on purpose.
+    if (onTestMat && this.testMatTriggerArmed && this.opponentsByTeam.size === 0) {
       this.testMatTriggerArmed = false;
       openOpponentConfigurator();
     }

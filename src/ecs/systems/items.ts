@@ -326,7 +326,9 @@ const VIEWMODEL_OFFSET: Record<HandSlot, { pos: THREE.Vector3Tuple; rot: THREE.E
 /**
  * Finds an open hand slot (`hand-left` before `hand-right`) among
  * everything `ownerEid` currently carries, or `undefined` if both are
- * occupied.
+ * occupied -- including "occupied by a two-handed weapon sitting in the
+ * *other* hand" (`ItemAssetDef.twoHanded`, e.g. the crossbow): it needs both
+ * hands to itself, so neither ever reads as open while it's equipped.
  */
 export function findOpenHandSlot(world: World, ownerEid: number): HandSlot | undefined {
   let leftOpen = true;
@@ -334,8 +336,10 @@ export function findOpenHandSlot(world: World, ownerEid: number): HandSlot | und
   for (const eid of query(world, [Item, Carried])) {
     if (Carried.ownerEid[eid] !== ownerEid) continue;
     const slot = Carried.slot[eid];
-    if (slot === "hand-left") leftOpen = false;
-    else if (slot === "hand-right") rightOpen = false;
+    if (!isHandSlot(slot)) continue;
+    const twoHanded = !!ITEM_REGISTRY[Item.itemTypeId[eid]]?.twoHanded;
+    if (slot === "hand-left") { leftOpen = false; if (twoHanded) rightOpen = false; }
+    else { rightOpen = false; if (twoHanded) leftOpen = false; }
   }
   return leftOpen ? "hand-left" : rightOpen ? "hand-right" : undefined;
 }
@@ -407,13 +411,32 @@ function makeRenderOnTop(mesh: THREE.Object3D): void {
  * camera-relative offset (see `VIEWMODEL_OFFSET`) — see `Viewmodel` in
  * components.ts for why this is a separate mesh from the item's in-world
  * `Object3DRef`. No-ops if the item isn't carried or isn't a `slot: "hand"`
- * item type. Does not check whether `slot` is actually open — callers
- * (`equipToOpenHandSlot` below) are expected to have picked an open one.
+ * item type. Does not check whether `slot` itself is already occupied by
+ * something one-handed — callers (`equipToOpenHandSlot` below,
+ * `inventory/store.ts`'s `tapSlot`) are expected to have picked/confirmed
+ * an open one. A two-handed item (`ItemAssetDef.twoHanded`, e.g. the
+ * crossbow) is the one case this *does* actively resolve either direction:
+ * equipping one clears whatever's in the *other* hand first, and equipping
+ * anything while a two-handed item already occupies either hand clears that
+ * first — `findOpenHandSlot` already keeps `equipToOpenHandSlot` from ever
+ * reaching this case, but `equipToSlot`'s explicit-slot path (a paper-doll
+ * tap) bypasses that check entirely, so it's handled here instead, once,
+ * for both callers.
  */
 export function equipItem(world: World, camera: THREE.Camera, itemEid: number, slot: HandSlot): void {
   if (!hasComponent(world, itemEid, Carried)) return;
   const itemType = ITEM_REGISTRY[Item.itemTypeId[itemEid]];
   if (!itemType || itemType.slot !== "hand") return;
+
+  const ownerEid = Carried.ownerEid[itemEid];
+  const otherSlot: HandSlot = slot === "hand-left" ? "hand-right" : "hand-left";
+  for (const otherEid of query(world, [Item, Carried])) {
+    if (otherEid === itemEid || Carried.ownerEid[otherEid] !== ownerEid) continue;
+    const otherOccupiedSlot = Carried.slot[otherEid];
+    if (otherOccupiedSlot !== slot && otherOccupiedSlot !== otherSlot) continue;
+    const otherType = ITEM_REGISTRY[Item.itemTypeId[otherEid]];
+    if (itemType.twoHanded || otherType?.twoHanded) unequipItem(world, otherEid);
+  }
 
   Carried.slot[itemEid] = slot;
 

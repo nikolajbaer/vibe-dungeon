@@ -33,6 +33,7 @@ export function inventorySync(world: World): void {
       name: itemType.name,
       icon: itemType.icon,
       equippable: itemType.slot === "hand",
+      twoHanded: !!itemType.twoHanded,
       readable: hasComponent(world, eid, Readable),
       isContainer: hasComponent(world, eid, Container),
       slot: Carried.slot[eid],

@@ -213,6 +213,11 @@ export const NPC = {
    * up before the chase ever had a chance to close the distance. Reset to
    * 0 on every fresh LOITERING -> CHASING transition. */
   reachedTargetSector: [] as number[],
+  /** Seconds left stunned by a ranged hit (combat.ts's `applyRangedDamage`,
+   * `RANGED_STAGGER_SECONDS`) -- while positive, `npcSystem` freezes this
+   * NPC's AI entirely (no wander/chase/attack, `Velocity` pinned to 0) and
+   * just counts it down. */
+  staggerRemaining: [] as number[],
 };
 
 /** Hit points. Added ahead of real combat (#16) so the HUD health bar (#23)

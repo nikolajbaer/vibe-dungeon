@@ -37,7 +37,10 @@ const TARGETABLE_STYLE = {
  * `DropZone.tsx`) drops that item instead of unequipping it.
  */
 export function PaperDoll() {
-  const { carried, selectedItemEid, dropArmed } = useObserved(() => ({
+  // `carried` isn't read directly below (itemInSlot reads it internally),
+  // but computing it here is what makes autorun re-render this component
+  // when it changes -- see useObserved's own doc comment.
+  const { selectedItemEid, dropArmed } = useObserved(() => ({
     carried: inventoryStore.carried,
     selectedItemEid: inventoryStore.selectedItemEid,
     dropArmed: inventoryStore.dropArmed,
@@ -46,7 +49,7 @@ export function PaperDoll() {
   return (
     <div class="inv-paperdoll" data-testid="inv-paperdoll">
       {SLOTS.map(({ slot, label, isHand }) => {
-        const item = carried.find((c) => c.slot === slot);
+        const item = inventoryStore.itemInSlot(slot);
         const targetable = !item && isHand && selectedItemEid !== null;
         return (
           <button

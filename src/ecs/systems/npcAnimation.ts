@@ -116,6 +116,24 @@ export function getNpcWeaponMesh(eid: number): THREE.Object3D | undefined {
   return npcAnimations.get(eid)?.weapon;
 }
 
+/** True while `eid` is mid-`"draw"`/`"parry"`/`"hit"` -- the three one-shots
+ * that only animate the upper body (see `humanoidBase.ts`'s `drawWeapon`/
+ * `parry`/`hit` clips: none of them keys a single leg bone), so idle/walk's
+ * weight gets pinned to 0 for their whole duration (`npcAnimationSystem`
+ * above) with nothing left to drive the legs at all. `npc.ts`'s
+ * `updateAggressive` checks this before deciding to move an NPC during one
+ * of these -- moving with zero leg animation reads as sliding/ice-skating
+ * rather than walking. `"attack"` is deliberately excluded: that one-shot
+ * (`weaponJab`, a re-timed `attack`) *does* carry its own leg-lunge
+ * keyframes, and `updateAggressive` already independently zeroes velocity
+ * for the whole `ATTACKING` state regardless, so there's never a real
+ * moving-during-attack case to guard against. `"death"` never needs this --
+ * a corpse doesn't move under its own AI at all. */
+export function isMovementLocked(eid: number): boolean {
+  const oneShot = npcAnimations.get(eid)?.oneShot;
+  return oneShot === "draw" || oneShot === "parry" || oneShot === "hit";
+}
+
 /** Draws a one-handed weapon from the opposite hip before combat begins. */
 export function triggerWeaponDraw(eid: number): boolean {
   const state = npcAnimations.get(eid);
