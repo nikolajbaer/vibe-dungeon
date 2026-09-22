@@ -69,6 +69,19 @@ export const NPC_ATTACK_SHAPE = { reachMultiplier: 1.0, width: 0.8, height: 1.1 
 export const NPC_ATTACK_ACTIVE_WINDOW = 0.2;
 export const NPC_ATTACK_STAMINA_COST = 12;
 
+/** Chance a landed, non-lethal ranged hit staggers its NPC target (see
+ * `applyRangedDamage`'s own `NPC.staggerRemaining` roll) -- a flat 20% for
+ * now, kept as its own named constant since it's an obvious future skill/
+ * perk knob (e.g. a marksmanship upgrade boosting it) rather than
+ * something to leave as a magic number inline. Melee never staggers -- this
+ * is bolt-specific, matching how getting shot reads as more disruptive than
+ * a blade's mitigated-by-blocking hit. */
+export const RANGED_STAGGER_CHANCE = 0.2;
+/** Seconds an NPC stagger freezes its AI for (see
+ * `NPC.staggerRemaining`/`npcSystem`) -- long enough to read as a real
+ * punish, short enough not to trivialize a fight by itself. */
+export const RANGED_STAGGER_SECONDS = 1;
+
 export const UNARMED_DAMAGE = 5;
 /** Reach (meters) for an attacker with no weapon equipped (or, for an NPC,
  * no `attackReach` and no `weaponClass` to derive one from) -- the
@@ -290,6 +303,13 @@ export function applyRangedDamage(world: World, targetEid: number, rawDamage: nu
     triggerDeathCollapse(targetEid);
   } else {
     triggerHitReaction(targetEid);
+    // Bolt-only stagger (never melee -- see RANGED_STAGGER_CHANCE's own doc
+    // comment): a flat roll per landed hit, independent of the hit-reaction
+    // flinch above (that's just the visual; this is what actually freezes
+    // the NPC's AI for RANGED_STAGGER_SECONDS, in npcSystem).
+    if (hasComponent(world, targetEid, NPC) && Math.random() < RANGED_STAGGER_CHANCE) {
+      NPC.staggerRemaining[targetEid] = RANGED_STAGGER_SECONDS;
+    }
   }
   return damage;
 }

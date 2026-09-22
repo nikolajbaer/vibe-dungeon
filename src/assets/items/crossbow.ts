@@ -38,6 +38,7 @@ const crossbow: ItemAssetDef = {
   icon: "🏹",
   slot: "hand",
   mass: 3.4,
+  twoHanded: true,
   rangedWeapon: { ammoItemTypeId: "bolt", damage: 18, reloadSeconds: 1.5, projectileSpeed: 18, maxRange: 12 },
   createWorldMesh: createCrossbowMesh,
   createViewmodelMesh: () => {

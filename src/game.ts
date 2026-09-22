@@ -10,7 +10,7 @@ import { addCharacter, CHARACTER_GROUPS, createPhysics, PHYSICS_DT } from "./phy
 import { doorAnimationSystem, tryInteract } from "./ecs/systems/doors";
 import { applyMeleeDamage, cancelSwingCharge, combatSystem, releaseSwingCharge, setBlocking, tryMeleeAttack, tryStartSwingCharge, type AttackType } from "./ecs/systems/combat";
 import { meleeCollisionSystem } from "./ecs/systems/meleeCollision";
-import { getRangedAmmoLabel, getRangedCombatDebugState, rangedCombatSystem, tryFireRanged } from "./ecs/systems/rangedCombat";
+import { getEquippedRangedWeapon, getRangedAmmoLabel, getRangedCombatDebugState, rangedCombatSystem, tryFireRanged } from "./ecs/systems/rangedCombat";
 import { hitboxDebugSystem, isHitboxDebugEnabled, setHitboxDebugEnabled } from "./ecs/systems/hitboxDebug";
 import { practiceSystem, startPractice } from "./ecs/systems/practice";
 import { npcSystem, toggleNpcFollow } from "./ecs/systems/npc";
@@ -500,6 +500,16 @@ export function startGame(container: HTMLElement, options: StartGameOptions = {}
     releaseSwingCharge: () => releaseSwingCharge(world),
     cancelSwingCharge: () => cancelSwingCharge(world),
     isSwingCharging: () => Combat.charging[player] > 0,
+    // Debug-only direct triggers for the shared mouse/touch press/release
+    // melee-or-ranged state machine (`frame()`, above `meleeMousePressed`'s
+    // own doc comment) -- sets the exact same flags the real `mousedown`/
+    // `mouseup` listeners do, so a test can exercise real hold-duration
+    // timing (jab vs. charged swing, or a ranged weapon's hold-to-aim-then-
+    // release-to-fire) without simulating actual pointer-lock clicks or
+    // touch events, the same reasoning `attack`/`block` above already lean
+    // on.
+    simulateAttackPress: () => { meleeMousePressed = true; },
+    simulateAttackRelease: () => { meleeMouseReleased = true; },
     block: (held: boolean) => setBlocking(world, player, held),
     getCombatState: () => ({
       attackRecovery: Combat.attackRecovery[player],
@@ -737,6 +747,10 @@ export function startGame(container: HTMLElement, options: StartGameOptions = {}
   let meleeHeld = false;
   let meleeHoldSeconds = 0;
   let meleeCharging = false;
+  // Set at press time (see `frame()`): whether the press that's currently
+  // being held was a ranged one, so the matching release fires the shot
+  // instead of resolving a jab/charged swing.
+  let meleePressWasRanged = false;
   // For detecting Digit2's own release edge -- `Keyboard` only exposes a
   // "just pressed" edge (`consumeJustPressed`) and a continuous `isDown`,
   // no "just released" of its own, so this compares last frame's state to
@@ -860,9 +874,17 @@ export function startGame(container: HTMLElement, options: StartGameOptions = {}
     const meleeReleaseEdge = meleeMouseReleased || touch.consumeAttackRelease() || digit2ReleaseEdge;
     meleeMouseReleased = false;
 
+    // Whether a ranged weapon is equipped is decided once, at press time --
+    // *firing* it waits for the matching release (below), same as it always
+    // has for the touch ATK button (its own hold time drives the
+    // zoom-while-aiming effect further down): pressing doesn't commit to a
+    // shot, it starts an aim you can hold as long as you like and only
+    // release when you're actually ready to fire. Resolving this on press
+    // rather than not-ranged-falls-back-to-melee at release also means a
+    // ranged press never accidentally starts winding up a melee charge.
     if (meleePressEdge && !isModalActive()) {
-      const rangedResult = tryFireRanged(world, camera, scene);
-      if (rangedResult === "not-ranged") {
+      meleePressWasRanged = getEquippedRangedWeapon(world, player) !== undefined;
+      if (!meleePressWasRanged) {
         meleeHeld = true;
         meleeHoldSeconds = 0;
         meleeCharging = false;
@@ -876,10 +898,12 @@ export function startGame(container: HTMLElement, options: StartGameOptions = {}
       }
     }
     if (meleeReleaseEdge) {
-      if (meleeCharging) releaseSwingCharge(world);
+      if (meleePressWasRanged) tryFireRanged(world, camera, scene);
+      else if (meleeCharging) releaseSwingCharge(world);
       else if (meleeHeld) tryMeleeAttack(world, "jab");
       meleeHeld = false;
       meleeCharging = false;
+      meleePressWasRanged = false;
     }
     // A modal opening mid-charge (dialogue, death, the combat-test config
     // panel) drops it outright rather than leaving the player's weapon stuck
@@ -889,6 +913,10 @@ export function startGame(container: HTMLElement, options: StartGameOptions = {}
       meleeHeld = false;
       meleeCharging = false;
     }
+    // Same idea for a ranged press still being held when a modal opens --
+    // otherwise the eventual release (possibly well after the modal closes)
+    // would fire a shot the player never actually meant to take.
+    if (isModalActive() && meleePressWasRanged) meleePressWasRanged = false;
     // Skyrim-style held block, not an edge-triggered press: `setBlocking`
     // runs every frame with the input's *current* state (keyboard.isDown, a
     // real hold) OR'd with a touch block gesture's fixed-length pulse (touch

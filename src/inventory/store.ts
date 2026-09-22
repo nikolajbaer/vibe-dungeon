@@ -29,6 +29,11 @@ export interface CarriedItemView {
   name: string;
   icon: string;
   equippable: boolean;
+  /** True for a two-handed weapon (`ItemAssetDef.twoHanded`, e.g. the
+   * crossbow) — see `itemInSlot` below for how this makes it occupy *both*
+   * hand slots in the paper doll even though `slot` itself only ever names
+   * one of them. */
+  twoHanded: boolean;
   /** True for a scroll (an `ItemSpawn` with `pages` — see
    * `ecs/components.ts`'s `Readable`). Tapping a readable item in the
    * inventory list opens the paged reader (`notice/store.ts`) instead of
@@ -161,9 +166,20 @@ class InventoryStore {
   }
 
   /** The item currently occupying `slot`, or `undefined` if it's open —
-   * used by the paper doll (head/torso/legs/hand-left/hand-right). */
+   * used by the paper doll (head/torso/legs/hand-left/hand-right). A
+   * two-handed weapon (`CarriedItemView.twoHanded`) in the *other* hand
+   * slot counts as occupying this one too, even though its own `.slot`
+   * names only one of them: it needs both, so neither should ever read as
+   * open (or accept a tap-to-equip) while it's out. Tapping either hand
+   * slot in that case still unequips the same item either way (`tapSlot`
+   * below), which is exactly "disable the second hand until it's put away." */
   itemInSlot(slot: CarriedSlot): CarriedItemView | undefined {
-    return this.carried.find((item) => item.slot === slot);
+    const direct = this.carried.find((item) => item.slot === slot);
+    if (direct) return direct;
+    if (!isHandSlot(slot)) return undefined;
+    const otherSlot: HandSlot = slot === "hand-left" ? "hand-right" : "hand-left";
+    const other = this.carried.find((item) => item.slot === otherSlot);
+    return other?.twoHanded ? other : undefined;
   }
 
   equip(itemEid: number): void {

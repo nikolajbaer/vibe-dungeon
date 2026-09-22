@@ -2,7 +2,7 @@ import { hasComponent, query, type World } from "bitecs";
 import { Dead, Health, NPC, NpcState, Position, Rotation, Stamina, Velocity, PlayerControlled, Practice } from "../components";
 import { NPC_REGISTRY } from "../../assets/npcRegistry";
 import type { NpcArchetypeDef } from "../../assets/types";
-import { triggerAttack, triggerWeaponDraw } from "./npcAnimation";
+import { isMovementLocked, triggerAttack, triggerWeaponDraw } from "./npcAnimation";
 import { NPC_ATTACK_ACTIVE_WINDOW, NPC_ATTACK_SHAPE, NPC_ATTACK_STAMINA_COST, UNARMED_REACH } from "./combat";
 import { isHostileTo, registerMeleeSwing } from "./meleeCollision";
 
@@ -75,6 +75,17 @@ export function npcSystem(world: World, dt: number, sectorAt: SectorAt): void {
       // movementSystem doesn't keep coasting the corpse on whatever it was
       // doing the instant it died — rather than just skipping the
       // follow/wander/chase branches below.
+      Velocity.x[eid] = 0;
+      Velocity.z[eid] = 0;
+      continue;
+    }
+
+    if (NPC.staggerRemaining[eid] > 0) {
+      // Stunned by a ranged hit (combat.ts's applyRangedDamage) -- frozen
+      // in place, no wander/chase/attack decision at all, until it wears
+      // off, the same "just count it down" shape as a docile archetype's
+      // wanderTimer.
+      NPC.staggerRemaining[eid] = Math.max(0, NPC.staggerRemaining[eid] - dt);
       Velocity.x[eid] = 0;
       Velocity.z[eid] = 0;
       continue;
@@ -263,6 +274,17 @@ function updateAggressive(world: World, eid: number, archetype: NpcArchetypeDef,
   // Humanoids face local +Z, so this yaw points the bandit's chest, head,
   // and held weapon at its target throughout both pursuit and melee guard.
   Rotation.yaw[eid] = Math.atan2(dx, dz);
+
+  // Drawing, parrying, or flinching from a hit are upper-body-only poses
+  // with no leg animation at all (`isMovementLocked`'s own doc comment) --
+  // moving during one would slide across the floor rather than walk, so
+  // this holds position (but keeps facing the target, above) until
+  // whichever one finishes and hands back control to idle/walk/combatIdle.
+  if (isMovementLocked(eid)) {
+    Velocity.x[eid] = 0;
+    Velocity.z[eid] = 0;
+    return;
+  }
 
   if (distToTarget > attackRange) {
     NPC.state[eid] = NpcState.CHASING;
