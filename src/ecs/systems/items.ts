@@ -488,70 +488,167 @@ export function unequipItem(world: World, itemEid: number): void {
   }
 }
 
-const SWING_DURATION = 0.26; // seconds, roundtrip
-const STAB_DISTANCE = 0.35; // meters, how far forward the blade thrusts at the peak
-const STAB_INWARD = 0.06; // meters, drifts toward screen-center at the peak
-/** How long (seconds) the charged swing's held pose takes to rise into its
- * fully-raised windup once charging starts -- fast enough to feel
- * responsive, then it just sits there at full raise however much longer
- * the charge is actually held (see `viewmodelSwingSystem`'s "swing"
- * branch). */
-const CHARGE_RAISE_SECONDS = 0.15;
+/**
+ * Mounts `itemTypeId`'s viewmodel mesh directly onto `camera` at `slot`'s
+ * offset, the same way `equipItem` does — but without `equipItem`'s
+ * `Carried`/`Item` component checks, which need a real carried entity in a
+ * live `World`. Used only by the standalone weapon-animation viewer
+ * (`weapon.html`/`src/viewer/weaponWorkshop.ts`), which has no ECS world or
+ * player to carry anything; it still sets `Carried.slot`/`Viewmodel` for
+ * `itemEid` (both plain arrays, not real bitECS components — see their doc
+ * comments in `ecs/components.ts`), so `viewmodelSwingSystem` drives the
+ * mounted mesh identically to a real equipped weapon. Returns `false` if
+ * `itemTypeId` doesn't exist or has no viewmodel mesh to show.
+ */
+export function debugMountViewmodel(camera: THREE.Camera, itemEid: number, itemTypeId: string, slot: HandSlot): boolean {
+  const itemType = ITEM_REGISTRY[itemTypeId];
+  const mesh = itemType?.createViewmodelMesh?.();
+  if (!mesh) return false;
+  debugUnmountViewmodel(itemEid);
+  const custom = itemType.viewmodelTransform;
+  const { pos, rot } = custom ? { pos: custom.position, rot: custom.rotation } : VIEWMODEL_OFFSET[slot];
+  mesh.position.set(...pos);
+  mesh.rotation.set(...rot);
+  makeRenderOnTop(mesh);
+  camera.add(mesh);
+  Carried.slot[itemEid] = slot;
+  Viewmodel[itemEid] = mesh;
+  return true;
+}
 
-/** How far to the wound-up side (meters) the charged swing pulls back to
- * while held -- a right-handed swing chambers up and crossed toward the
- * right (see `handSign` in `viewmodelSwingSystem`), a left-handed one
- * toward the left, then releases in a full diagonal cut down and across to
- * the *opposite* side -- a real committed power-swing wind-up (think
- * cocking a bat back over one shoulder), not a small twitch. */
-const SWEEP_WIND = 0.26;
-/** How far *past* the resting center (meters) the release's follow-through
- * carries at its peak -- deliberately much wider than `SWEEP_WIND`, large
- * enough that the weapon's own origin (at its grip -- see
- * `VIEWMODEL_OFFSET`'s doc comment) travels off the edge of the screen
- * during the cut, not just its blade tip. */
-const SWEEP_REACH = 0.62;
-/** Upward drift (meters) while winding up -- chambering the swing raises
- * the weapon up before it cuts down. */
-const SWEEP_RISE_WIND = 0.09;
-/** Downward drift (meters, negative) at the release's follow-through peak
- * -- the cut continues down and across rather than staying level, so the
- * weapon ends up low and to the side rather than swinging flat. */
-const SWEEP_DROP_PEAK = -0.28;
-/** Yaw (radians) the blade turns toward while winding up/following through
- * -- what actually sells "the blade is cutting sideways" rather than just
- * the hilt translating in a straight line; `handSign` flips it to always
- * wind up opposite the follow-through side. */
-const SWEEP_YAW_WIND = 0.67;
-const SWEEP_YAW_REACH = 1.0;
-/** Roll (radians) layered on top of the yaw above, same wind/reach shape --
- * gives the blade a bit of a slicing tilt rather than staying perfectly
- * flat through the whole arc. */
-const SWEEP_ROLL_WIND = 0.2;
-const SWEEP_ROLL_REACH = 0.55;
+/** Removes a mount made by `debugMountViewmodel`, if any — see its own doc
+ * comment for why this doesn't just reuse `unequipItem`. */
+export function debugUnmountViewmodel(itemEid: number): void {
+  const mesh = Viewmodel[itemEid];
+  if (mesh) {
+    mesh.removeFromParent();
+    Viewmodel[itemEid] = undefined;
+  }
+}
 
-/** How long (seconds) the held block's guard pose takes to rise once block
- * starts, and to lower once it releases -- fast enough to feel like raising
- * a guard on purpose, not a delayed reaction. */
-const BLOCK_RAISE_SECONDS = 0.15;
-const BLOCK_LOWER_SECONDS = 0.15;
-/** Held-guard pose deltas from resting, all reaching full strength at
- * `BLOCK_RAISE_SECONDS`: raised toward chest/face height, pulled in toward
- * screen-center ("across the body"), and rolled hard enough toward
- * horizontal that the blade reads as a raised guard rather than its normal
- * resting angle. */
-const BLOCK_RAISE = 0.14;
-const BLOCK_INWARD = 0.09;
-const BLOCK_FORWARD = 0.08;
-const BLOCK_PITCH = 0.22;
-const BLOCK_ROLL = 1.1;
+/**
+ * Every numeric knob that shapes a viewmodel animation, gathered into one
+ * mutable object rather than module-level constants — production code only
+ * ever reads through `tuning` (below), so shipped behavior always runs on
+ * `DEFAULT_TUNING` and never changes; the indirection exists purely so the
+ * standalone weapon-animation viewer (`weapon.html`/`src/viewer/
+ * weaponWorkshop.ts`) can retune any of these live, without a rebuild, in
+ * place of the "edit a constant, reload, re-equip, re-attack" loop these
+ * numbers used to require.
+ */
+export interface ViewmodelTuning {
+  /** Seconds, roundtrip, for a released swing/jab's whole animation. */
+  swingDuration: number;
+  /** How far forward (meters) a jab's thrust carries at its peak. */
+  stabDistance: number;
+  /** How far (meters) a jab drifts toward screen-center at its peak. */
+  stabInward: number;
+  /** How long (seconds) the charged swing's held pose takes to rise into
+   * its fully-raised windup once charging starts -- fast enough to feel
+   * responsive, then it just sits there at full raise however much longer
+   * the charge is actually held (see `viewmodelSwingSystem`'s "swing"
+   * branch). */
+  chargeRaiseSeconds: number;
+  /** How far to the wound-up side (meters) the charged swing pulls back to
+   * while held -- a right-handed swing chambers up and crossed toward the
+   * right (see `handSign` in `viewmodelSwingSystem`), a left-handed one
+   * toward the left, then releases in a full diagonal cut down and across
+   * to the *opposite* side -- a real committed power-swing wind-up (think
+   * cocking a bat back over one shoulder), not a small twitch. */
+  sweepWind: number;
+  /** How far *past* the resting center (meters) the release's
+   * follow-through carries at its peak -- deliberately much wider than
+   * `sweepWind`, large enough that the weapon's own origin (at its grip --
+   * see `VIEWMODEL_OFFSET`'s doc comment) travels off the edge of the
+   * screen during the cut, not just its blade tip. */
+  sweepReach: number;
+  /** Upward drift (meters) while winding up -- chambering the swing raises
+   * the weapon up before it cuts down. */
+  sweepRiseWind: number;
+  /** Downward drift (meters, negative) at the release's follow-through
+   * peak -- the cut continues down and across rather than staying level,
+   * so the weapon ends up low and to the side rather than swinging flat. */
+  sweepDropPeak: number;
+  /** Yaw (radians) the blade turns toward while winding up/following
+   * through -- what actually sells "the blade is cutting sideways" rather
+   * than just the hilt translating in a straight line; `handSign` flips it
+   * to always wind up opposite the follow-through side. */
+  sweepYawWind: number;
+  sweepYawReach: number;
+  /** Roll (radians) layered on top of the yaw above, same wind/reach shape
+   * -- gives the blade a bit of a slicing tilt rather than staying
+   * perfectly flat through the whole arc. */
+  sweepRollWind: number;
+  sweepRollReach: number;
+  /** How long (seconds) the held block's guard pose takes to rise once
+   * block starts, and to lower once it releases -- fast enough to feel
+   * like raising a guard on purpose, not a delayed reaction. */
+  blockRaiseSeconds: number;
+  blockLowerSeconds: number;
+  /** Held-guard pose deltas from resting, all reaching full strength at
+   * `blockRaiseSeconds`: raised toward chest/face height, pulled in toward
+   * screen-center ("across the body"), and rolled hard enough toward
+   * horizontal that the blade reads as a raised guard rather than its
+   * normal resting angle. */
+  blockRaise: number;
+  blockInward: number;
+  blockForward: number;
+  blockPitch: number;
+  blockRoll: number;
+  /** How long (seconds) a freshly-interrupted animation blends from
+   * wherever the viewmodel actually was into the new one's own trajectory,
+   * instead of snapping -- see `applyViewmodelPose`. Short enough to still
+   * feel responsive; long enough to hide the pop when, say, a held block
+   * is released straight into a swing, or a charge is cancelled
+   * mid-raise. */
+  blendSeconds: number;
+}
 
-/** How long (seconds) a freshly-interrupted animation blends from wherever
- * the viewmodel actually was into the new one's own trajectory, instead of
- * snapping -- see `applyViewmodelPose`. Short enough to still feel
- * responsive; long enough to hide the pop when, say, a held block is
- * released straight into a swing, or a charge is cancelled mid-raise. */
-const BLEND_SECONDS = 0.08;
+const DEFAULT_TUNING: Readonly<ViewmodelTuning> = {
+  swingDuration: 0.26,
+  stabDistance: 0.35,
+  stabInward: 0.06,
+  chargeRaiseSeconds: 0.15,
+  sweepWind: 0.26,
+  sweepReach: 0.62,
+  sweepRiseWind: 0.09,
+  sweepDropPeak: -0.28,
+  sweepYawWind: 0.67,
+  sweepYawReach: 1.0,
+  sweepRollWind: 0.2,
+  sweepRollReach: 0.55,
+  blockRaiseSeconds: 0.15,
+  blockLowerSeconds: 0.15,
+  blockRaise: 0.14,
+  blockInward: 0.09,
+  blockForward: 0.08,
+  blockPitch: 0.22,
+  blockRoll: 1.1,
+  blendSeconds: 0.08,
+};
+
+let tuning: ViewmodelTuning = { ...DEFAULT_TUNING };
+
+/** The live tuning values every viewmodel animation currently reads --
+ * a copy, so a caller can't mutate this module's actual state except
+ * through `setViewmodelTuning`. */
+export function getViewmodelTuning(): ViewmodelTuning {
+  return { ...tuning };
+}
+
+/** Overrides one or more tuning values immediately -- every subsequent
+ * `viewmodelSwingSystem` frame (and any new `triggerViewmodelSwing` call,
+ * for `swingDuration`) picks them up. Only the standalone weapon-animation
+ * viewer calls this today; production code never does, so shipped behavior
+ * always runs on `DEFAULT_TUNING`. */
+export function setViewmodelTuning(patch: Partial<ViewmodelTuning>): void {
+  Object.assign(tuning, patch);
+}
+
+/** Restores every tuning value to its shipped default. */
+export function resetViewmodelTuning(): void {
+  tuning = { ...DEFAULT_TUNING };
+}
 
 interface SwingState {
   itemEid: number;
@@ -620,7 +717,7 @@ export function getViewmodelAnimationDebugState(): { itemEid: number; attackType
  * `viewmodelSwingSystem`'s "swing" release phase always *starts* at the
  * exact same fully-raised pose the held charge was already sitting in, so
  * the transition is seamless. */
-export function triggerViewmodelSwing(itemEid: number, attackType: import("./combat").AttackType = "jab", duration = SWING_DURATION): void {
+export function triggerViewmodelSwing(itemEid: number, attackType: import("./combat").AttackType = "jab", duration = tuning.swingDuration): void {
   const existing = activeSwings.find((s) => s.itemEid === itemEid);
   if (existing?.charging) {
     // Continuing straight out of a held charge/block -- already sitting in
@@ -680,7 +777,7 @@ export function stopViewmodelBlock(itemEid: number): void {
   if (!existing) return;
   existing.charging = false;
   existing.elapsed = 0;
-  existing.duration = BLOCK_LOWER_SECONDS;
+  existing.duration = tuning.blockLowerSeconds;
 }
 
 /** Applies `swing`'s computed target pose to `mesh` for this frame --
@@ -703,7 +800,7 @@ function applyViewmodelPose(mesh: THREE.Object3D, swing: SwingState, dt: number,
     return;
   }
   swing.blendElapsed += dt;
-  const t = Math.min(1, swing.blendElapsed / BLEND_SECONDS);
+  const t = Math.min(1, swing.blendElapsed / tuning.blendSeconds);
   const eased = 1 - (1 - t) * (1 - t); // ease-out: fast at first, settles into the target rather than arriving linearly
   mesh.position.set(
     from.pos[0] + (targetPos[0] - from.pos[0]) * eased,
@@ -788,19 +885,19 @@ export function viewmodelSwingSystem(dt: number): void {
         // Held phase: rise into the guard and then just sit there, however
         // long block is actually held.
         swing.chargeElapsed += dt;
-        const raise = Math.min(1, swing.chargeElapsed / BLOCK_RAISE_SECONDS);
+        const raise = Math.min(1, swing.chargeElapsed / tuning.blockRaiseSeconds);
         applyViewmodelPose(mesh, swing, dt,
-          [base.pos[0] + inwardSign * BLOCK_INWARD * raise, base.pos[1] + BLOCK_RAISE * raise, base.pos[2] + BLOCK_FORWARD * raise],
-          [base.rot[0] + BLOCK_PITCH * raise, base.rot[1], base.rot[2] + inwardSign * BLOCK_ROLL * raise]);
+          [base.pos[0] + inwardSign * tuning.blockInward * raise, base.pos[1] + tuning.blockRaise * raise, base.pos[2] + tuning.blockForward * raise],
+          [base.rot[0] + tuning.blockPitch * raise, base.rot[1], base.rot[2] + inwardSign * tuning.blockRoll * raise]);
         continue;
       }
-      // Release lowers the guard back to resting over BLOCK_LOWER_SECONDS.
+      // Release lowers the guard back to resting over tuning.blockLowerSeconds.
       swing.elapsed += dt;
       const t = Math.min(1, swing.elapsed / swing.duration);
       const lower = 1 - t;
       applyViewmodelPose(mesh, swing, dt,
-        [base.pos[0] + inwardSign * BLOCK_INWARD * lower, base.pos[1] + BLOCK_RAISE * lower, base.pos[2] + BLOCK_FORWARD * lower],
-        [base.rot[0] + BLOCK_PITCH * lower, base.rot[1], base.rot[2] + inwardSign * BLOCK_ROLL * lower]);
+        [base.pos[0] + inwardSign * tuning.blockInward * lower, base.pos[1] + tuning.blockRaise * lower, base.pos[2] + tuning.blockForward * lower],
+        [base.rot[0] + tuning.blockPitch * lower, base.rot[1], base.rot[2] + inwardSign * tuning.blockRoll * lower]);
       if (t >= 1) activeSwings.splice(i, 1);
       continue;
     }
@@ -812,10 +909,10 @@ export function viewmodelSwingSystem(dt: number): void {
         // motion at all yet (that's the release phase below, which always
         // starts from exactly this same fully-chambered chamber=1 pose).
         swing.chargeElapsed += dt;
-        const chamber = Math.min(1, swing.chargeElapsed / CHARGE_RAISE_SECONDS);
+        const chamber = Math.min(1, swing.chargeElapsed / tuning.chargeRaiseSeconds);
         applyViewmodelPose(mesh, swing, dt,
-          [base.pos[0] + handSign * SWEEP_WIND * chamber, base.pos[1] + SWEEP_RISE_WIND * chamber, base.pos[2]],
-          [base.rot[0], base.rot[1] + handSign * SWEEP_YAW_WIND * chamber, base.rot[2] + handSign * SWEEP_ROLL_WIND * chamber]);
+          [base.pos[0] + handSign * tuning.sweepWind * chamber, base.pos[1] + tuning.sweepRiseWind * chamber, base.pos[2]],
+          [base.rot[0], base.rot[1] + handSign * tuning.sweepYawWind * chamber, base.rot[2] + handSign * tuning.sweepRollWind * chamber]);
         continue;
       }
       // Release phase: the chambered weapon cuts down and across to a wide
@@ -828,8 +925,8 @@ export function viewmodelSwingSystem(dt: number): void {
       const chamber = 1 - releaseT;
       const arc = Math.sin(releaseT * Math.PI);
       applyViewmodelPose(mesh, swing, dt,
-        [base.pos[0] + handSign * SWEEP_WIND * chamber - handSign * SWEEP_REACH * arc, base.pos[1] + SWEEP_RISE_WIND * chamber + SWEEP_DROP_PEAK * arc, base.pos[2]],
-        [base.rot[0], base.rot[1] + handSign * SWEEP_YAW_WIND * chamber - handSign * SWEEP_YAW_REACH * arc, base.rot[2] + handSign * SWEEP_ROLL_WIND * chamber - handSign * SWEEP_ROLL_REACH * arc]);
+        [base.pos[0] + handSign * tuning.sweepWind * chamber - handSign * tuning.sweepReach * arc, base.pos[1] + tuning.sweepRiseWind * chamber + tuning.sweepDropPeak * arc, base.pos[2]],
+        [base.rot[0], base.rot[1] + handSign * tuning.sweepYawWind * chamber - handSign * tuning.sweepYawReach * arc, base.rot[2] + handSign * tuning.sweepRollWind * chamber - handSign * tuning.sweepRollReach * arc]);
       if (releaseT >= 1) activeSwings.splice(i, 1);
       continue;
     }
@@ -839,7 +936,7 @@ export function viewmodelSwingSystem(dt: number): void {
     const t = Math.min(1, swing.elapsed / swing.duration);
     const arc = Math.sin(t * Math.PI);
     applyViewmodelPose(mesh, swing, dt,
-      [base.pos[0] + inwardSign * STAB_INWARD * arc, base.pos[1], base.pos[2] - arc * STAB_DISTANCE],
+      [base.pos[0] + inwardSign * tuning.stabInward * arc, base.pos[1], base.pos[2] - arc * tuning.stabDistance],
       base.rot);
 
     if (t >= 1) activeSwings.splice(i, 1);
