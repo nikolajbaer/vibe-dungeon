@@ -210,6 +210,7 @@ export function buildCombatTestLevel(world: World, physics: Physics, scene: THRE
   spawnItems(world, physics, scene, [
     { id: "quarterstaff", x: 5.3, y: 1.05, z: -12.5 },
     { id: "greatsword", x: 5.9, y: 1.05, z: -12.5 },
+    { id: "javelin", x: 6.5, y: 1.05, z: -12.5 },
   ]);
 
   for (const x of [-9, 0, 9]) {

@@ -5,10 +5,12 @@ import {
   debugMountViewmodel,
   getViewmodelAnimationDebugState,
   getViewmodelTuning,
+  releaseViewmodelThrow,
   resetViewmodelTuning,
   setViewmodelTuning,
   startViewmodelBlock,
   startViewmodelCharge,
+  startViewmodelThrowCharge,
   stopViewmodelBlock,
   triggerViewmodelSwing,
   viewmodelSwingSystem,
@@ -71,11 +73,28 @@ mount();
 function jab(): void {
   triggerViewmodelSwing(ITEM_EID, "jab", getViewmodelTuning().swingDuration);
 }
+// A throwable weapon (the javelin) charges/releases into its own
+// throwing-ready pose instead of the generic swing chamber -- same
+// hold-the-swing-button input, routed the same way game.ts's real input
+// handling picks between combat.ts's swing charge and throwingCombat.ts's
+// throw charge (`isEquippedWeaponThrowable`). Release re-mounts the weapon
+// immediately afterward (`mount()`) since this workshop has no real world
+// for a thrown item to land in and be picked back up from -- otherwise a
+// single test throw would permanently empty the hand.
+function isThrowableSelected(): boolean {
+  return !!ITEM_REGISTRY[weaponSelect.value]?.throwable;
+}
 function chargeSwing(): void {
-  startViewmodelCharge(ITEM_EID);
+  if (isThrowableSelected()) startViewmodelThrowCharge(ITEM_EID);
+  else startViewmodelCharge(ITEM_EID);
 }
 function releaseSwing(): void {
-  triggerViewmodelSwing(ITEM_EID, "swing", getViewmodelTuning().swingDuration);
+  if (isThrowableSelected()) {
+    releaseViewmodelThrow(ITEM_EID);
+    mount();
+  } else {
+    triggerViewmodelSwing(ITEM_EID, "swing", getViewmodelTuning().swingDuration);
+  }
 }
 function cancelSwing(): void {
   cancelViewmodelCharge(ITEM_EID);
@@ -179,6 +198,18 @@ const SLIDER_GROUPS: SliderGroup[] = [
       { key: "swingChamberRot", index: 0, label: "Chamber pitch (rad)", min: -2, max: 2, step: 0.01 },
       { key: "swingChamberRot", index: 1, label: "Chamber yaw (rad)", min: -3, max: 3, step: 0.01 },
       { key: "swingChamberRot", index: 2, label: "Chamber roll (rad)", min: -3, max: 3, step: 0.01 },
+    ],
+  },
+  {
+    title: "Throw: chamber (held) -- throwable weapons only",
+    sliders: [
+      { key: "throwRaiseSeconds", label: "Chamber raise time (s)", min: 0.02, max: 1, step: 0.01 },
+      { key: "throwChamberPos", index: 0, label: "Chamber X (m)", min: -1, max: 1, step: 0.01 },
+      { key: "throwChamberPos", index: 1, label: "Chamber Y (m)", min: -1, max: 1, step: 0.01 },
+      { key: "throwChamberPos", index: 2, label: "Chamber Z (m)", min: -1, max: 1, step: 0.01 },
+      { key: "throwChamberRot", index: 0, label: "Chamber pitch (rad)", min: -2, max: 2, step: 0.01 },
+      { key: "throwChamberRot", index: 1, label: "Chamber yaw (rad)", min: -3, max: 3, step: 0.01 },
+      { key: "throwChamberRot", index: 2, label: "Chamber roll (rad)", min: -3, max: 3, step: 0.01 },
     ],
   },
   {

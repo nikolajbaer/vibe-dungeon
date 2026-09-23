@@ -11,12 +11,13 @@ import { doorAnimationSystem, tryInteract } from "./ecs/systems/doors";
 import { applyMeleeDamage, cancelSwingCharge, combatSystem, releaseSwingCharge, setBlocking, tryMeleeAttack, tryStartSwingCharge, type AttackType } from "./ecs/systems/combat";
 import { meleeCollisionSystem } from "./ecs/systems/meleeCollision";
 import { getEquippedRangedWeapon, getRangedAmmoLabel, getRangedCombatDebugState, rangedCombatSystem, tryFireRanged } from "./ecs/systems/rangedCombat";
+import { getThrowingCombatDebugState, isEquippedWeaponThrowable, throwingCombatSystem, tryStartThrowCharge, tryThrowWeapon } from "./ecs/systems/throwingCombat";
 import { hitboxDebugSystem, isHitboxDebugEnabled, setHitboxDebugEnabled } from "./ecs/systems/hitboxDebug";
 import { practiceSystem, startPractice } from "./ecs/systems/practice";
 import { npcSystem, toggleNpcFollow } from "./ecs/systems/npc";
 import { getNpcAnimationDebugState, npcAnimationSystem } from "./ecs/systems/npcAnimation";
 import { corpseCleanupSystem, MIN_LINGER_SECONDS } from "./ecs/systems/corpseCleanup";
-import { BASE_CARRY_WEIGHT, equipItem, equipToOpenHandSlot, getViewmodelAnimationDebugState, giveItem, isHandSlot, unequipItem, viewmodelSwingSystem, wouldExceedCarryWeight, wouldExceedInventorySlots } from "./ecs/systems/items";
+import { BASE_CARRY_WEIGHT, equipItem, equipToOpenHandSlot, findOpenHandSlot, getViewmodelAnimationDebugState, giveItem, isHandSlot, unequipItem, viewmodelSwingSystem, wouldExceedCarryWeight, wouldExceedDualWieldWeight, wouldExceedInventorySlots } from "./ecs/systems/items";
 import { syncSystem } from "./ecs/systems/sync";
 import { hudSync } from "./ecs/systems/hudSync";
 import { buildLevel } from "./level/level";
@@ -234,13 +235,26 @@ export function startGame(container: HTMLElement, options: StartGameOptions = {}
   // HUD only ever needed the opposite (ECS -> store) direction.
   const inventoryActions: InventoryActions = {
     equip(itemEid) {
+      const slot = findOpenHandSlot(world, player);
+      if (slot && wouldExceedDualWieldWeight(world, player, itemEid, slot)) {
+        hudStore.showMessage("Too heavy to wield alongside your other weapon.");
+        return;
+      }
       equipToOpenHandSlot(world, camera, itemEid);
     },
     // Issue #47: lets the inventory UI put an item in a specific hand
     // (rather than whichever one `equipToOpenHandSlot` picks) once the
     // player has tapped a paper-doll slot for it — the store only ever
-    // calls this after confirming that slot is open.
+    // calls this after confirming that slot is open. Gated the same
+    // dual-wield weight check as `equip` above -- a real weapon in the
+    // *other* hand already, too heavy combined with this one
+    // (`wouldExceedDualWieldWeight`) refuses the same way an overweight
+    // fresh pickup already does elsewhere in this file.
     equipToSlot(itemEid, slot) {
+      if (wouldExceedDualWieldWeight(world, player, itemEid, slot)) {
+        hudStore.showMessage("Too heavy to wield alongside your other weapon.");
+        return;
+      }
       equipItem(world, camera, itemEid, slot);
     },
     unequip(itemEid) {
@@ -492,8 +506,13 @@ export function startGame(container: HTMLElement, options: StartGameOptions = {}
     // real held charge -- use `startSwingCharge`/`releaseSwingCharge` below
     // to exercise the actual charge-and-release mechanic.
     attack: (attackType: AttackType = "jab") => tryMeleeAttack(world, attackType),
-    startSwingCharge: () => tryStartSwingCharge(world),
-    releaseSwingCharge: () => releaseSwingCharge(world),
+    // Throw-aware the same way the real mouse/touch press/release handling
+    // in `frame()` is (`meleeHeldIsThrowable`) -- a throwable weapon (the
+    // javelin) charges/releases through `throwingCombat.ts` instead of
+    // `combat.ts`'s own swing charge/release, so a test exercising this
+    // through the debug hook sees the same routing real input does.
+    startSwingCharge: () => (isEquippedWeaponThrowable(world, player) ? tryStartThrowCharge(world) : tryStartSwingCharge(world)),
+    releaseSwingCharge: () => (isEquippedWeaponThrowable(world, player) ? tryThrowWeapon(world, physics, camera, scene) : releaseSwingCharge(world)),
     cancelSwingCharge: () => cancelSwingCharge(world),
     isSwingCharging: () => Combat.charging[player] > 0,
     // Debug-only direct triggers for the shared mouse/touch press/release
@@ -514,6 +533,7 @@ export function startGame(container: HTMLElement, options: StartGameOptions = {}
       maxStamina: Stamina.max[player],
     }),
     getRangedCombatState: () => getRangedCombatDebugState(),
+    getThrowingCombatState: () => getThrowingCombatDebugState(),
     getViewmodelAnimationState: () => getViewmodelAnimationDebugState(),
     getPracticeState: () => ({
       active: hasComponent(world, player, Practice) && !!Practice.active[player],
@@ -743,6 +763,15 @@ export function startGame(container: HTMLElement, options: StartGameOptions = {}
   // being held was a ranged one, so the matching release fires the shot
   // instead of resolving a jab/charged swing.
   let meleePressWasRanged = false;
+  // Set at press time alongside `meleePressWasRanged`: whether the
+  // currently-equipped weapon is a self-thrown one (the javelin -- see
+  // `ItemAssetDef.throwable`), so a held charge raises the throwing-ready
+  // pose (`tryStartThrowCharge`) instead of the melee swing chamber, and the
+  // matching release throws it (`tryThrowWeapon`) instead of swinging it.
+  // Checked once at press time, same reasoning `meleePressWasRanged` already
+  // documents -- re-equipping mid-hold is an edge case neither variable
+  // tries to handle.
+  let meleeHeldIsThrowable = false;
   // For detecting Digit2's own release edge -- `Keyboard` only exposes a
   // "just pressed" edge (`consumeJustPressed`) and a continuous `isDown`,
   // no "just released" of its own, so this compares last frame's state to
@@ -880,22 +909,27 @@ export function startGame(container: HTMLElement, options: StartGameOptions = {}
         meleeHeld = true;
         meleeHoldSeconds = 0;
         meleeCharging = false;
+        meleeHeldIsThrowable = isEquippedWeaponThrowable(world, player);
       }
     }
     if (meleeHeld) {
       meleeHoldSeconds += dt;
       if (!meleeCharging && meleeHoldSeconds >= SWING_CHARGE_THRESHOLD_SECONDS) {
-        meleeCharging = tryStartSwingCharge(world);
+        meleeCharging = meleeHeldIsThrowable ? tryStartThrowCharge(world) : tryStartSwingCharge(world);
         if (!meleeCharging) meleeHeld = false; // couldn't charge (cooldown/stamina/etc) -- stop retrying every frame
       }
     }
     if (meleeReleaseEdge) {
       if (meleePressWasRanged) tryFireRanged(world, camera, scene);
-      else if (meleeCharging) releaseSwingCharge(world);
+      else if (meleeCharging) {
+        if (meleeHeldIsThrowable) tryThrowWeapon(world, physics, camera, scene);
+        else releaseSwingCharge(world);
+      }
       else if (meleeHeld) tryMeleeAttack(world, "jab");
       meleeHeld = false;
       meleeCharging = false;
       meleePressWasRanged = false;
+      meleeHeldIsThrowable = false;
     }
     // A modal opening mid-charge (dialogue, death, the combat-test config
     // panel) drops it outright rather than leaving the player's weapon stuck
@@ -920,6 +954,7 @@ export function startGame(container: HTMLElement, options: StartGameOptions = {}
     viewmodelSwingSystem(dt);
     if (!isModalActive()) {
       rangedCombatSystem(world, physics, scene, dt);
+      throwingCombatSystem(world, physics, scene, dt);
       // meleeCollisionSystem only resolves *which* swings connected (real
       // Rapier sensor-cylinder geometry, replacing the old raycast-vs-distance
       // split between the player and NPCs) -- applying the actual damage

@@ -143,7 +143,11 @@ interface EquippedWeapon {
   attackMultipliers: ItemAssetDef["attackMultipliers"];
 }
 
-function getEquippedWeapon(world: World, attackerEid: number): EquippedWeapon | undefined {
+/** Exported for `throwingCombat.ts` (the javelin's charge/throw needs to
+ * know which equipped item -- if any -- is the throwable one, using the
+ * exact same "best of everything in a hand slot" pick jab/swing already
+ * resolve through) as well as internal use here. */
+export function getEquippedWeapon(world: World, attackerEid: number): EquippedWeapon | undefined {
   let best: EquippedWeapon | undefined;
   for (const eid of query(world, [Item, Carried])) {
     if (Carried.ownerEid[eid] !== attackerEid || !isHandSlot(Carried.slot[eid])) continue;

@@ -106,6 +106,28 @@ export interface ItemAssetDef {
     projectileSpeed: number;
     maxRange: number;
   };
+  /** Optional self-thrown-weapon tuning (the javelin) -- unlike
+   * `rangedWeapon` above, there's no separate ammo item type: the weapon
+   * entity itself becomes the flying projectile and leaves the hand the
+   * instant it's thrown, recoverable wherever it lands (or embeds), the
+   * same "it's a real item you can walk over and pick back up" way a fired
+   * bolt is (see `ecs/systems/throwingCombat.ts`).
+   *
+   * Also unlike `rangedWeapon`, a throwable weapon fires through the same
+   * held jab-or-charge-and-release input every other `slot: "hand"` weapon
+   * uses (`combat.ts`'s `tryStartSwingCharge`/`releaseSwingCharge`), not a
+   * dedicated aim-and-fire button -- there's no reload, no ammo count, and
+   * no zoom-while-aiming (that's `rangedWeapon`-only, gated on
+   * `getRangedAmmoLabel`). A jab still stabs with this weapon's own
+   * `meleeDamage`/`meleeReach`; holding past the swing-charge threshold
+   * raises it into a throwing-ready pose instead of a melee windup
+   * (`ecs/systems/items.ts`'s `throwChamberPos`/`Rot`), and releasing
+   * throws it instead of swinging it. */
+  throwable?: {
+    damage: number;
+    projectileSpeed: number;
+    maxRange: number;
+  };
   /** True for a `slot: "hand"` item that needs both hands -- equipping one
    * (`ecs/systems/items.ts`'s `equipItem`) unequips whatever's currently in
    * *either* hand first, and while it's equipped `findOpenHandSlot` reports
