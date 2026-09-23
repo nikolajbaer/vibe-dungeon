@@ -12,22 +12,26 @@ import type { ItemAssetDef } from "../types";
 // `throwChamberRot`/jab poses in ecs/systems/items.ts) work the same way
 // they do for the sword/dagger.
 
-// Kept close to the sword's own overall length (~0.84m) rather than a real
-// javelin's -- the generic per-hand `VIEWMODEL_OFFSET` (ecs/systems/items.ts)
-// places every one-handed weapon's grip only ~0.4m from the camera, so a
-// mesh authored at true javelin scale (~1.8-2m) reads as wildly oversized
-// and fills most of the screen once it's that close. A little longer than
-// the sword reads as "reach weapon" without that blowup.
-const SHAFT_FORWARD_LENGTH = 0.6; // grip to the base of the head
-const HEAD_LENGTH = 0.14;
-const SHAFT_RADIUS = 0.016;
-const HEAD_BASE_RADIUS = 0.032;
-const HEAD_TIP_RADIUS = 0.004;
-const TAIL_LENGTH = 0.16; // grip to the fletched butt end
-const TAIL_CAP_LENGTH = 0.04;
-const TAIL_CAP_RADIUS = 0.022;
-const GRIP_LENGTH = 0.16;
-const GRIP_RADIUS = 0.02;
+// Sized at roughly 3/4 the quarterstaff's own length (1.7m -- see
+// quarterstaff.ts's STAFF_LENGTH) rather than the sword's compact scale --
+// a real thrown spear reads as a substantial two-handed-ish weapon even
+// though it's mechanically one-handed for equip/dual-wield purposes, and a
+// too-small mesh (an earlier pass at 0.9m total) looked more like a long
+// dagger than a javelin. Most of the extra length went into the forward
+// (blade-ward) section rather than the tail: the tail end swings closest to
+// the camera in the resting/jab pose (see `VIEWMODEL_OFFSET` in
+// ecs/systems/items.ts), so growing it as much as the front would exaggerate
+// near-camera perspective blow-up more than growing the receding front does.
+const SHAFT_FORWARD_LENGTH = 0.9; // grip to the base of the head
+const HEAD_LENGTH = 0.2;
+const SHAFT_RADIUS = 0.02;
+const HEAD_BASE_RADIUS = 0.04;
+const HEAD_TIP_RADIUS = 0.006;
+const TAIL_LENGTH = 0.18; // grip to the fletched butt end
+const TAIL_CAP_LENGTH = 0.05;
+const TAIL_CAP_RADIUS = 0.028;
+const GRIP_LENGTH = 0.2;
+const GRIP_RADIUS = 0.026;
 
 // Same "shrink a touch for the closer camera" scale-down every viewmodel in
 // this repo uses.
@@ -96,11 +100,17 @@ const javelin: ItemAssetDef = {
   mass: 1.6,
   // Thrown through the shared jab-or-charge-and-release input (see this
   // field's own doc comment in assets/types.ts) rather than a dedicated
-  // aim-and-fire button -- flat damage regardless of range, no falloff,
-  // same as a fired crossbow bolt. High enough to drop a fully-guarded
-  // "guard" NPC (45 HP, ecs/systems/combat.ts's BLOCK_MITIGATION.oneHanded)
-  // in one hit at close range, since a thrown hit -- like a bolt -- bypasses
-  // melee blocking entirely (`applyRangedDamage`).
+  // aim-and-fire button -- a real flying rigid body once released
+  // (`ecs/systems/throwingCombat.ts`), same as a fired crossbow bolt but
+  // slower (crossbow.ts's own bolt: `projectileSpeed: 34`) and heavier-arcing.
+  // Damage is high enough to drop a fully-guarded "guard" NPC (45 HP,
+  // ecs/systems/combat.ts's BLOCK_MITIGATION.oneHanded) in one hit at close
+  // range, since a thrown hit -- like a bolt -- bypasses melee blocking
+  // entirely (`applyRangedDamage`). `maxRange` here isn't a hard flight-
+  // distance cutoff the way it is for a bolt -- real physics decides how far
+  // it actually flies -- it's how long (at `projectileSpeed`) the throw stays
+  // eligible to land a fresh hit before `throwingCombatSystem` gives up
+  // tracking it and lets it simply be a landed, recoverable item.
   throwable: { damage: 55, projectileSpeed: 24, maxRange: 18 },
   createWorldMesh: createJavelinMesh,
   createViewmodelMesh: () => {
