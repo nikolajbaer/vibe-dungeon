@@ -109,8 +109,17 @@
         position: fixed;
         inset: 0;
         display: flex;
+        flex-direction: column;
         align-items: center;
-        justify-content: center;
+        /* No justify-content: center here -- centering a flex container's
+           main axis clips whatever overflows *before* the centered content
+           (a well-known flexbox gotcha) with no way to scroll back up to
+           it. overflow-y auto here plus `margin: auto 0` on .menu-panel
+           below centers it vertically when it fits, same as this would,
+           but falls back to plain top-aligned + scrollable once it
+           doesn't -- e.g. a short landscape phone screen. */
+        overflow-y: auto;
+        -webkit-overflow-scrolling: touch;
         background: #0b0b12;
         color: #eee;
         font: 16px/1.4 system-ui, sans-serif;
@@ -124,6 +133,7 @@
         gap: 28px;
         width: 100%;
         max-width: 360px;
+        margin: auto 0;
       }
       .menu-title {
         margin: 0;
@@ -464,8 +474,14 @@
         position: fixed;
         inset: 0;
         display: flex;
+        flex-direction: column;
         align-items: center;
-        justify-content: center;
+        /* Same "no justify-content: center" fix as .menu-root above -- see
+           its own comment. Scrolls to reach every field on a short
+           landscape phone screen instead of clipping the top/bottom of the
+           panel with no way back to it. */
+        overflow-y: auto;
+        -webkit-overflow-scrolling: touch;
         padding: 16px;
         box-sizing: border-box;
         background: rgba(0, 0, 0, 0.55);
@@ -477,6 +493,7 @@
         flex-direction: column;
         gap: 14px;
         padding: 18px;
+        margin: auto 0;
         background: rgba(15, 14, 12, 0.96);
         border: 1px solid rgba(220, 190, 120, 0.65);
         border-radius: 12px;
