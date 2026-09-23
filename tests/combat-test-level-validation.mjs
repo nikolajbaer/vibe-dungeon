@@ -28,7 +28,7 @@ try {
   assert.equal(level.sectorAt(0, 0, 0), "combat-test", "arena has its own standalone sector");
   assert.deepEqual(level.spawn, { x: 0, z: -10.5, yaw: 0 }, "player spawns in front of the equipment table, facing it");
   const itemTypes = query(world, [Item]).map((eid) => Item.itemTypeId[eid]);
-  for (const weapon of ["dagger", "sword", "wooden_sword", "crossbow"]) {
+  for (const weapon of ["dagger", "sword", "wooden_sword", "crossbow", "quarterstaff"]) {
     assert(itemTypes.includes(weapon), `equipment table includes ${weapon}`);
   }
   const [barrel] = query(world, [Container]);

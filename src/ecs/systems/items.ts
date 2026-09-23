@@ -497,8 +497,12 @@ export function unequipItem(world: World, itemEid: number): void {
  * player to carry anything; it still sets `Carried.slot`/`Viewmodel` for
  * `itemEid` (both plain arrays, not real bitECS components — see their doc
  * comments in `ecs/components.ts`), so `viewmodelSwingSystem` drives the
- * mounted mesh identically to a real equipped weapon. Returns `false` if
- * `itemTypeId` doesn't exist or has no viewmodel mesh to show.
+ * mounted mesh identically to a real equipped weapon -- including a
+ * `viewmodelTransform`-overridden base pose (see `viewmodelSwingSystem`),
+ * which needs `Item.itemTypeId[itemEid]` set to look up, so this sets that
+ * too even though nothing else about `Item` (a real bitECS component) is
+ * ever added. Returns `false` if `itemTypeId` doesn't exist or has no
+ * viewmodel mesh to show.
  */
 export function debugMountViewmodel(camera: THREE.Camera, itemEid: number, itemTypeId: string, slot: HandSlot): boolean {
   const itemType = ITEM_REGISTRY[itemTypeId];
@@ -511,6 +515,7 @@ export function debugMountViewmodel(camera: THREE.Camera, itemEid: number, itemT
   mesh.rotation.set(...rot);
   makeRenderOnTop(mesh);
   camera.add(mesh);
+  Item.itemTypeId[itemEid] = itemTypeId;
   Carried.slot[itemEid] = slot;
   Viewmodel[itemEid] = mesh;
   return true;
@@ -904,11 +909,19 @@ export function viewmodelSwingSystem(dt: number): void {
     // sign always points back toward screen-center regardless of which hand.
     const inwardSign = slot === "hand-right" ? -1 : 1;
     // Which side a swing chambers toward versus follows through toward --
-    // a right-handed cut winds up to the right (handSign positive) and
-    // follows through down-and-left, the mirror image for a left-handed
-    // one.
+    // a right-handed cut chambers left-across-the-body (handSign negative
+    // in `mirroredPose`'s deltas) and follows through to the right, the
+    // mirror image for a left-handed one.
     const handSign = slot === "hand-right" ? 1 : -1;
-    const base = VIEWMODEL_OFFSET[slot];
+    // A weapon with its own fixed `viewmodelTransform` (the crossbow, the
+    // quarterstaff -- anything held centered rather than per-hand-offset,
+    // see that field's own doc comment in assets/types.ts) animates around
+    // *that* resting pose instead of the generic per-hand `VIEWMODEL_OFFSET`,
+    // the same override `equipItem`/`debugMountViewmodel` already apply when
+    // first mounting the mesh -- without this, a two-handed melee weapon's
+    // jab/swing/block would animate around the wrong (off-center) origin.
+    const custom = ITEM_REGISTRY[Item.itemTypeId[swing.itemEid]]?.viewmodelTransform;
+    const base = custom ? { pos: custom.position, rot: custom.rotation } : VIEWMODEL_OFFSET[slot];
 
     if (swing.attackType === "cancel") {
       applyViewmodelPose(mesh, swing, dt, base.pos, base.rot);
