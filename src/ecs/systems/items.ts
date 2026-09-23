@@ -693,7 +693,7 @@ const DEFAULT_TUNING: Readonly<ViewmodelTuning> = {
   swingEndRot: [1.0427, 1.7742, 4.479],
   swingCutEndT: 0.75,
   throwRaiseSeconds: 0.25,
-  throwChamberPos: [-0.05, 0.05, -0.15],
+  throwChamberPos: [-0.05, 0.3, -0.15],
   throwChamberRot: [-0.3536, 0.4198, 2.9082],
   blockRaiseSeconds: 0.15,
   blockLowerSeconds: 0.15,

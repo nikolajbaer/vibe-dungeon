@@ -1,14 +1,14 @@
 import * as THREE from "three";
-import type { RigidBody } from "@dimforge/rapier3d-compat";
-import { hasComponent, query, removeComponent, type World } from "bitecs";
-import { Carried, Combat, Dead, Health, Item, Object3DRef, PhysicsBody, PlayerControlled, Stamina } from "../components";
+import { addComponent, hasComponent, query, removeComponent, type World } from "bitecs";
+import { Carried, Combat, Dead, DynamicBody, Embedded, Health, Item, Object3DRef, PhysicsBody, PhysicsRotation, PlayerControlled, Position, Stamina } from "../components";
 import { ITEM_REGISTRY } from "../../assets/itemRegistry";
 import type { ItemAssetDef } from "../../assets/types";
 import { releaseViewmodelThrow, startViewmodelThrowCharge } from "./items";
 import { ATTACK_PROFILES, ATTACK_STAMINA_COST, applyRangedDamage, getEquippedWeapon } from "./combat";
-import { BODY_PART_DAMAGE_MULTIPLIER, getCombatHitboxColliders } from "./meleeCollision";
-import { buildItemWorldBody } from "../../level/spawning";
-import type { CombatBodyPart, Physics } from "../../physics/world";
+import { BODY_PART_DAMAGE_MULTIPLIER, getBodyPartAt } from "./meleeCollision";
+import { reflectBounceVelocity } from "./rangedCombat";
+import { buildItemWorldBody, dropCarriedItem } from "../../level/spawning";
+import type { Physics } from "../../physics/world";
 
 /**
  * The javelin-style "self-thrown weapon" attack -- see
@@ -18,27 +18,20 @@ import type { CombatBodyPart, Physics } from "../../physics/world";
  * projectile, and it fires through the shared melee jab-or-charge-and-release
  * input (`combat.ts`) rather than a dedicated aim-and-fire button.
  *
- * Unlike a fired bolt (which simulates its own flight by hand -- a raycast
- * swept along a manually-integrated gravity arc, entirely independent of
- * Rapier), a thrown weapon here is a *real* Rapier rigid body for its whole
- * flight: the item's own existing dynamic physics body (already CCD-enabled
- * -- see `addDynamicBox` in physics/world.ts -- so a fast throw can't tunnel
- * through a thin wall in one step) is simply re-enabled and given a launch
- * velocity, then left alone; `physics.world.step()` and the already-generic
- * `dynamicSyncSystem`/`syncSystem` pipeline (game.ts) actually move and
- * render it every frame after, the exact same way they already drive every
- * other dropped item or shoved prop.
- *
- * That's also what "imparts inertia to knock things over" actually is:
- * Rapier's own solver, not anything this file does -- a solid, real-mass
- * body moving at real velocity hitting a dynamic prop (a barrel, a chair)
- * shoves it exactly the way any other physical collision in this world
- * already does, for free. Hitting a *character* is the one case that needs
- * help from this file: characters are kinematic (moved by explicit
- * position sets, immune to being physically shoved -- see physics/world.ts's
- * own header comment on why), so `throwingCombatSystem` below watches for
- * that specific overlap itself and calls `applyRangedDamage`, the same way
- * a bolt's raycast hit does.
+ * Flight is simulated by hand -- a raycast swept along a manually-integrated
+ * gravity arc, closely mirroring `rangedCombat.ts`'s own flying bolts --
+ * rather than handed off to a real Rapier rigid body. A real body was tried
+ * first (see this file's git history) and worked for the "does it fly and
+ * hit things" mechanics, but couldn't give a thrown weapon the one thing a
+ * javelin actually needs: sticking cleanly into whatever it hits, the way a
+ * fired bolt already does (`rangedCombat.ts`'s embedding). A live physics
+ * body that's *also* meant to end up embedded and motionless fights itself --
+ * hand-rolled flight, exactly like the bolt's own, doesn't have that
+ * conflict. "Knock things over" is handled explicitly here instead of
+ * falling out of Rapier's own solver for free: a hit on a genuinely dynamic
+ * prop (a barrel, a dropped item) applies a real impulse to *that* object's
+ * own physics body (see `resolveHit` below), which is what actually knocks
+ * it over -- the javelin itself never re-enables its own body mid-flight.
  */
 
 interface EquippedThrowable {
@@ -87,110 +80,98 @@ export function tryStartThrowCharge(world: World): boolean {
   return true;
 }
 
-/** Meters ahead of the camera a throw launches from -- clears the player's
- * own movement capsule (`PLAYER_RADIUS` in game.ts, 0.35m) with real margin,
- * so the freshly-enabled body doesn't spawn overlapping it and get an
- * unwanted overlap-resolution shove the instant it's created. */
-const THROW_MUZZLE_OFFSET = 0.6;
+/** Meters ahead of the camera a throw launches from -- the same "begin at
+ * the camera, not further out" reasoning `rangedCombat.ts`'s own bolts use
+ * (a muzzle offset can otherwise place the projectile on the far side of a
+ * nearby wall, so the first frame never sees the impact), nudged forward
+ * just enough to clear the player's own movement capsule. */
+const THROW_MUZZLE_OFFSET = 0.4;
 
-/** How much of the world's real gravity (`physics/world.ts`'s `GRAVITY_Y`,
- * tuned for a snappy character fall, not ballistics) a thrown javelin
- * actually feels -- applying the full character-scale gravity to a fast,
- * thin projectile would nose-dive it into the floor within a couple of
- * meters. Matches `rangedCombat.ts`'s own bolt gravity (4 m/s^2) as a
- * fraction of the world's -24, so a thrown javelin arcs the same gentle way
- * a fired bolt does despite being simulated by Rapier instead of by hand. */
-const THROW_GRAVITY_SCALE = 4 / 24;
+/** Gravity (m/s^2) a thrown javelin falls under -- deliberately gentle, the
+ * same reasoning `rangedCombat.ts`'s own `BOLT_GRAVITY` (4) gives: the
+ * world's real gravity (physics/world.ts's `GRAVITY_Y`, -24) is tuned for a
+ * snappy character fall, not projectile ballistics, and would nose-dive a
+ * fast, thin throw into the floor within a couple of meters. Drop over a
+ * given distance scales with (distance / speed)^2, so a javelin flying at
+ * half a bolt's speed (`javelin.ts`'s `projectileSpeed: 12` vs. the bolt's
+ * own 34) needs a *much* gentler pull than the bolt's own to arc the same
+ * amount over the same distance, not the same constant -- a first pass here
+ * that reused a flat "a bit above the bolt's own 4" value (6) sank into the
+ * floor well short of normal combat range once the speed came down. This
+ * keeps the same "arcs a little more than the bolt" feel (a fixed multiple
+ * of the bolt's own drop-per-distance) at this weapon's own, slower speed. */
+const THROW_GRAVITY = 1.5;
 
-/** Extra horizontal margin (m) added to a character's own combat hitbox
- * cylinder radius when checking whether a flying javelin has reached it
- * (`findStruckCharacter` below) -- the javelin is a thin, fast-moving line
- * sampled once per rendered frame, not a continuously-swept point, so a real
- * solid hit Rapier's own collision response already registered against the
- * character's capsule can land just outside a bare point-in-cylinder test. */
-const HIT_CHECK_RADIUS_PAD = 0.15;
+/** How far (m) the tip visually sinks into whatever it embeds in -- deep
+ * enough to read as genuinely stuck rather than just touching the surface,
+ * shallow enough that most of the shaft still shows. Independent of the
+ * weapon's own length (`tipOffset` below, measured per-throw off the actual
+ * mesh) -- a bigger weapon doesn't need a proportionally deeper hole, just a
+ * consistent one. */
+const EMBED_DEPTH = 0.12;
 
-/** Fraction of a javelin's velocity left once it's confirmed to have struck
- * a character -- without this it would keep sliding at full throw speed
- * against (or through, next physics step) whatever it just hit, since a
- * kinematic character never absorbs any of a dynamic body's momentum the
- * way a shoved prop would. Damping it here reads as the target's own body
- * absorbing the impact, and lets it drop to the floor near them shortly
- * after instead of riding along, stuck against their capsule. */
-const IMPACT_VELOCITY_DAMPING = 0.15;
+/** Below this speed (m/s) a hit is treated as a weak graze that clatters off
+ * rather than a real stick -- keeps a javelin that's already lost most of
+ * its momentum (e.g. from an earlier bounce) from freezing motionless
+ * in place the instant it grazes anything. */
+const MIN_EMBED_SPEED = 2;
 
-interface LiveThrow {
-  itemEid: number;
-  attackerEid: number;
-  damage: number;
-  elapsed: number;
-  /** Seconds after which this throw stops being checked for a fresh hit
-   * (`throwable.maxRange / throwable.projectileSpeed`) -- once past this,
-   * it's simply left as whatever ordinary landed item Rapier's own physics
-   * has already settled it into, the same as any other dropped item; there's
-   * nothing left to do here since the entity was never anything other than a
-   * real, permanently-tracked `DynamicBody` item to begin with. */
-  timeout: number;
-  /** The item's own physics collider, local-space (relative to the body's
-   * own origin and rotation) offset and half-length along its long axis
-   * (+Z, the "tip forward" convention every weapon mesh in this repo uses --
-   * see e.g. sword.ts's own header comment) -- read once at throw time from
-   * the body's actual collider shape (`addDynamicBox`'s box, itself computed
-   * off the mesh's real geometry by `boxShapeOf`). A javelin is long enough
-   * (~1.3m) that its own origin (the grip) can sit well behind wherever the
-   * blade tip -- and the real point of physical contact -- currently is;
-   * `findStruckCharacter` below samples several points along this span each
-   * frame instead of only the origin, so a hit registers wherever along the
-   * shaft it actually connects. */
-  localOffsetX: number;
-  localOffsetY: number;
-  localNearZ: number;
-  localFarZ: number;
-}
+/** Fraction of a thrown javelin's own momentum (mass * velocity) actually
+ * imparted to a dynamic prop it hits (a barrel, a dropped item) -- real
+ * collisions aren't perfectly momentum-transferring (some of it goes into
+ * the javelin's own deceleration), so this is deliberately less than 1,
+ * tuned to still read as a solid, weighty impact rather than a tap. */
+const PROP_IMPULSE_FRACTION = 0.7;
 
-const liveThrows: LiveThrow[] = [];
+const raycaster = new THREE.Raycaster();
 
-/** How many evenly-spaced points (inclusive of both ends) to sample along a
- * flying weapon's own length each frame when checking for a character hit
- * (see `LiveThrow.local*` fields above) -- enough that even the ~1.3m
- * javelin's own length never has more than a small fraction of a meter
- * between sample points, well under a character's own hitbox radius. */
-const HIT_CHECK_SAMPLE_COUNT = 5;
-
-const hitCheckPoint = new THREE.Vector3();
-const hitCheckQuat = new THREE.Quaternion();
-
-/** The struck character (if any) currently overlapping any sampled point
- * along `thrown`'s own length -- reuses `meleeCollision.ts`'s already-
- * registered combat hitbox cylinders (the same ones a melee swing box tests
- * against) rather than issuing a fresh Rapier query, since a plain
- * point-in-cylinder check against a handful of characters is cheap enough to
- * do inline every frame -- the same reasoning `getBodyPartAt`
- * (rangedCombat.ts's own equivalent) gives for reusing these colliders' live
- * getters instead of a real intersection test. */
-function findStruckCharacter(world: World, thrown: LiveThrow, body: RigidBody, excludeEid: number): { eid: number; part: CombatBodyPart } | undefined {
-  const pos = body.translation();
-  const rot = body.rotation();
-  hitCheckQuat.set(rot.x, rot.y, rot.z, rot.w);
-  for (let i = 0; i < HIT_CHECK_SAMPLE_COUNT; i++) {
-    const f = i / (HIT_CHECK_SAMPLE_COUNT - 1);
-    const localZ = thrown.localNearZ + (thrown.localFarZ - thrown.localNearZ) * f;
-    hitCheckPoint.set(thrown.localOffsetX, thrown.localOffsetY, localZ).applyQuaternion(hitCheckQuat);
-    hitCheckPoint.x += pos.x;
-    hitCheckPoint.y += pos.y;
-    hitCheckPoint.z += pos.z;
-    for (const owner of getCombatHitboxColliders()) {
-      if (owner.eid === excludeEid) continue;
-      if (!hasComponent(world, owner.eid, Health) || hasComponent(world, owner.eid, Dead)) continue;
-      const t = owner.collider.translation();
-      const horizontalDist = Math.hypot(hitCheckPoint.x - t.x, hitCheckPoint.z - t.z);
-      if (horizontalDist > owner.collider.radius() + HIT_CHECK_RADIUS_PAD) continue;
-      const halfHeight = owner.collider.halfHeight();
-      if (hitCheckPoint.y < t.y - halfHeight || hitCheckPoint.y > t.y + halfHeight) continue;
-      return { eid: owner.eid, part: owner.part };
-    }
+function owningEid(object: THREE.Object3D): number | undefined {
+  for (let current: THREE.Object3D | null = object; current; current = current.parent) {
+    if (typeof current.userData.eid === "number") return current.userData.eid;
   }
   return undefined;
+}
+
+/** `hit.normal` (per three.js's `Mesh.raycast`) is in the struck object's
+ * *local* space -- transformed to world space here, or a level floor's
+ * normal as a fallback if the geometry didn't carry one. Duplicated from
+ * `rangedCombat.ts`'s own private equivalent (not exported) -- small enough
+ * that sharing it isn't worth the coupling. */
+function worldSurfaceNormal(hit?: THREE.Intersection): THREE.Vector3 {
+  return hit?.normal ? hit.normal.clone().transformDirection(hit.object.matrixWorld) : new THREE.Vector3(0, 1, 0);
+}
+
+interface FlyingThrown {
+  itemEid: number;
+  mesh: THREE.Object3D;
+  position: THREE.Vector3;
+  velocity: THREE.Vector3;
+  distance: number;
+  maxRange: number;
+  damage: number;
+  attackerEid: number;
+  /** Local +Z distance from the mesh's own origin (the grip -- see
+   * javelin.ts's own header comment on this repo-wide "tip forward"
+   * convention) to its visual tip, measured off the actual mesh geometry
+   * once at throw time -- how deep the embed-origin math (`embeddedOrigin`
+   * below) needs to walk the origin back from the surface for the tip to
+   * land right at `EMBED_DEPTH`, and generic to whatever a future thrown
+   * weapon's own proportions happen to be, no hardcoded per-weapon number. */
+  tipOffset: number;
+}
+
+const flyingThrown: FlyingThrown[] = [];
+
+/** Where a stuck javelin's mesh origin (its local Z=0, the grip -- see
+ * `FlyingThrown.tipOffset`'s own doc comment) belongs in world space, given
+ * the raycast `hitPoint`, the struck surface's world-space unit `normal`,
+ * and the javelin's own world-space unit travel `direction` -- the same
+ * "walk the tip in from the surface, then walk the origin back from the tip
+ * along the actual flight direction" derivation `rangedCombat.ts`'s
+ * `embeddedBoltOrigin` uses for a fired bolt, just parameterized by this
+ * weapon's own `tipOffset` instead of a bolt-specific constant. */
+function embeddedOrigin(hitPoint: THREE.Vector3, normal: THREE.Vector3, direction: THREE.Vector3, tipOffset: number): THREE.Vector3 {
+  return hitPoint.clone().addScaledVector(normal, -EMBED_DEPTH).addScaledVector(direction, -tipOffset);
 }
 
 /**
@@ -198,10 +179,10 @@ function findStruckCharacter(world: World, thrown: LiveThrow, body: RigidBody, e
  * weapon -- the throwable analog of `combat.ts`'s `releaseSwingCharge`,
  * doing the same recovery/stamina bookkeeping that function does for a
  * melee swing release, but detaching the weapon from the hand entirely
- * (`items.ts`'s `releaseViewmodelThrow`) and launching it as a real physics
- * body (see this file's header comment) instead of registering a melee
- * swing box. A stray release with nothing charging is a harmless no-op,
- * same as `releaseSwingCharge`.
+ * (`items.ts`'s `releaseViewmodelThrow`) and launching it as a tracked
+ * flying projectile (`throwingCombatSystem` below) instead of registering a
+ * melee swing box. A stray release with nothing charging is a harmless
+ * no-op, same as `releaseSwingCharge`.
  *
  * Reuses the weapon's own existing world-pickup entity/mesh/physics-body
  * (present on any item that's ever been placed in the world -- see
@@ -227,85 +208,193 @@ export function tryThrowWeapon(world: World, physics: Physics, camera: THREE.Cam
   if (!hasComponent(world, itemEid, Object3DRef)) {
     buildItemWorldBody(world, physics, scene, itemEid, throwable.def, 0, 0, 0);
   }
+  // Flight is hand-simulated (see this file's header comment), not driven by
+  // Rapier -- keep the body disabled the whole time, same as while carried,
+  // so nothing else in the physics world reacts to it until it's dropped
+  // back in (`dropCarriedItem`) or stuck in place (`embedJavelin`).
+  PhysicsBody[itemEid]?.setEnabled(false);
   removeComponent(world, itemEid, Carried);
+  // `dynamicSyncSystem`/`syncSystem` would otherwise keep copying this
+  // item's (now-frozen, disabled) physics body transform onto its mesh every
+  // frame -- fighting the hand-simulated flight this file drives directly.
+  // Removed here, re-added by `embedJavelin` (`Position` only, `Embedded`
+  // takes over from there) or `clatter` (both, once it's a normal loose item
+  // again) once flight actually ends.
+  removeComponent(world, itemEid, Position);
+  removeComponent(world, itemEid, PhysicsRotation);
 
   const mesh = Object3DRef[itemEid]!;
   mesh.visible = true;
 
   const direction = new THREE.Vector3();
   camera.getWorldDirection(direction).normalize();
-  const muzzle = camera.getWorldPosition(new THREE.Vector3()).addScaledVector(direction, THROW_MUZZLE_OFFSET);
-  const quat = new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, 0, 1), direction);
-  const speed = throwable.def.throwable.projectileSpeed;
+  const position = camera.getWorldPosition(new THREE.Vector3()).addScaledVector(direction, THROW_MUZZLE_OFFSET);
+  mesh.position.copy(position);
+  mesh.quaternion.setFromUnitVectors(new THREE.Vector3(0, 0, 1), direction);
 
-  const body = PhysicsBody[itemEid]!;
-  body.setEnabled(true);
-  body.setTranslation({ x: muzzle.x, y: muzzle.y, z: muzzle.z }, true);
-  body.setRotation({ x: quat.x, y: quat.y, z: quat.z, w: quat.w }, true);
-  body.setLinvel({ x: direction.x * speed, y: direction.y * speed, z: direction.z * speed }, true);
-  body.setAngvel({ x: 0, y: 0, z: 0 }, true);
-  body.setGravityScale(THROW_GRAVITY_SCALE, true);
-  // Every other dynamic item/prop carries heavy linear/angular damping
-  // (physics/world.ts's `PROP_LINEAR_DAMPING`/`PROP_ANGULAR_DAMPING`, tuned
-  // for furniture that shouldn't slide forever once shoved) -- a real thrown
-  // weapon needs to actually cross the room at something close to its launch
-  // speed, so both are dropped to (near) zero for the flight; nothing resets
-  // them afterward, since a landed weapon behaving a little more slidy than
-  // an ordinary dropped item if kicked again is harmless.
-  body.setLinearDamping(0);
-  body.setAngularDamping(0.05);
+  // `mesh` here is already the pickup-hitbox-wrapped group (`Object3DRef`),
+  // not the bare visual mesh -- its first child is the real geometry (see
+  // `withPickupHitbox`), which is what actually needs measuring; the
+  // group's own bounds would be dominated by the much larger invisible
+  // pickup hitbox sphere.
+  const visualMesh = mesh.children[0] ?? mesh;
+  const tipOffset = new THREE.Box3().setFromObject(visualMesh).max.z;
 
-  // Matches the physics body immediately, rather than waiting for the next
-  // physics step's `dynamicSyncSystem` pass, so the very first rendered
-  // frame after the throw doesn't show it still sitting wherever it was
-  // hidden while carried.
-  mesh.position.copy(muzzle);
-  mesh.quaternion.copy(quat);
-
-  // Read the collider's own local-space span along its long axis (see
-  // `LiveThrow`'s own doc comment) once, here -- it never changes for the
-  // rest of this throw's flight, only the body's world position/rotation do.
-  const collider = body.numColliders() > 0 ? body.collider(0) : undefined;
-  const localOffset = collider?.translationWrtParent() ?? { x: 0, y: 0, z: 0 };
-  const localHalf = collider?.halfExtents() ?? { x: 0, y: 0, z: 0 };
-
-  liveThrows.push({
-    itemEid, attackerEid, damage: throwable.def.throwable.damage,
-    elapsed: 0, timeout: throwable.def.throwable.maxRange / speed,
-    localOffsetX: localOffset.x, localOffsetY: localOffset.y,
-    localNearZ: localOffset.z - localHalf.z, localFarZ: localOffset.z + localHalf.z,
+  flyingThrown.push({
+    itemEid, mesh, position,
+    velocity: direction.multiplyScalar(throwable.def.throwable.projectileSpeed),
+    distance: 0, maxRange: throwable.def.throwable.maxRange, damage: throwable.def.throwable.damage, attackerEid, tipOffset,
   });
   return true;
 }
 
-/** Advances every javelin currently eligible to land a fresh hit -- real
- * flight/impact physics already happened in `physics.world.step()` and
- * `dynamicSyncSystem` (game.ts's own fixed-timestep loop, which runs before
- * this) by the time this sees each one's current position; all this does is
- * watch for the one thing plain Rapier collision can't handle on its own
- * (see this file's header comment): a hit on a kinematic character. */
-export function throwingCombatSystem(world: World, dt: number): void {
-  for (let i = liveThrows.length - 1; i >= 0; i--) {
-    const thrown = liveThrows[i];
-    thrown.elapsed += dt;
-    const body = PhysicsBody[thrown.itemEid];
-    if (!body) {
-      liveThrows.splice(i, 1);
+/** Sticks `thrown` into whatever it just hit -- reparented onto `hit.object`
+ * (`Object3D.attach` preserves world transform across the reparent) so it
+ * follows a moving target the same way an embedded bolt does. `thrown.mesh`
+ * has been a direct child of `scene` for its entire flight, so its
+ * position/quaternion are already world-space; no reset-to-identity dance
+ * is needed the way a freshly-created bolt mesh needs one. */
+function embedJavelin(world: World, thrown: FlyingThrown, hit: THREE.Intersection, normal: THREE.Vector3, direction: THREE.Vector3): void {
+  const group = thrown.mesh;
+  group.position.copy(embeddedOrigin(hit.point, normal, direction, thrown.tipOffset));
+  group.quaternion.setFromUnitVectors(new THREE.Vector3(0, 0, 1), direction);
+  addComponent(world, thrown.itemEid, Embedded);
+  // `Position` only, not `PhysicsRotation` -- same as a fired bolt's own
+  // embed (see `Embedded`'s doc comment): `syncSystem`'s quaternion loop has
+  // no `Embedded` skip, so re-adding `PhysicsRotation` here would fight the
+  // orientation `attach()` below already gave the mesh.
+  addComponent(world, thrown.itemEid, Position);
+  Position.x[thrown.itemEid] = group.position.x;
+  Position.y[thrown.itemEid] = group.position.y;
+  Position.z[thrown.itemEid] = group.position.z;
+  hit.object.attach(group);
+}
+
+/** Ends a throw as a normal loose world item again -- a failed embed, a hit
+ * on a dynamic prop, or simply running out of range -- rather than staying
+ * stuck (`embedJavelin`). Re-adds `Position`/`PhysicsRotation` (both this
+ * time, unlike `embedJavelin`: this item isn't `Embedded`, so it needs the
+ * full pair the generic sync pipeline expects of any ordinary dynamic body)
+ * and sets them to match the physics body `dropCarriedItem` is about to
+ * plant at `point`, identity rotation and all -- `dynamicSyncSystem` won't
+ * read that body back out until *next* frame's physics step, one frame after
+ * `syncSystem` (this frame's) needs correct values to draw from. */
+function clatter(world: World, physics: Physics, scene: THREE.Scene, thrown: FlyingThrown, point: THREE.Vector3): void {
+  addComponent(world, thrown.itemEid, Position);
+  addComponent(world, thrown.itemEid, PhysicsRotation);
+  Position.x[thrown.itemEid] = point.x;
+  Position.y[thrown.itemEid] = point.y;
+  Position.z[thrown.itemEid] = point.z;
+  PhysicsRotation.x[thrown.itemEid] = 0;
+  PhysicsRotation.y[thrown.itemEid] = 0;
+  PhysicsRotation.z[thrown.itemEid] = 0;
+  PhysicsRotation.w[thrown.itemEid] = 1;
+  dropCarriedItem(world, physics, scene, thrown.itemEid, point.x, point.y, point.z);
+}
+
+/** Decides whether `thrown` sticks into whatever it just hit (`embedJavelin`)
+ * or clatters off instead -- too shallow an angle or too little speed left
+ * (`MIN_EMBED_SPEED`) fails to embed, the same "a real hit sometimes just
+ * glances off" idea `rangedCombat.ts`'s bolts use, just phrased in terms of
+ * this weapon's own measured `tipOffset` rather than a bolt-specific
+ * constant. A failed embed reflects the javelin's own incoming velocity off
+ * the struck surface (`reflectBounceVelocity`, shared with the bolt's own
+ * clatter) rather than just dropping it dead at the impact point. */
+function embedOrClatter(world: World, physics: Physics, scene: THREE.Scene, thrown: FlyingThrown, hit: THREE.Intersection, normal: THREE.Vector3, direction: THREE.Vector3): void {
+  const speed = thrown.velocity.length();
+  const incidence = Math.abs(direction.dot(normal));
+  const minIncidence = Math.min(0.95, EMBED_DEPTH / thrown.tipOffset);
+  if (speed >= MIN_EMBED_SPEED && incidence >= minIncidence) {
+    embedJavelin(world, thrown, hit, normal, direction);
+    return;
+  }
+  clatter(world, physics, scene, thrown, hit.point);
+  const body = PhysicsBody[thrown.itemEid];
+  if (body) {
+    const reflected = reflectBounceVelocity(thrown.velocity, normal);
+    body.setLinvel({ x: reflected.x, y: reflected.y, z: reflected.z }, true);
+  }
+}
+
+/**
+ * Resolves a raycast hit into whichever of three outcomes actually applies:
+ * a living, `Health`-bearing target takes damage (bypassing melee blocking
+ * entirely, the same as a fired bolt) and then embeds or clatters
+ * (`embedOrClatter`); a genuinely dynamic prop (`DynamicBody` -- a barrel, a
+ * dropped item, never a kinematic character, which is immune to being
+ * physically shoved -- see physics/world.ts's own header comment on why)
+ * gets a real impulse applied to *its own* physics body at the actual impact
+ * point (`applyImpulseAtPoint`, which imparts some spin/tip along with the
+ * push for an off-center hit) and the javelin itself just clatters nearby,
+ * rather than trying to embed in something that might now be tumbling; raw
+ * level geometry (a wall/floor, no owning entity at all) always goes through
+ * `embedOrClatter` too.
+ */
+function resolveHit(world: World, physics: Physics, scene: THREE.Scene, thrown: FlyingThrown, hit: THREE.Intersection): void {
+  const direction = thrown.velocity.clone().normalize();
+  const normal = worldSurfaceNormal(hit);
+  const targetEid = owningEid(hit.object);
+
+  if (targetEid !== undefined && hasComponent(world, targetEid, Health) && !hasComponent(world, targetEid, Dead)) {
+    const part = getBodyPartAt(targetEid, hit.point.y);
+    const damage = part ? thrown.damage * BODY_PART_DAMAGE_MULTIPLIER[part] : thrown.damage;
+    applyRangedDamage(world, targetEid, damage, thrown.attackerEid, part);
+    embedOrClatter(world, physics, scene, thrown, hit, normal, direction);
+    return;
+  }
+
+  if (targetEid !== undefined && hasComponent(world, targetEid, DynamicBody)) {
+    const body = PhysicsBody[targetEid];
+    if (body) {
+      const mass = ITEM_REGISTRY[Item.itemTypeId[thrown.itemEid]]?.mass ?? 1;
+      const impulseMag = mass * thrown.velocity.length() * PROP_IMPULSE_FRACTION;
+      const impulse = direction.clone().multiplyScalar(impulseMag);
+      body.applyImpulseAtPoint({ x: impulse.x, y: impulse.y, z: impulse.z }, { x: hit.point.x, y: hit.point.y, z: hit.point.z }, true);
+    }
+    clatter(world, physics, scene, thrown, hit.point);
+    return;
+  }
+
+  embedOrClatter(world, physics, scene, thrown, hit, normal, direction);
+}
+
+/** Advances every javelin currently in flight -- the same manual swept-
+ * raycast approach `rangedCombat.ts`'s flying bolts use (see this file's
+ * header comment for why), so it can stick wherever it lands
+ * (`embedJavelin`) or clatter (`embedOrClatter`/`resolveHit`'s prop branch)
+ * once it hits something or runs out of range. */
+export function throwingCombatSystem(world: World, physics: Physics, scene: THREE.Scene, dt: number): void {
+  for (let i = flyingThrown.length - 1; i >= 0; i--) {
+    const thrown = flyingThrown[i];
+    const previous = thrown.position.clone();
+    thrown.velocity.y -= THROW_GRAVITY * dt;
+    const step = thrown.velocity.clone().multiplyScalar(dt);
+    const stepLength = step.length();
+    const direction = step.clone().normalize();
+    raycaster.set(previous, direction);
+    raycaster.far = stepLength;
+    const hit = raycaster.intersectObjects(scene.children, true).find((candidate) => {
+      for (let current: THREE.Object3D | null = candidate.object; current; current = current.parent) {
+        if (current === thrown.mesh || current instanceof THREE.Camera) return false;
+      }
+      return candidate.object.visible;
+    });
+    if (hit) {
+      resolveHit(world, physics, scene, thrown, hit);
+      flyingThrown.splice(i, 1);
       continue;
     }
-    const struck = findStruckCharacter(world, thrown, body, thrown.attackerEid);
-    if (struck) {
-      const damage = thrown.damage * BODY_PART_DAMAGE_MULTIPLIER[struck.part];
-      applyRangedDamage(world, struck.eid, damage, thrown.attackerEid, struck.part);
-      const v = body.linvel();
-      body.setLinvel({ x: v.x * IMPACT_VELOCITY_DAMPING, y: v.y * IMPACT_VELOCITY_DAMPING, z: v.z * IMPACT_VELOCITY_DAMPING }, true);
-      liveThrows.splice(i, 1);
-      continue;
+    thrown.position.add(step);
+    thrown.distance += stepLength;
+    thrown.mesh.position.copy(thrown.position);
+    thrown.mesh.quaternion.setFromUnitVectors(new THREE.Vector3(0, 0, 1), thrown.velocity.clone().normalize());
+    if (thrown.distance >= thrown.maxRange) {
+      clatter(world, physics, scene, thrown, thrown.position);
+      flyingThrown.splice(i, 1);
     }
-    if (thrown.elapsed >= thrown.timeout) liveThrows.splice(i, 1);
   }
 }
 
 export function getThrowingCombatDebugState(): { flying: number } {
-  return { flying: liveThrows.length };
+  return { flying: flyingThrown.length };
 }

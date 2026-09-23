@@ -954,7 +954,7 @@ export function startGame(container: HTMLElement, options: StartGameOptions = {}
     viewmodelSwingSystem(dt);
     if (!isModalActive()) {
       rangedCombatSystem(world, physics, scene, dt);
-      throwingCombatSystem(world, dt);
+      throwingCombatSystem(world, physics, scene, dt);
       // meleeCollisionSystem only resolves *which* swings connected (real
       // Rapier sensor-cylinder geometry, replacing the old raycast-vs-distance
       // split between the player and NPCs) -- applying the actual damage

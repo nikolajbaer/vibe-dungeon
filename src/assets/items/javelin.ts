@@ -100,18 +100,19 @@ const javelin: ItemAssetDef = {
   mass: 1.6,
   // Thrown through the shared jab-or-charge-and-release input (see this
   // field's own doc comment in assets/types.ts) rather than a dedicated
-  // aim-and-fire button -- a real flying rigid body once released
-  // (`ecs/systems/throwingCombat.ts`), same as a fired crossbow bolt but
-  // slower (crossbow.ts's own bolt: `projectileSpeed: 34`) and heavier-arcing.
-  // Damage is high enough to drop a fully-guarded "guard" NPC (45 HP,
-  // ecs/systems/combat.ts's BLOCK_MITIGATION.oneHanded) in one hit at close
-  // range, since a thrown hit -- like a bolt -- bypasses melee blocking
-  // entirely (`applyRangedDamage`). `maxRange` here isn't a hard flight-
-  // distance cutoff the way it is for a bolt -- real physics decides how far
-  // it actually flies -- it's how long (at `projectileSpeed`) the throw stays
-  // eligible to land a fresh hit before `throwingCombatSystem` gives up
-  // tracking it and lets it simply be a landed, recoverable item.
-  throwable: { damage: 55, projectileSpeed: 24, maxRange: 18 },
+  // aim-and-fire button -- a hand-simulated flight, same shape as a fired
+  // crossbow bolt (a raycast swept along a manually-integrated gravity arc --
+  // see `ecs/systems/throwingCombat.ts`), just noticeably slower
+  // (crossbow.ts's own bolt: `projectileSpeed: 34`), reading as a heavier,
+  // lobbed throw rather than a flat, fast shot. Damage is high enough to
+  // drop a fully-guarded "guard" NPC (45 HP, ecs/systems/combat.ts's
+  // BLOCK_MITIGATION.oneHanded) in one hit at close range, since a thrown
+  // hit -- like a bolt -- bypasses melee blocking entirely
+  // (`applyRangedDamage`). `maxRange` is a hard flight-distance cutoff, same
+  // meaning as a bolt's own: past this many meters (regardless of how long
+  // that takes at this weapon's own `projectileSpeed`) it lands wherever it
+  // is instead of continuing to fly.
+  throwable: { damage: 55, projectileSpeed: 12, maxRange: 18 },
   createWorldMesh: createJavelinMesh,
   createViewmodelMesh: () => {
     const mesh = createJavelinMesh();
