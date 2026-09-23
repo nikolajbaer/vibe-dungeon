@@ -7,9 +7,10 @@ try {
   const {Carried,CharacterBody,Combat,Dead,Health,Item,NPC,NpcState,PhysicsBody,PlayerControlled,Position,Rotation,Stamina,Velocity}=await server.ssrLoadModule('/src/ecs/components.ts');
   const {initPhysics,createPhysics,addCharacter,addCombatHitboxes,queryCombatHitboxes}=await server.ssrLoadModule('/src/physics/world.ts');
   const {registerMeleeSwing,meleeCollisionSystem,getCombatHitboxColliders}=await server.ssrLoadModule('/src/ecs/systems/meleeCollision.ts');
-  const {ATTACK_STAMINA_COST,applyMeleeDamage,cancelSwingCharge,releaseSwingCharge,setBlocking,tryMeleeAttack,tryStartSwingCharge}=await server.ssrLoadModule('/src/ecs/systems/combat.ts');
+  const {ATTACK_PROFILES,ATTACK_STAMINA_COST,applyMeleeDamage,cancelSwingCharge,releaseSwingCharge,setBlocking,tryMeleeAttack,tryStartSwingCharge}=await server.ssrLoadModule('/src/ecs/systems/combat.ts');
   const {npcSystem}=await server.ssrLoadModule('/src/ecs/systems/npc.ts');
   const {default:bandit}=await server.ssrLoadModule('/src/assets/npcs/bandit.ts');
+  const {default:greatsword}=await server.ssrLoadModule('/src/assets/items/greatsword.ts');
 
   await initPhysics();
   const physics=createPhysics();
@@ -173,15 +174,15 @@ try {
   // requested attack type -- a jab's extended reach connects at a distance
   // the charged swing's shorter one can't.
   {
-    const setupPlayer=(attackType,distance)=>{
+    const setupPlayer=(attackType,distance,weaponId='sword')=>{
       const bx=nextBlock();
       const player=spawnCombatant(bx,{dz:0});
       addComponent(world,player,PlayerControlled);addComponent(world,player,Combat);addComponent(world,player,Stamina);
       Combat.attackRecovery[player]=0;Combat.blocking[player]=0;Combat.agility[player]=0;
       Stamina.max[player]=100;Stamina.current[player]=100;
-      const sword=addEntity(world);
-      addComponent(world,sword,Item);addComponent(world,sword,Carried);
-      Item.itemTypeId[sword]='sword';Carried.ownerEid[sword]=player;Carried.slot[sword]='hand-right';
+      const weapon=addEntity(world);
+      addComponent(world,weapon,Item);addComponent(world,weapon,Carried);
+      Item.itemTypeId[weapon]=weaponId;Carried.ownerEid[weapon]=player;Carried.slot[weapon]='hand-right';
       spawnCombatant(bx,{dz:-distance});
       warmUp();
       const fired=tryMeleeAttack(world,attackType);
@@ -202,6 +203,22 @@ try {
     // (surface at 1.35m) sits inside jab's reach but outside the swing's.
     assert.equal(setupPlayer('jab',1.7).length,1,'a jab\'s extended reach connects at 1.7m');
     assert.equal(setupPlayer('swing',1.7).length,0,'the charged swing\'s shorter reach misses the same 1.7m target');
+
+    // The greatsword's swing.reach multiplier (1.25x) is meant to connect
+    // at distances a one-handed sword's identical-.85x-multiplier swing
+    // can't reach at all -- same 1.7m distance the sword's swing just
+    // missed above, same weapon-flat 1.4m meleeReach (the greatsword
+    // declares no flat reach bonus of its own -- see greatsword.ts's own
+    // doc comment -- only this per-attack-type multiplier), but its own
+    // 1.25x reach multiplier (1.4*.85*1.25 = 1.4875m, versus the surface
+    // distance's 1.35m) closes the gap the sword's 1.19m couldn't.
+    const greatswordHits=setupPlayer('swing',1.7,'greatsword');
+    assert.equal(greatswordHits.length,1,'the greatsword\'s longer swing reach connects at the same 1.7m the sword\'s swing missed');
+    // 15 flat damage * swing's shared 1.35x * the greatsword's own 1.5x
+    // swing-only damage multiplier = 30.375, rounded once as tryMeleeAttack
+    // itself always does before this ever reaches registerMeleeSwing.
+    const expectedGreatswordSwingDamage=Math.round(greatsword.meleeDamage*ATTACK_PROFILES.swing.damageMultiplier*greatsword.attackMultipliers.swing.damage);
+    assert.equal(greatswordHits[0].damage,expectedGreatswordSwingDamage,'the greatsword\'s swing damage multiplier is applied on top of the shared swing multiplier');
   }
 
   // tryMeleeAttack refuses outright -- same as being on cooldown -- without

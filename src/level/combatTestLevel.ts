@@ -169,11 +169,12 @@ export function buildCombatTestLevel(world: World, physics: Physics, scene: THRE
     addBox(physics, scene, new THREE.Vector3(0.12, 0.72, 0.12), new THREE.Vector3(x, 0.36, -12.25), wood);
   }
   spawnItems(world, physics, scene, [
-    { id: "dagger", x: -1.8, y: 1.05, z: -12.5 },
-    { id: "sword", x: -0.9, y: 1.05, z: -12.5 },
-    { id: "wooden_sword", x: 0, y: 1.05, z: -12.5 },
-    { id: "crossbow", x: 0.9, y: 1.05, z: -12.5 },
-    { id: "quarterstaff", x: 1.8, y: 1.05, z: -12.5 },
+    { id: "dagger", x: -2.0, y: 1.05, z: -12.5 },
+    { id: "sword", x: -1.2, y: 1.05, z: -12.5 },
+    { id: "wooden_sword", x: -0.4, y: 1.05, z: -12.5 },
+    { id: "crossbow", x: 0.4, y: 1.05, z: -12.5 },
+    { id: "quarterstaff", x: 1.2, y: 1.05, z: -12.5 },
+    { id: "greatsword", x: 2.0, y: 1.05, z: -12.5 },
   ]);
 
   // The projectile barrel currently contains every projectile commodity in

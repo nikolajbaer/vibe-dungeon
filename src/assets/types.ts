@@ -34,6 +34,24 @@ export interface ContainerSpec {
   capacity: number;
 }
 
+/** One attack type's multipliers on a weapon's own `meleeDamage`/
+ * `meleeReach` and on `ecs/systems/combat.ts`'s shared per-attack-type
+ * tables -- see `ItemAssetDef.attackMultipliers`'s own doc comment for how
+ * these compose and when a weapon needs this instead of a single flat
+ * `meleeDamage`/`meleeReach`. */
+export interface AttackTypeMultipliers {
+  /** Multiplies this weapon's own `meleeDamage`, on top of the shared
+   * `ATTACK_PROFILES[type].damageMultiplier` every weapon already gets. */
+  damage?: number;
+  /** Multiplies this weapon's own `meleeReach`, on top of the shared
+   * `ATTACK_SHAPES[type].reachMultiplier`. */
+  reach?: number;
+  /** Multiplies the shared `ATTACK_PROFILES[type].recovery`. */
+  recovery?: number;
+  /** Multiplies the shared `ATTACK_STAMINA_COST[type]`. */
+  stamina?: number;
+}
+
 /**
  * One item asset — a weapon, potion, or curio. `id`/`name`/`icon`/`slot`/
  * `meleeDamage` are exactly the old `ItemType` record's fields (same names,
@@ -65,19 +83,20 @@ export interface ItemAssetDef {
    * `UNARMED_REACH` in combat.ts, the same pattern `meleeDamage` already
    * uses for damage. */
   meleeReach?: number;
-  /** Multiplies both attack types' shared recovery time (`ATTACK_PROFILES`
-   * in `ecs/systems/combat.ts`) while this weapon is equipped. `undefined`
-   * means 1 (no change) — every existing weapon's implicit default. A
-   * weapon that trades power for reach (the quarterstaff) sets this above
-   * 1: slower to recover between swings than a sword, on top of already
-   * dealing less `meleeDamage`. */
-  attackRecoveryMultiplier?: number;
-  /** Multiplies both attack types' shared stamina cost (`ATTACK_STAMINA_COST`
-   * in `ecs/systems/combat.ts`) while this weapon is equipped. Same
-   * `undefined` = 1 default as `attackRecoveryMultiplier`, and the same
-   * reach-for-power tradeoff it's meant for: heavier/longer weapons cost
-   * more stamina to swing at all. */
-  attackStaminaMultiplier?: number;
+  /** Per-attack-type multipliers layered on top of `meleeDamage`/`meleeReach`
+   * above and `ecs/systems/combat.ts`'s shared `ATTACK_PROFILES` (damage/
+   * recovery) and `ATTACK_STAMINA_COST` tables -- for a weapon whose jab and
+   * swing aren't just a flat scale of each other. Any field left unset (or
+   * the whole `jab`/`swing` entry, or `attackMultipliers` itself) means 1,
+   * no change from the shared baseline -- every weapon's implicit default
+   * until it opts in. A reach weapon that's uniformly slower/costlier
+   * regardless of attack type (the quarterstaff) sets the same
+   * `recovery`/`stamina` values under both `jab` and `swing`; a weapon whose
+   * two attacks are meant to feel different (the greatsword: a stab barely
+   * harder-hitting than a one-handed sword's, a swing that hits much
+   * harder and reaches further, both slower/costlier than a one-handed
+   * sword either way) sets different values under each. */
+  attackMultipliers?: Partial<Record<"jab" | "swing", AttackTypeMultipliers>>;
   /** Optional ranged-weapon tuning. Ammo is another stackable item type;
    * firing consumes one unit and the weapon cannot fire again until reload. */
   rangedWeapon?: {

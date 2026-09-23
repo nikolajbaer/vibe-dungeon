@@ -7,6 +7,7 @@ import { triggerDeathCollapse, triggerHitReaction, triggerParry } from "./npcAni
 import { flashCharacterHit, flashWeaponHit } from "./hitboxDebug";
 import { isHostileTo, registerMeleeSwing } from "./meleeCollision";
 import type { CombatBodyPart } from "../../physics/world";
+import type { AttackTypeMultipliers, ItemAssetDef } from "../../assets/types";
 
 /** Two actions, Skyrim-style: `jab` is a quick, weak, instant tap; `swing`
  * is a held power attack -- press to start winding up (see
@@ -132,11 +133,10 @@ interface EquippedWeapon {
   damage: number;
   reach: number;
   weaponClass: WeaponClass;
-  /** `ItemAssetDef.attackRecoveryMultiplier`/`attackStaminaMultiplier`, or 1
-   * when the weapon doesn't declare one -- see those fields' own doc
-   * comments (types.ts). */
-  recoveryMultiplier: number;
-  staminaMultiplier: number;
+  /** `ItemAssetDef.attackMultipliers`, verbatim (`undefined` when the
+   * weapon doesn't declare any) -- see `multiplierFor` below for how a
+   * specific field is read out of this per attack type, defaulting to 1. */
+  attackMultipliers: ItemAssetDef["attackMultipliers"];
 }
 
 function getEquippedWeapon(world: World, attackerEid: number): EquippedWeapon | undefined {
@@ -150,12 +150,20 @@ function getEquippedWeapon(world: World, attackerEid: number): EquippedWeapon | 
       damage: def.meleeDamage,
       reach: def.meleeReach ?? UNARMED_REACH,
       weaponClass: def.twoHanded ? "twoHanded" : def.id === "dagger" ? "dagger" : "oneHanded",
-      recoveryMultiplier: def.attackRecoveryMultiplier ?? 1,
-      staminaMultiplier: def.attackStaminaMultiplier ?? 1,
+      attackMultipliers: def.attackMultipliers,
     };
     if (!best || candidate.damage > best.damage) best = candidate;
   }
   return best;
+}
+
+/** Reads one `AttackTypeMultipliers` field for `attackType` off `weapon`,
+ * defaulting to 1 (no change) when the weapon has no `attackMultipliers`
+ * at all, no entry for this attack type, or leaves this specific field
+ * unset -- see that field's own doc comment (types.ts) for the full
+ * default-stacking story. */
+function multiplierFor(weapon: EquippedWeapon | undefined, attackType: AttackType, key: keyof AttackTypeMultipliers): number {
+  return weapon?.attackMultipliers?.[attackType]?.[key] ?? 1;
 }
 
 /** What `eid` effectively fights/defends with -- a real carried weapon item
@@ -348,18 +356,18 @@ export function tryMeleeAttack(world: World, attackType: AttackType = "jab"): bo
   const [attackerEid] = query(world, [PlayerControlled, Combat]);
   if (attackerEid === undefined || Combat.attackRecovery[attackerEid] > 0 || Combat.blocking[attackerEid] > 0) return false;
   const weapon = getEquippedWeapon(world, attackerEid);
-  const cost = ATTACK_STAMINA_COST[attackType] * (weapon?.staminaMultiplier ?? 1);
+  const cost = ATTACK_STAMINA_COST[attackType] * multiplierFor(weapon, attackType, "stamina");
   if (hasComponent(world, attackerEid, Stamina) && Stamina.current[attackerEid] < cost) return false;
 
   const profile = ATTACK_PROFILES[attackType];
   const shape = ATTACK_SHAPES[attackType];
-  const recovery = profile.recovery * (weapon?.recoveryMultiplier ?? 1);
+  const recovery = profile.recovery * multiplierFor(weapon, attackType, "recovery");
   Combat.attackRecovery[attackerEid] = recovery;
   if (hasComponent(world, attackerEid, Stamina)) Stamina.current[attackerEid] -= cost;
   if (weapon) triggerViewmodelSwing(weapon.itemEid, attackType, recovery);
 
-  const reach = (weapon?.reach ?? UNARMED_REACH) * shape.reachMultiplier;
-  const damage = Math.round((weapon?.damage ?? UNARMED_DAMAGE) * profile.damageMultiplier);
+  const reach = (weapon?.reach ?? UNARMED_REACH) * shape.reachMultiplier * multiplierFor(weapon, attackType, "reach");
+  const damage = Math.round((weapon?.damage ?? UNARMED_DAMAGE) * profile.damageMultiplier * multiplierFor(weapon, attackType, "damage"));
   // The player has no body mesh at all (`Object3DRef` is the camera --
   // see game.ts), so `Rotation.yaw` here means exactly what inputSystem's
   // own forward vector means: local -Z at yaw 0 (see registerMeleeSwing's
@@ -384,7 +392,7 @@ export function tryStartSwingCharge(world: World): boolean {
   const [attackerEid] = query(world, [PlayerControlled, Combat]);
   if (attackerEid === undefined || Combat.attackRecovery[attackerEid] > 0 || Combat.blocking[attackerEid] > 0 || Combat.charging[attackerEid] > 0) return false;
   const weapon = getEquippedWeapon(world, attackerEid);
-  const cost = ATTACK_STAMINA_COST.swing * (weapon?.staminaMultiplier ?? 1);
+  const cost = ATTACK_STAMINA_COST.swing * multiplierFor(weapon, "swing", "stamina");
   if (hasComponent(world, attackerEid, Stamina) && Stamina.current[attackerEid] < cost) return false;
   Combat.charging[attackerEid] = 1;
   if (weapon) startViewmodelCharge(weapon.itemEid);
