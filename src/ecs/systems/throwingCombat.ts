@@ -4,7 +4,8 @@ import { Carried, Combat, Dead, DynamicBody, Embedded, Health, Item, Object3DRef
 import { ITEM_REGISTRY } from "../../assets/itemRegistry";
 import type { ItemAssetDef } from "../../assets/types";
 import { releaseViewmodelThrow, startViewmodelThrowCharge } from "./items";
-import { ATTACK_PROFILES, ATTACK_STAMINA_COST, applyRangedDamage, getEquippedWeapon } from "./combat";
+import { ATTACK_PROFILES, ATTACK_STAMINA_COST, applyRangedDamage, getEquippedWeaponInHand, handCombatFields, mainHand } from "./combat";
+import type { HandSlot } from "./items";
 import { BODY_PART_DAMAGE_MULTIPLIER, getBodyPartAt } from "./meleeCollision";
 import { reflectBounceVelocity } from "./rangedCombat";
 import { buildItemWorldBody, dropCarriedItem } from "../../level/spawning";
@@ -39,22 +40,26 @@ interface EquippedThrowable {
   def: ItemAssetDef & { throwable: NonNullable<ItemAssetDef["throwable"]> };
 }
 
-function getEquippedThrowable(world: World, ownerEid: number): EquippedThrowable | undefined {
-  const weapon = getEquippedWeapon(world, ownerEid);
+function getEquippedThrowable(world: World, ownerEid: number, hand: HandSlot): EquippedThrowable | undefined {
+  const weapon = getEquippedWeaponInHand(world, ownerEid, hand);
   if (!weapon) return undefined;
   const def = ITEM_REGISTRY[Item.itemTypeId[weapon.itemEid]];
   if (!def?.throwable) return undefined;
   return { itemEid: weapon.itemEid, def: def as EquippedThrowable["def"] };
 }
 
-/** True if the player's currently-equipped weapon (the same one
- * `tryMeleeAttack`/jab would use) is a throwable one -- lets game.ts decide,
- * at press time, whether a held charge should raise the throwing-ready pose
- * (`tryStartThrowCharge` below) instead of the melee swing chamber
- * (`combat.ts`'s `tryStartSwingCharge`), the same way it already decides
- * melee-vs-ranged via `getEquippedRangedWeapon`. */
-export function isEquippedWeaponThrowable(world: World, ownerEid: number): boolean {
-  return getEquippedThrowable(world, ownerEid) !== undefined;
+/** True if `hand`'s currently-equipped weapon (the same one
+ * `tryMeleeAttack`/jab would use for that hand) is a throwable one -- lets
+ * game.ts decide, at press time, whether a held charge for that hand should
+ * raise the throwing-ready pose (`tryStartThrowCharge` below) instead of the
+ * melee swing chamber (`combat.ts`'s `tryStartSwingCharge`), the same way it
+ * already decides melee-vs-ranged via `getEquippedRangedWeapon`. `hand` left
+ * unset resolves via `combat.ts`'s `mainHand` -- see `tryMeleeAttack`'s own
+ * doc comment there for what that means (a lone javelin, like any other lone
+ * weapon, commonly lands in `hand-left` -- `items.ts`'s `findOpenHandSlot`
+ * fills left before right -- so this can't just default to `"hand-right"`). */
+export function isEquippedWeaponThrowable(world: World, ownerEid: number, hand?: HandSlot): boolean {
+  return getEquippedThrowable(world, ownerEid, hand ?? mainHand(world, ownerEid)) !== undefined;
 }
 
 /**
@@ -62,20 +67,26 @@ export function isEquippedWeaponThrowable(world: World, ownerEid: number): boole
  * `tryStartSwingCharge`, refusing under the same conditions (cooldown,
  * blocking, already charging, not enough stamina for the shared `swing`
  * cost -- a javelin doesn't declare its own `attackMultipliers`, so no
- * per-weapon multiplier lookup is needed here). Raises the weapon into its
- * throwing-ready pose (`items.ts`'s `startViewmodelThrowCharge`) and leaves
- * it there until `tryThrowWeapon` (release) or `combat.ts`'s
- * `cancelSwingCharge` (which is charge-type-agnostic -- see its own doc
- * comment) drops it.
+ * per-weapon multiplier lookup is needed here), all checked for `hand`
+ * specifically (`combat.ts`'s `handCombatFields`) so a dual-wielded javelin
+ * in either hand can be charged independently of whatever the other hand is
+ * doing. Raises the weapon into its throwing-ready pose (`items.ts`'s
+ * `startViewmodelThrowCharge`) and leaves it there until `tryThrowWeapon`
+ * (release) or `combat.ts`'s `cancelSwingCharge` (which is charge-type-
+ * agnostic -- see its own doc comment) drops it. `hand` left unset resolves
+ * via `mainHand`, same as `isEquippedWeaponThrowable` above.
  */
-export function tryStartThrowCharge(world: World): boolean {
+export function tryStartThrowCharge(world: World, hand?: HandSlot): boolean {
   const [attackerEid] = query(world, [PlayerControlled, Combat]);
-  if (attackerEid === undefined || Combat.attackRecovery[attackerEid] > 0 || Combat.blocking[attackerEid] > 0 || Combat.charging[attackerEid] > 0) return false;
-  const throwable = getEquippedThrowable(world, attackerEid);
+  if (attackerEid === undefined) return false;
+  const resolvedHand = hand ?? mainHand(world, attackerEid);
+  const { recovery: recoveryField, charging: chargingField } = handCombatFields(world, attackerEid, resolvedHand);
+  if (recoveryField[attackerEid] > 0 || Combat.blocking[attackerEid] > 0 || chargingField[attackerEid] > 0) return false;
+  const throwable = getEquippedThrowable(world, attackerEid, resolvedHand);
   if (!throwable) return false;
   const cost = ATTACK_STAMINA_COST.swing;
   if (hasComponent(world, attackerEid, Stamina) && Stamina.current[attackerEid] < cost) return false;
-  Combat.charging[attackerEid] = 1;
+  chargingField[attackerEid] = 1;
   startViewmodelThrowCharge(throwable.itemEid);
   return true;
 }
@@ -189,17 +200,23 @@ function embeddedOrigin(hitPoint: THREE.Vector3, normal: THREE.Vector3, directio
  * `buildItemWorldBody`/`pickUpItem`) rather than spawning a fresh one --
  * building one on the spot only for the rare case where it doesn't exist yet
  * (a javelin seeded straight into `Carried` with no in-world history, e.g.
- * NPC/container starting loot).
+ * NPC/container starting loot). `hand` left unset resolves via `mainHand`
+ * (same as `tryStartThrowCharge`, and for the same reason) and picks which
+ * literal hand's charge this releases and which hand's own recovery timer
+ * gets set -- see `tryMeleeAttack`'s own doc comment (combat.ts) for why.
  */
-export function tryThrowWeapon(world: World, physics: Physics, camera: THREE.Camera, scene: THREE.Scene): boolean {
+export function tryThrowWeapon(world: World, physics: Physics, camera: THREE.Camera, scene: THREE.Scene, hand?: HandSlot): boolean {
   const [attackerEid] = query(world, [PlayerControlled, Combat]);
-  if (attackerEid === undefined || !(Combat.charging[attackerEid] > 0)) return false;
-  Combat.charging[attackerEid] = 0;
-  const throwable = getEquippedThrowable(world, attackerEid);
+  if (attackerEid === undefined) return false;
+  const resolvedHand = hand ?? mainHand(world, attackerEid);
+  const { recovery: recoveryField, charging: chargingField } = handCombatFields(world, attackerEid, resolvedHand);
+  if (!(chargingField[attackerEid] > 0)) return false;
+  chargingField[attackerEid] = 0;
+  const throwable = getEquippedThrowable(world, attackerEid, resolvedHand);
   if (!throwable) return false;
 
   const cost = ATTACK_STAMINA_COST.swing;
-  Combat.attackRecovery[attackerEid] = ATTACK_PROFILES.swing.recovery;
+  recoveryField[attackerEid] = ATTACK_PROFILES.swing.recovery;
   if (hasComponent(world, attackerEid, Stamina)) Stamina.current[attackerEid] -= cost;
 
   const itemEid = throwable.itemEid;

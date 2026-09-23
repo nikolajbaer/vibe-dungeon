@@ -384,6 +384,7 @@ export function spawnNpcs(world: World, physics: Physics, scene: THREE.Scene, sp
     Health.current[eid] = archetype.health;
     Health.max[eid] = archetype.health;
     Combat.attackRecovery[eid] = 0;
+    Combat.attackRecoveryOffhand[eid] = 0; // never actually used by an NPC (hand-aware attacks are player-only), just kept out of NaN by combatSystem's blanket per-Combat-entity decrement
     Combat.blocking[eid] = 0;
     Combat.agility[eid] = archetype.agility ?? 0;
     Stamina.max[eid] = archetype.maxStamina ?? DEFAULT_NPC_MAX_STAMINA;

@@ -244,6 +244,11 @@ export const CarryCapacity = {
  * for an NPC, its archetype's `weaponClass`) at the moment a hit resolves --
  * see `combat.ts`'s `weaponClassFor`/`BLOCK_MITIGATION`. */
 export const Combat = {
+  /** Left-hand (or the only hand, unarmed/single-wielding -- see combat.ts's
+   * `mainHand` for why it's the left hand rather than the right) attack
+   * recovery -- see `attackRecoveryOffhand` below for why dual-wielding
+   * needs a second, independent one of these rather than sharing this one
+   * field. */
   attackRecovery: [] as number[],
   blocking: [] as number[],
   /** Reactive NPC block chance per incoming melee hit (0..1) -- an NPC has
@@ -255,6 +260,16 @@ export const Combat = {
    * this; an NPC's own generic swing (npc.ts) fires instantly, with no
    * charge phase of its own. */
   charging: [] as number[],
+  /** The right hand's own `attackRecovery`/`charging`, used only once
+   * dual-wielding actually puts a second weapon in play -- see
+   * `combat.ts`'s hand-aware `tryMeleeAttack`/`tryStartSwingCharge`/
+   * `releaseSwingCharge`. Kept as two separate named fields rather than a
+   * single hand-indexed one (bitECS's SoA arrays are plain per-eid columns,
+   * not naturally 2D) so each hand can wind up and recover independently;
+   * `blocking` above stays a single shared flag either hand's attack still
+   * checks -- raising a guard is a whole-body action, not a per-hand one. */
+  attackRecoveryOffhand: [] as number[],
+  chargingOffhand: [] as number[],
 };
 
 /** Per-entity stamina pool (RPG-groundwork: a real per-character stat block

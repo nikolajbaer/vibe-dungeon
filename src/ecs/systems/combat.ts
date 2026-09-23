@@ -2,7 +2,7 @@ import { addComponent, hasComponent, query, type World } from "bitecs";
 import { Carried, Combat, Dead, Health, Item, NPC, NpcState, PhysicsCollider, PlayerControlled, Practice, Rotation, Stamina } from "../components";
 import { ITEM_REGISTRY } from "../../assets/itemRegistry";
 import { NPC_REGISTRY } from "../../assets/npcRegistry";
-import { cancelViewmodelCharge, isHandSlot, startViewmodelBlock, startViewmodelCharge, stopViewmodelBlock, triggerViewmodelSwing } from "./items";
+import { cancelViewmodelCharge, startViewmodelBlock, startViewmodelCharge, stopViewmodelBlock, triggerViewmodelSwing, type HandSlot } from "./items";
 import { triggerDeathCollapse, triggerHitReaction, triggerParry } from "./npcAnimation";
 import { flashCharacterHit, flashWeaponHit } from "./hitboxDebug";
 import { isHostileTo, registerMeleeSwing } from "./meleeCollision";
@@ -143,26 +143,97 @@ interface EquippedWeapon {
   attackMultipliers: ItemAssetDef["attackMultipliers"];
 }
 
-/** Exported for `throwingCombat.ts` (the javelin's charge/throw needs to
- * know which equipped item -- if any -- is the throwable one, using the
- * exact same "best of everything in a hand slot" pick jab/swing already
- * resolve through) as well as internal use here. */
-export function getEquippedWeapon(world: World, attackerEid: number): EquippedWeapon | undefined {
-  let best: EquippedWeapon | undefined;
+/** The weapon (if any) literally sitting in `hand` -- unlike `getEquippedWeapon`
+ * below, this never looks at the other hand, which is what lets a
+ * dual-wielding player's two hands attack independently (`tryMeleeAttack`
+ * and friends, below) instead of always resolving to whichever one hits
+ * harder. A two-handed item (`ItemAssetDef.twoHanded`) only ever occupies
+ * the one literal slot `items.ts`'s `equipItem` put it in -- the *other*
+ * hand simply has nothing here, falling back to an unarmed attack of its
+ * own, rather than this also finding the two-handed weapon a second time
+ * and letting it be swung twice as often by alternating hands. */
+export function getEquippedWeaponInHand(world: World, attackerEid: number, hand: HandSlot): EquippedWeapon | undefined {
   for (const eid of query(world, [Item, Carried])) {
-    if (Carried.ownerEid[eid] !== attackerEid || !isHandSlot(Carried.slot[eid])) continue;
+    if (Carried.ownerEid[eid] !== attackerEid || Carried.slot[eid] !== hand) continue;
     const def = ITEM_REGISTRY[Item.itemTypeId[eid]];
     if (def?.meleeDamage === undefined) continue;
-    const candidate: EquippedWeapon = {
+    return {
       itemEid: eid,
       damage: def.meleeDamage,
       reach: def.meleeReach ?? UNARMED_REACH,
       weaponClass: def.twoHanded ? "twoHanded" : def.id === "dagger" ? "dagger" : "oneHanded",
       attackMultipliers: def.attackMultipliers,
     };
-    if (!best || candidate.damage > best.damage) best = candidate;
   }
-  return best;
+  return undefined;
+}
+
+/** The single best-of-both-hands weapon -- used for whole-body actions that
+ * aren't hand-specific (raising a block guard, an NPC's own `weaponClassFor`
+ * defense roll) and by callers with no reason to care which hand a weapon's
+ * actually in. Exported for `throwingCombat.ts`'s own pre-dual-wield "is
+ * anything throwable equipped" checks. Attacking itself never goes through
+ * this any more -- see `getEquippedWeaponInHand` above. */
+export function getEquippedWeapon(world: World, attackerEid: number): EquippedWeapon | undefined {
+  const left = getEquippedWeaponInHand(world, attackerEid, "hand-left");
+  const right = getEquippedWeaponInHand(world, attackerEid, "hand-right");
+  if (!left) return right;
+  if (!right) return left;
+  return right.damage >= left.damage ? right : left;
+}
+
+/** True once both hands hold a real, independently-attackable weapon --
+ * i.e. actually dual-wielding, not just "happens to have an empty off hand"
+ * or "wielding a two-handed weapon" (which only ever occupies one hand's
+ * literal slot -- see `getEquippedWeaponInHand`). Drives both whether the
+ * off-hand's own attack control (the second touch ATK button/right-click;
+ * see `touchControls.ts` and `game.ts`) is shown at all, and whether it does
+ * anything -- `game.ts` only ever feeds an off-hand press into
+ * `tryMeleeAttack("hand-right")` and friends while this is true, keeping it
+ * inert (rather than a redundant extra way to swing a single weapon) until
+ * there's an actual second one to use it on. */
+export function isDualWielding(world: World, attackerEid: number): boolean {
+  return getEquippedWeaponInHand(world, attackerEid, "hand-left") !== undefined
+    && getEquippedWeaponInHand(world, attackerEid, "hand-right") !== undefined;
+}
+
+/** Which hand the *main* attack input (mouse-left, Digit1/Digit2, the
+ * primary touch ATK button) resolves to, when a caller doesn't pin a
+ * specific hand itself -- every hand-aware attack function below defaults to
+ * this rather than a hardcoded hand. Prefers `hand-left` whenever anything's
+ * there (including genuine dual-wielding, whose off hand -- its own separate
+ * button -- is always `hand-right`), falling back to `hand-right` only when
+ * `hand-left` is genuinely empty but `hand-right` isn't (a lone weapon can
+ * end up in either slot depending on how it got equipped -- `findOpenHandSlot`
+ * fills left first, but nothing stops a test or a future caller from placing
+ * one directly in `hand-right`), or arbitrarily when neither hand has
+ * anything at all -- an unarmed jab doesn't care which "hand" it's nominally
+ * thrown with. Reproduces the pre-dual-wield `getEquippedWeapon`'s
+ * real-world behavior for every case except genuine dual-wielding, which
+ * didn't exist before this function did. */
+export function mainHand(world: World, attackerEid: number): HandSlot {
+  if (getEquippedWeaponInHand(world, attackerEid, "hand-left") !== undefined) return "hand-left";
+  if (getEquippedWeaponInHand(world, attackerEid, "hand-right") !== undefined) return "hand-right";
+  return "hand-left";
+}
+
+/** Picks which hand's `Combat` fields (`attackRecovery`/`charging`) a given
+ * attack reads and writes -- whichever literal hand `mainHand` currently
+ * resolves to (the *role* "main", not a fixed hand identity) uses the
+ * original, un-suffixed fields, so a solo weapon uses those regardless of
+ * which literal slot it actually landed in; the other hand's own
+ * `attackRecoveryOffhand`/`chargingOffhand` only ever come into play once
+ * dual-wielding puts a second, genuinely independent weapon there (see that
+ * field's own doc comment in components.ts for why these are two separate
+ * named fields rather than one hand-indexed one). Resolving by role rather
+ * than a hardcoded hand is what lets a lone weapon in *either* hand share
+ * one recovery clock across both attack buttons, instead of a lone
+ * `hand-right` weapon (say) dodging the main button's own cooldown check by
+ * also being reachable through the off-hand one. */
+export function handCombatFields(world: World, attackerEid: number, hand: HandSlot): { recovery: number[]; charging: number[] } {
+  return hand === mainHand(world, attackerEid)
+    ? { recovery: Combat.attackRecovery, charging: Combat.charging }
+    : { recovery: Combat.attackRecoveryOffhand, charging: Combat.chargingOffhand };
 }
 
 /** Reads one `AttackTypeMultipliers` field for `attackType` off `weapon`,
@@ -216,6 +287,7 @@ function recordFriendlyFire(world: World, targetEid: number, attackerEid?: numbe
 export function combatSystem(world: World, dt: number): void {
   for (const eid of query(world, [Combat])) {
     Combat.attackRecovery[eid] = Math.max(0, Combat.attackRecovery[eid] - dt);
+    Combat.attackRecoveryOffhand[eid] = Math.max(0, Combat.attackRecoveryOffhand[eid] - dt);
     if (hasComponent(world, eid, Stamina)) {
       Stamina.current[eid] = Math.min(Stamina.max[eid], Stamina.current[eid] + STAMINA_REGEN_PER_SECOND * dt);
     }
@@ -233,11 +305,13 @@ export function combatSystem(world: World, dt: number): void {
  * Raising block (the `held && !already blocking` transition) is refused
  * mid-attack-recovery -- the same "can't parry mid-swing" gate the old
  * timed parry had -- or mid-charge (can't raise a shield with both hands
- * committed to winding up a swing; see `tryStartSwingCharge`) -- and raises
- * the weapon into a held guard pose (`startViewmodelBlock`) that stays up
- * for as long as blocking does; releasing it (`!held`) lowers that pose
- * back down (`stopViewmodelBlock`) and always succeeds. Holding it down
- * across frames where it was already up is a no-op, not a repeated trigger.
+ * committed to winding up a swing; see `tryStartSwingCharge`) -- checking
+ * *both* hands' recovery/charge (blocking is a whole-body action, so either
+ * hand still winding up or recovering keeps it down) -- and raises the
+ * weapon into a held guard pose (`startViewmodelBlock`) that stays up for as
+ * long as blocking does; releasing it (`!held`) lowers that pose back down
+ * (`stopViewmodelBlock`) and always succeeds. Holding it down across frames
+ * where it was already up is a no-op, not a repeated trigger.
  */
 export function setBlocking(world: World, eid: number, held: boolean): void {
   if (!hasComponent(world, eid, Combat)) return;
@@ -250,7 +324,8 @@ export function setBlocking(world: World, eid: number, held: boolean): void {
     Combat.blocking[eid] = 0;
     return;
   }
-  if (wasBlocking || Combat.attackRecovery[eid] > 0 || Combat.charging[eid] > 0) return;
+  if (wasBlocking || Combat.attackRecovery[eid] > 0 || Combat.charging[eid] > 0
+      || Combat.attackRecoveryOffhand[eid] > 0 || Combat.chargingOffhand[eid] > 0) return;
   Combat.blocking[eid] = 1;
   const weapon = getEquippedWeapon(world, eid);
   if (weapon) startViewmodelBlock(weapon.itemEid);
@@ -353,6 +428,18 @@ export function applyRangedDamage(world: World, targetEid: number, rawDamage: nu
  * cooldown -- while blocking (can't swing with your guard up) or without
  * enough stamina for this attack type's `ATTACK_STAMINA_COST`.
  *
+ * `hand` picks which literal hand slot's weapon actually swings and which
+ * hand's own recovery timer gates/gets set (`handCombatFields`) -- the two
+ * hands are otherwise completely independent attacks, sharing only the
+ * whole-body `blocking` gate above and the single `Stamina` pool below (per
+ * dual-wielding's own design: both hands draw from the same stamina, but
+ * recover on their own separate clocks). Left unset (the common case --
+ * every caller except `game.ts`'s explicit off-hand input), it resolves via
+ * `mainHand`: `"hand-right"` whenever dual-wielding or anything's equipped
+ * there, falling back to `"hand-left"` for a single weapon that happens to
+ * live there instead (a two-handed weapon, or a lone one-handed one --
+ * `findOpenHandSlot` fills left before right).
+ *
  * `attackType: "swing"` is normally reached through `releaseSwingCharge`
  * below, never called directly -- game.ts's own input handling always goes
  * through the charge/release pair for a real held power attack. Calling it
@@ -360,17 +447,20 @@ export function applyRangedDamage(world: World, targetEid: number, rawDamage: nu
  * shown the held wind-up pose first: `triggerViewmodelSwing` notices there's
  * no charge already in flight for the weapon and plays the whole
  * windup-and-swing motion as one immediate clip instead. */
-export function tryMeleeAttack(world: World, attackType: AttackType = "jab"): boolean {
+export function tryMeleeAttack(world: World, attackType: AttackType = "jab", hand?: HandSlot): boolean {
   const [attackerEid] = query(world, [PlayerControlled, Combat]);
-  if (attackerEid === undefined || Combat.attackRecovery[attackerEid] > 0 || Combat.blocking[attackerEid] > 0) return false;
-  const weapon = getEquippedWeapon(world, attackerEid);
+  if (attackerEid === undefined) return false;
+  const resolvedHand = hand ?? mainHand(world, attackerEid);
+  const { recovery: recoveryField } = handCombatFields(world, attackerEid, resolvedHand);
+  if (recoveryField[attackerEid] > 0 || Combat.blocking[attackerEid] > 0) return false;
+  const weapon = getEquippedWeaponInHand(world, attackerEid, resolvedHand);
   const cost = ATTACK_STAMINA_COST[attackType] * multiplierFor(weapon, attackType, "stamina");
   if (hasComponent(world, attackerEid, Stamina) && Stamina.current[attackerEid] < cost) return false;
 
   const profile = ATTACK_PROFILES[attackType];
   const shape = ATTACK_SHAPES[attackType];
   const recovery = profile.recovery * multiplierFor(weapon, attackType, "recovery");
-  Combat.attackRecovery[attackerEid] = recovery;
+  recoveryField[attackerEid] = recovery;
   if (hasComponent(world, attackerEid, Stamina)) Stamina.current[attackerEid] -= cost;
   if (weapon) triggerViewmodelSwing(weapon.itemEid, attackType, recovery);
 
@@ -388,21 +478,25 @@ export function tryMeleeAttack(world: World, attackType: AttackType = "jab"): bo
 /**
  * Starts charging the held power attack (Skyrim-style: hold to wind up,
  * release to throw it, however long that wind-up ends up being) -- called
- * on press. Raises the equipped weapon into a held windup pose
+ * on press. Raises `hand`'s equipped weapon into a held windup pose
  * (`items.ts`'s `startViewmodelCharge`) and leaves it there indefinitely,
  * doing nothing else, until `releaseSwingCharge` actually throws the swing
  * or `cancelSwingCharge` drops it. Refuses under the same conditions as any
  * other attack -- on cooldown, blocking, not enough stamina for `swing`'s
  * cost -- plus already charging (holding the button/key down across frames
- * is a no-op here, not a repeated attempt).
+ * is a no-op here, not a repeated attempt). `hand` left unset resolves via
+ * `mainHand`; see `tryMeleeAttack`'s own doc comment for what that means.
  */
-export function tryStartSwingCharge(world: World): boolean {
+export function tryStartSwingCharge(world: World, hand?: HandSlot): boolean {
   const [attackerEid] = query(world, [PlayerControlled, Combat]);
-  if (attackerEid === undefined || Combat.attackRecovery[attackerEid] > 0 || Combat.blocking[attackerEid] > 0 || Combat.charging[attackerEid] > 0) return false;
-  const weapon = getEquippedWeapon(world, attackerEid);
+  if (attackerEid === undefined) return false;
+  const resolvedHand = hand ?? mainHand(world, attackerEid);
+  const { recovery: recoveryField, charging: chargingField } = handCombatFields(world, attackerEid, resolvedHand);
+  if (recoveryField[attackerEid] > 0 || Combat.blocking[attackerEid] > 0 || chargingField[attackerEid] > 0) return false;
+  const weapon = getEquippedWeaponInHand(world, attackerEid, resolvedHand);
   const cost = ATTACK_STAMINA_COST.swing * multiplierFor(weapon, "swing", "stamina");
   if (hasComponent(world, attackerEid, Stamina) && Stamina.current[attackerEid] < cost) return false;
-  Combat.charging[attackerEid] = 1;
+  chargingField[attackerEid] = 1;
   if (weapon) startViewmodelCharge(weapon.itemEid);
   return true;
 }
@@ -413,13 +507,21 @@ export function tryStartSwingCharge(world: World): boolean {
  * stamina deduction, the real hit-detection box -- all of it happens here,
  * not at charge-start, in case anything changed while it was held). A
  * stray release with nothing charging (already cancelled, or one that
- * arrives twice) is a harmless no-op.
+ * arrives twice) is a harmless no-op. `hand` left unset resolves via
+ * `mainHand`; see `tryMeleeAttack`'s own doc comment for what that means --
+ * resolved fresh here rather than remembered from `tryStartSwingCharge`, so
+ * this only actually finds a charge in flight if nothing changed hands
+ * in between (re-equipping mid-charge is an accepted edge case, same as
+ * everywhere else in this file).
  */
-export function releaseSwingCharge(world: World): boolean {
+export function releaseSwingCharge(world: World, hand?: HandSlot): boolean {
   const [attackerEid] = query(world, [PlayerControlled, Combat]);
-  if (attackerEid === undefined || !(Combat.charging[attackerEid] > 0)) return false;
-  Combat.charging[attackerEid] = 0;
-  return tryMeleeAttack(world, "swing");
+  if (attackerEid === undefined) return false;
+  const resolvedHand = hand ?? mainHand(world, attackerEid);
+  const { charging: chargingField } = handCombatFields(world, attackerEid, resolvedHand);
+  if (!(chargingField[attackerEid] > 0)) return false;
+  chargingField[attackerEid] = 0;
+  return tryMeleeAttack(world, "swing", resolvedHand);
 }
 
 /**
@@ -427,12 +529,17 @@ export function releaseSwingCharge(world: World): boolean {
  * e.g. a modal (dialogue, death) opening mid-charge (game.ts). No stamina
  * was ever spent to reach this point (that only happens on an actual
  * release), so there's nothing to refund; this just snaps the viewmodel
- * back to its resting pose (`items.ts`'s `cancelViewmodelCharge`).
+ * back to its resting pose (`items.ts`'s `cancelViewmodelCharge`). `hand`
+ * left unset resolves via `mainHand`; see `tryMeleeAttack`'s own doc comment
+ * for what that means.
  */
-export function cancelSwingCharge(world: World): void {
+export function cancelSwingCharge(world: World, hand?: HandSlot): void {
   const [attackerEid] = query(world, [PlayerControlled, Combat]);
-  if (attackerEid === undefined || !(Combat.charging[attackerEid] > 0)) return;
-  Combat.charging[attackerEid] = 0;
-  const weapon = getEquippedWeapon(world, attackerEid);
+  if (attackerEid === undefined) return;
+  const resolvedHand = hand ?? mainHand(world, attackerEid);
+  const { charging: chargingField } = handCombatFields(world, attackerEid, resolvedHand);
+  if (!(chargingField[attackerEid] > 0)) return;
+  chargingField[attackerEid] = 0;
+  const weapon = getEquippedWeaponInHand(world, attackerEid, resolvedHand);
   if (weapon) cancelViewmodelCharge(weapon.itemEid);
 }
