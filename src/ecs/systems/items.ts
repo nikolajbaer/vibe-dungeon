@@ -555,8 +555,8 @@ export interface ViewmodelTuning {
    * branch). */
   chargeRaiseSeconds: number;
   /**
-   * The swing's whole shape is three poses, each declared as [x,y,z]
-   * position and [pitch,yaw,roll] rotation *deltas* from the resting
+   * The swing's whole shape is two poses, each declared as [x,y,z] position
+   * and [pitch,yaw,roll] rotation *deltas* from the resting
    * `VIEWMODEL_OFFSET` pose, for a right-handed hold -- `handSign` in
    * `viewmodelSwingSystem` mirrors position's X and rotation's yaw/roll for
    * a left-handed one (position's Y/Z and rotation's pitch apply
@@ -564,32 +564,42 @@ export interface ViewmodelTuning {
    * this file uses:
    *
    * - `swingChamber*`: the fully wound-up pose, reached gradually over
-   *   `chargeRaiseSeconds` while charging -- crossed over the body toward
-   *   the off-hand side, blade pointing away across the chest, hilt pulled
-   *   in toward screen-center. The release always starts here.
-   * - `swingMid*`, reached at `swingMidT` (0..1) through the release: the
-   *   swing's extended midpoint, blade carried through to point roughly
-   *   straight ahead.
-   * - `swingEnd*`, reached at `swingEndT` (0..1, after `swingMidT`): the
-   *   follow-through's peak, carried on through to the strong-hand side --
-   *   far enough that the weapon's own grip (see `VIEWMODEL_OFFSET`'s doc
-   *   comment) travels off the edge of the screen, not just the blade tip.
+   *   `chargeRaiseSeconds` while charging -- for a right-handed hold, blade
+   *   drawn back across the body toward "9:30 on a clock face" seen from
+   *   directly above (12 = straight ahead, 3 = the wielder's right), tip
+   *   trailing behind on the off-hand side, and raised a little higher than
+   *   resting (a real wind-up lifts before it cuts). The release always
+   *   starts here.
+   * - `swingEnd*`: the cut's full extension, reached at `swingCutEndT`
+   *   (0..1) through the release -- for a right-handed hold, swept
+   *   *clockwise* (seen from above) all the way through "12" to "3", angled
+   *   a little lower than resting (the cut travels downward through the
+   *   swing), mostly rotation with only a small translation, the same way a
+   *   real wrist/arm swing is almost entirely a turn, not a shove. A
+   *   left-handed hold is the exact mirror: chambers to "2:30", releases
+   *   *counter-clockwise* through "12" to "9".
    *
-   * `viewmodelSwingSystem` eases chamber -> mid across `[0, swingMidT]` of
-   * the release, mid -> end across `[swingMidT, swingEndT]`, then eases
-   * end back to the *exact* resting pose across `[swingEndT, 1]` -- so a
-   * dramatic off-screen follow-through still always finishes cleanly at
-   * rest (see this file's header comment on why that matters), the settle
-   * back just isn't one of the three poses above.
+   * Both rotations were derived the same way `VIEWMODEL_OFFSET`'s own were
+   * (pose the mesh, `Object3D.lookAt` the intended direction, read back the
+   * resulting Euler angles, then store the *delta* from resting) rather
+   * than guessed as raw additive numbers -- a compound baked rotation like
+   * this doesn't respond to hand-tuned Euler deltas in any way that lines
+   * up with what you'd see on screen. `viewmodelSwingSystem` eases chamber
+   * straight to end across `[0, swingCutEndT]` of the release in one
+   * continuous motion -- a real cut, not two disjointed arcs stitched at a
+   * midpoint -- then eases end back to the *exact* resting pose across
+   * `[swingCutEndT, 1]` as a separate, distinctly slower recovery (see this
+   * file's header comment on why finishing exactly at rest matters). Both
+   * legs interpolate rotation via quaternion slerp (`lerpPoseSlerp`), not a
+   * per-component Euler lerp -- with a turn this large, lerping the three
+   * Euler numbers independently traces a visibly wobbly, non-physical path
+   * instead of one clean turn.
    */
   swingChamberPos: THREE.Vector3Tuple;
   swingChamberRot: THREE.EulerTuple;
-  swingMidPos: THREE.Vector3Tuple;
-  swingMidRot: THREE.EulerTuple;
-  swingMidT: number;
   swingEndPos: THREE.Vector3Tuple;
   swingEndRot: THREE.EulerTuple;
-  swingEndT: number;
+  swingCutEndT: number;
   /** How long (seconds) the held block's guard pose takes to rise once
    * block starts, and to lower once it releases -- fast enough to feel
    * like raising a guard on purpose, not a delayed reaction. */
@@ -615,18 +625,15 @@ export interface ViewmodelTuning {
 }
 
 const DEFAULT_TUNING: Readonly<ViewmodelTuning> = {
-  swingDuration: 0.26,
+  swingDuration: 0.13,
   stabDistance: 0.35,
   stabInward: 0.06,
   chargeRaiseSeconds: 0.15,
-  swingChamberPos: [-0.24, 0.04, 0.05],
-  swingChamberRot: [0, 0, 0],
-  swingMidPos: [0.05, 0.15, -0.35],
-  swingMidRot: [0, 0.42, -0.23],
-  swingMidT: 0.45,
-  swingEndPos: [0.1, -0.05, -0.2],
-  swingEndRot: [0, 2.15, -1.75],
-  swingEndT: 0.8,
+  swingChamberPos: [-0.1, 0.04, 0.05],
+  swingChamberRot: [0.7163, -0.4549, 0.9219],
+  swingEndPos: [0.08, -0.03, -0.06],
+  swingEndRot: [1.0427, 1.7742, 4.479],
+  swingCutEndT: 0.75,
   blockRaiseSeconds: 0.15,
   blockLowerSeconds: 0.15,
   blockRaise: 0.14,
@@ -829,16 +836,36 @@ function lerp(a: number, b: number, t: number): number {
   return a + (b - a) * t;
 }
 
-function lerpPose(a: { pos: THREE.Vector3Tuple; rot: THREE.EulerTuple }, b: { pos: THREE.Vector3Tuple; rot: THREE.EulerTuple }, t: number): { pos: THREE.Vector3Tuple; rot: THREE.EulerTuple } {
+const slerpScratchA = new THREE.Quaternion();
+const slerpScratchB = new THREE.Quaternion();
+const slerpScratchEuler = new THREE.Euler();
+
+/** Lerps position but interpolates rotation as an actual 3D rotation
+ * (quaternion slerp) instead of lerping the three Euler numbers
+ * independently. The swing's chamber/end poses can differ by more than
+ * just a clean single-axis turn (translation aside, their *rotations*
+ * cross most of a full turn), and lerping Euler components independently
+ * doesn't trace that as one consistent rotation -- each component can take
+ * a different, uncoordinated path (including the "long way around" for
+ * one axis and not another), which reads as a wobble or bulge partway
+ * through the swing instead of one clean turn. Slerp always takes the
+ * short, direct path between the two orientations regardless of how their
+ * Euler triples happen to be written, which is exactly what a real swing
+ * (or its wind-up and recovery) needs. */
+function lerpPoseSlerp(a: { pos: THREE.Vector3Tuple; rot: THREE.EulerTuple }, b: { pos: THREE.Vector3Tuple; rot: THREE.EulerTuple }, t: number): { pos: THREE.Vector3Tuple; rot: THREE.EulerTuple } {
+  slerpScratchA.setFromEuler(slerpScratchEuler.set(a.rot[0], a.rot[1], a.rot[2], "XYZ"));
+  slerpScratchB.setFromEuler(slerpScratchEuler.set(b.rot[0], b.rot[1], b.rot[2], "XYZ"));
+  slerpScratchA.slerp(slerpScratchB, t);
+  slerpScratchEuler.setFromQuaternion(slerpScratchA, "XYZ");
   return {
     pos: [lerp(a.pos[0], b.pos[0], t), lerp(a.pos[1], b.pos[1], t), lerp(a.pos[2], b.pos[2], t)],
-    rot: [lerp(a.rot[0], b.rot[0], t), lerp(a.rot[1], b.rot[1], t), lerp(a.rot[2], b.rot[2], t)],
+    rot: [slerpScratchEuler.x, slerpScratchEuler.y, slerpScratchEuler.z],
   };
 }
 
 /** Smoothstep -- eases both ends of a 0..1 span (accelerate out, decelerate
  * in) rather than the constant-velocity feel a plain `lerp` has, used for
- * every leg of the swing's chamber -> mid -> end -> rest path below. */
+ * every leg of the swing's chamber -> end -> rest path below. */
 function ease(t: number): number {
   return t * t * (3 - 2 * t);
 }
@@ -872,14 +899,15 @@ function mirroredPose(base: { pos: THREE.Vector3Tuple; rot: THREE.EulerTuple }, 
  *   `VIEWMODEL_OFFSET` pose throughout, which is what makes it read as the
  *   blade driving point-first rather than swinging through an arc.
  * - **swing**: the held power attack -- chambers crossed over the body
- *   (`tuning.swingChamberPos`/`Rot`) while held, then on release carries
- *   through an extended midpoint (`swingMid*`, reached at `swingMidT`) to a
- *   wide follow-through on the strong-hand side (`swingEnd*`, reached at
- *   `swingEndT`) -- far enough that the weapon's own grip travels off the
- *   edge of the screen, not just its blade tip -- before easing back to
- *   rest. `handSign` (`mirroredPose`) mirrors which side is which by hand,
- *   so a right-handed weapon chambers left-across-the-body and follows
- *   through to the right, and a left-handed one is the exact mirror.
+ *   (`tuning.swingChamberPos`/`Rot`) while held, then on release sweeps in
+ *   one smooth, continuous cut straight through to full extension on the
+ *   opposite side (`swingEnd*`, reached at `swingCutEndT`) before easing
+ *   back to rest as a separate, slower recovery -- a real slash, not a
+ *   multi-stage animation with a pause stitched into the middle of it.
+ *   `handSign` (`mirroredPose`) mirrors which side is which by hand, so a
+ *   right-handed weapon chambers left-across-the-body and cuts clockwise
+ *   (seen from above) through to the right, and a left-handed one is the
+ *   exact mirror.
  * - **block**: a genuinely held guard (`startViewmodelBlock`/
  *   `stopViewmodelBlock`) raised toward chest height, pulled in across the
  *   body, and rolled toward horizontal for as long as block is actually
@@ -960,25 +988,25 @@ export function viewmodelSwingSystem(dt: number): void {
         // from exactly this same fully-chambered pose).
         swing.chargeElapsed += dt;
         const t = ease(Math.min(1, swing.chargeElapsed / tuning.chargeRaiseSeconds));
-        const raised = lerpPose(base, chamberPose, t);
+        const raised = lerpPoseSlerp(base, chamberPose, t);
         applyViewmodelPose(mesh, swing, dt, raised.pos, raised.rot);
         continue;
       }
-      // Release phase: chamber -> mid -> end -> rest, each leg eased
-      // independently -- see `ViewmodelTuning.swingChamberPos`'s doc
-      // comment for why the settle back to rest isn't itself one of the
-      // three tuned poses.
+      // Release phase: one continuous eased cut from chamber straight to
+      // full extension (the actual slash), then a separate, slower ease
+      // back to rest (the recovery) -- see `ViewmodelTuning.swingChamberPos`'s
+      // doc comment for why the cut itself is a single unbroken arc now.
+      // Both legs slerp (`lerpPoseSlerp`) rather than lerp the raw Euler
+      // triples, so the blade's actual turn through space is one clean arc
+      // instead of three independently-interpolated angles.
       swing.elapsed += dt;
       const releaseT = Math.min(1, swing.elapsed / swing.duration);
-      const midPose = mirroredPose(base, tuning.swingMidPos, tuning.swingMidRot, handSign);
       const endPose = mirroredPose(base, tuning.swingEndPos, tuning.swingEndRot, handSign);
       let pose: { pos: THREE.Vector3Tuple; rot: THREE.EulerTuple };
-      if (releaseT <= tuning.swingMidT) {
-        pose = lerpPose(chamberPose, midPose, ease(releaseT / Math.max(1e-4, tuning.swingMidT)));
-      } else if (releaseT <= tuning.swingEndT) {
-        pose = lerpPose(midPose, endPose, ease((releaseT - tuning.swingMidT) / Math.max(1e-4, tuning.swingEndT - tuning.swingMidT)));
+      if (releaseT <= tuning.swingCutEndT) {
+        pose = lerpPoseSlerp(chamberPose, endPose, ease(releaseT / Math.max(1e-4, tuning.swingCutEndT)));
       } else {
-        pose = lerpPose(endPose, base, ease((releaseT - tuning.swingEndT) / Math.max(1e-4, 1 - tuning.swingEndT)));
+        pose = lerpPoseSlerp(endPose, base, ease((releaseT - tuning.swingCutEndT) / Math.max(1e-4, 1 - tuning.swingCutEndT)));
       }
       applyViewmodelPose(mesh, swing, dt, pose.pos, pose.rot);
       if (releaseT >= 1) activeSwings.splice(i, 1);

@@ -25,12 +25,16 @@ export interface AttackProfile {
 }
 
 /** Shared balance table for players and, later, NPC attack selection.
- * `swing`'s numbers are the old, deleted `chop`'s unchanged -- it was
- * already the strongest/slowest option, exactly the role a held power
- * attack should play. */
+ * `swing`'s damage multiplier is the old, deleted `chop`'s unchanged -- it
+ * was already the strongest option, exactly the role a held power attack
+ * should play. Its recovery was halved from that same 1s down to 0.5s so
+ * the swing itself reads as a quick, smooth slash rather than a slow,
+ * segmented one -- the viewmodel animation's own duration comes directly
+ * from this value (`tryMeleeAttack`), so a slower recovery here always
+ * meant a slower-playing swing too. */
 export const ATTACK_PROFILES: Record<AttackType, AttackProfile> = {
   jab: { damageMultiplier: 0.7, recovery: 0.5 },
-  swing: { damageMultiplier: 1.35, recovery: 1 },
+  swing: { damageMultiplier: 1.35, recovery: 0.5 },
 };
 
 /** The melee swing box's shape per attack type (see `meleeCollision.ts`'s

@@ -182,21 +182,9 @@ const SLIDER_GROUPS: SliderGroup[] = [
     ],
   },
   {
-    title: "Swing: mid (release midpoint)",
+    title: "Swing: end (full extension)",
     sliders: [
-      { key: "swingMidT", label: "Mid reached at (0..1)", min: 0.05, max: 0.95, step: 0.01 },
-      { key: "swingMidPos", index: 0, label: "Mid X (m)", min: -1, max: 1, step: 0.01 },
-      { key: "swingMidPos", index: 1, label: "Mid Y (m)", min: -1, max: 1, step: 0.01 },
-      { key: "swingMidPos", index: 2, label: "Mid Z (m)", min: -1, max: 1, step: 0.01 },
-      { key: "swingMidRot", index: 0, label: "Mid pitch (rad)", min: -2, max: 2, step: 0.01 },
-      { key: "swingMidRot", index: 1, label: "Mid yaw (rad)", min: -3, max: 3, step: 0.01 },
-      { key: "swingMidRot", index: 2, label: "Mid roll (rad)", min: -3, max: 3, step: 0.01 },
-    ],
-  },
-  {
-    title: "Swing: end (follow-through)",
-    sliders: [
-      { key: "swingEndT", label: "End reached at (0..1)", min: 0.05, max: 0.98, step: 0.01 },
+      { key: "swingCutEndT", label: "Cut reached at (0..1)", min: 0.05, max: 0.98, step: 0.01 },
       { key: "swingEndPos", index: 0, label: "End X (m)", min: -1.5, max: 1.5, step: 0.01 },
       { key: "swingEndPos", index: 1, label: "End Y (m)", min: -1, max: 1, step: 0.01 },
       { key: "swingEndPos", index: 2, label: "End Z (m)", min: -1, max: 1, step: 0.01 },
