@@ -344,6 +344,38 @@ export function findOpenHandSlot(world: World, ownerEid: number): HandSlot | und
   return leftOpen ? "hand-left" : rightOpen ? "hand-right" : undefined;
 }
 
+/** Combined weight (kg) of the two hand items a dual wield is allowed to
+ * total -- a sword (3) and a dagger (0.6) fits comfortably under this; a
+ * second sword (6 total) or a sword alongside the javelin (4.6) doesn't --
+ * swinging two real weapons at once only reads as plausible when the pair
+ * is light enough. Doesn't apply at all to a single equipped weapon (the
+ * ordinary one-hand case), only to *holding two at the same time* -- see
+ * `wouldExceedDualWieldWeight` below. */
+export const DUAL_WIELD_MAX_COMBINED_WEIGHT = 4.0;
+
+/** True if putting `itemEid` into `slot` would leave `ownerEid` dual-wielding
+ * (a one-handed weapon already in the *other* hand, and `itemEid` itself
+ * one-handed too) with the pair's combined weight over
+ * `DUAL_WIELD_MAX_COMBINED_WEIGHT`. Always `false` when the other hand is
+ * empty, or occupied by (or itself) a two-handed item -- a two-handed weapon
+ * already displaces whatever's in the other hand entirely (`equipItem`), so
+ * there's never actually a *pair* to weigh in that case. Checked by
+ * `equipItem`'s callers before committing to the equip, the same "ask
+ * first, mutate second" shape `wouldExceedCarryWeight`/
+ * `wouldExceedInventorySlots` already use for a fresh pickup. */
+export function wouldExceedDualWieldWeight(world: World, ownerEid: number, itemEid: number, slot: HandSlot): boolean {
+  const itemType = ITEM_REGISTRY[Item.itemTypeId[itemEid]];
+  if (!itemType || itemType.twoHanded) return false;
+  const otherSlot: HandSlot = slot === "hand-left" ? "hand-right" : "hand-left";
+  for (const otherEid of query(world, [Item, Carried])) {
+    if (otherEid === itemEid || Carried.ownerEid[otherEid] !== ownerEid || Carried.slot[otherEid] !== otherSlot) continue;
+    const otherType = ITEM_REGISTRY[Item.itemTypeId[otherEid]];
+    if (!otherType || otherType.twoHanded) return false;
+    return (itemType.mass ?? DEFAULT_ITEM_WEIGHT) + (otherType.mass ?? DEFAULT_ITEM_WEIGHT) > DUAL_WIELD_MAX_COMBINED_WEIGHT;
+  }
+  return false;
+}
+
 /**
  * Forces `mesh` (and everything under it) to render on top of the rest of
  * the scene regardless of actual depth — `renderOrder` past every ordinary
@@ -600,6 +632,32 @@ export interface ViewmodelTuning {
   swingEndPos: THREE.Vector3Tuple;
   swingEndRot: THREE.EulerTuple;
   swingCutEndT: number;
+  /** Seconds for a throwable weapon's (the javelin's) held ready-to-throw
+   * pose to rise once charging starts -- the throw's own analog of
+   * `chargeRaiseSeconds` above, kept separate since a heft-up-and-back
+   * throwing motion reads differently than a blade's chamber and may want
+   * its own timing. */
+  throwRaiseSeconds: number;
+  /**
+   * A throwable weapon's held ready pose, declared the same right-handed-
+   * delta-from-resting way `swingChamberPos`/`Rot` are (see that field's own
+   * doc comment for the full derivation technique) -- for a right-handed
+   * hold, hefted up and back near the shoulder on the wielder's *own* side
+   * (not crossed over the body like a blade's chamber), tip angled steeply
+   * up and slightly outward, ready to throw straight ahead. Reached
+   * gradually over `throwRaiseSeconds` while held, the same
+   * ease-then-hold-indefinitely shape the swing's own chamber uses
+   * (`viewmodelSwingSystem`'s "throw" branch).
+   *
+   * Unlike `swingEnd*`, there's no matching release pose: throwing isn't an
+   * animated swing at all, it's the weapon leaving the hand outright the
+   * instant it's released (`releaseViewmodelThrow`) -- once the viewmodel
+   * mesh is gone, `viewmodelSwingSystem`'s own `!mesh` check retires the
+   * animation state on the very next frame, so there's nothing left to ease
+   * back to rest.
+   */
+  throwChamberPos: THREE.Vector3Tuple;
+  throwChamberRot: THREE.EulerTuple;
   /** How long (seconds) the held block's guard pose takes to rise once
    * block starts, and to lower once it releases -- fast enough to feel
    * like raising a guard on purpose, not a delayed reaction. */
@@ -634,6 +692,9 @@ const DEFAULT_TUNING: Readonly<ViewmodelTuning> = {
   swingEndPos: [0.08, -0.03, -0.06],
   swingEndRot: [1.0427, 1.7742, 4.479],
   swingCutEndT: 0.75,
+  throwRaiseSeconds: 0.25,
+  throwChamberPos: [0, 0.15, 0.05],
+  throwChamberRot: [0.1776, 0.5532, 3.2671],
   blockRaiseSeconds: 0.15,
   blockLowerSeconds: 0.15,
   blockRaise: 0.14,
@@ -670,7 +731,7 @@ export function resetViewmodelTuning(): void {
 interface SwingState {
   itemEid: number;
   elapsed: number;
-  attackType: import("./combat").AttackType | "block" | "cancel";
+  attackType: import("./combat").AttackType | "block" | "cancel" | "throw";
   duration: number;
   /** True only for a `"swing"`/`"block"` entry that's still being held (see
    * `startViewmodelCharge`/`startViewmodelBlock`) -- while true,
@@ -763,6 +824,19 @@ export function startViewmodelCharge(itemEid: number): void {
   else activeSwings.push({ itemEid, elapsed: 0, chargeElapsed: 0, attackType: "swing", duration: 0, charging: true, blendFrom, blendElapsed: 0 });
 }
 
+/** Starts holding `itemEid`'s viewmodel raised in the throwing-ready pose --
+ * a throwable weapon's (the javelin's) own analog of `startViewmodelCharge`
+ * above, driven by `throwingCombat.ts`'s `tryStartThrowCharge` instead of
+ * `combat.ts`'s `tryStartSwingCharge` -- until `releaseViewmodelThrow`
+ * (the throw actually firing) or `cancelViewmodelCharge` (charge-type-
+ * agnostic, works on this the same as any other charging entry) drops it. */
+export function startViewmodelThrowCharge(itemEid: number): void {
+  const blendFrom = captureBlendFrom(itemEid);
+  const existing = activeSwings.find((s) => s.itemEid === itemEid);
+  if (existing) Object.assign(existing, { elapsed: 0, chargeElapsed: 0, attackType: "throw" as const, duration: 0, charging: true, blendFrom, blendElapsed: 0 });
+  else activeSwings.push({ itemEid, elapsed: 0, chargeElapsed: 0, attackType: "throw", duration: 0, charging: true, blendFrom, blendElapsed: 0 });
+}
+
 /** Cancels a charge started by `startViewmodelCharge` without ever
  * swinging -- e.g. a modal opening mid-charge (game.ts) -- easing the
  * viewmodel back to its resting pose (see `applyViewmodelPose`) rather than
@@ -772,6 +846,25 @@ export function cancelViewmodelCharge(itemEid: number): void {
   if (i === -1) return;
   const blendFrom = captureBlendFrom(itemEid);
   activeSwings[i] = { itemEid, elapsed: 0, chargeElapsed: 0, attackType: "cancel", duration: 0, charging: false, blendFrom, blendElapsed: 0 };
+}
+
+/** Releases a throw charge started by `startViewmodelThrowCharge` --
+ * `throwingCombat.ts`'s `tryThrowWeapon` calls this the instant the weapon
+ * actually leaves the hand. Unlike every other release in this file, there's
+ * no follow-through animation to play: the weapon (and its viewmodel) is
+ * simply gone, so this just removes both outright -- `viewmodelSwingSystem`
+ * would otherwise notice the missing mesh and clean up the animation state
+ * on its own very next frame anyway, this just does it a frame sooner and
+ * without a wasted render of a now-nonexistent weapon still sitting in the
+ * chambered pose. */
+export function releaseViewmodelThrow(itemEid: number): void {
+  const i = activeSwings.findIndex((s) => s.itemEid === itemEid);
+  if (i !== -1) activeSwings.splice(i, 1);
+  const mesh = Viewmodel[itemEid];
+  if (mesh) {
+    mesh.removeFromParent();
+    Viewmodel[itemEid] = undefined;
+  }
 }
 
 /** Starts (or keeps) holding `itemEid`'s viewmodel raised in the block guard
@@ -884,7 +977,7 @@ function mirroredPose(base: { pos: THREE.Vector3Tuple; rot: THREE.EulerTuple }, 
 
 /**
  * Advances every active weapon animation, driving each item's `Viewmodel`
- * mesh through whichever of jab/swing/block/cancel it's currently in
+ * mesh through whichever of jab/swing/throw/block/cancel it's currently in
  * (see each trigger function's own doc comment for when each starts).
  * Reads `Carried.slot` each frame (rather than caching the hand at
  * swing-start) so re-equipping mid-animation doesn't leave the mesh
@@ -908,6 +1001,13 @@ function mirroredPose(base: { pos: THREE.Vector3Tuple; rot: THREE.EulerTuple }, 
  *   right-handed weapon chambers left-across-the-body and cuts clockwise
  *   (seen from above) through to the right, and a left-handed one is the
  *   exact mirror.
+ * - **throw**: a throwable weapon's (the javelin's) own held charge --
+ *   hefted up and back near the shoulder (`tuning.throwChamberPos`/`Rot`)
+ *   while held, same ease-and-hold shape as `swing`'s own chamber. There's
+ *   no release phase to animate here at all: `throwingCombat.ts` detaches
+ *   the viewmodel entirely the instant the throw fires
+ *   (`releaseViewmodelThrow`), so this state never actually reaches a
+ *   released frame -- the `!mesh` check above retires it first.
  * - **block**: a genuinely held guard (`startViewmodelBlock`/
  *   `stopViewmodelBlock`) raised toward chest height, pulled in across the
  *   body, and rolled toward horizontal for as long as block is actually
@@ -954,6 +1054,23 @@ export function viewmodelSwingSystem(dt: number): void {
     if (swing.attackType === "cancel") {
       applyViewmodelPose(mesh, swing, dt, base.pos, base.rot);
       if (!swing.blendFrom) activeSwings.splice(i, 1);
+      continue;
+    }
+
+    if (swing.attackType === "throw") {
+      // Charging is the only phase this ever sees: `releaseViewmodelThrow`
+      // removes the viewmodel mesh outright the instant the throw fires, so
+      // the `!mesh` check at the top of this loop retires the entry before
+      // any "released" branch here would ever run. Ease into the
+      // throwing-ready pose and then just sit there, however long the
+      // charge is actually held -- same shape as `swing`'s own charging
+      // branch, just its own pose and timing (`throwChamberPos`/`Rot`,
+      // `throwRaiseSeconds`).
+      swing.chargeElapsed += dt;
+      const t = ease(Math.min(1, swing.chargeElapsed / tuning.throwRaiseSeconds));
+      const chamberPose = mirroredPose(base, tuning.throwChamberPos, tuning.throwChamberRot, handSign);
+      const raised = lerpPoseSlerp(base, chamberPose, t);
+      applyViewmodelPose(mesh, swing, dt, raised.pos, raised.rot);
       continue;
     }
 
