@@ -83,6 +83,17 @@ class TouchAttackButton {
     this.ammoEl.hidden = !label;
     this.ammoEl.textContent = label ?? "";
   }
+
+  /** Shows or hides the button outright -- used for the off-hand instance,
+   * which only makes sense to display once the player is actually
+   * dual-wielding two weapons (`combat.ts`'s `isDualWielding`); hidden while
+   * a mid-touch hold happened to be live also drops that hold (`held =
+   * false`), the same as `touchcancel`, so a since-unequipped off-hand
+   * weapon can't leave a stuck phantom charge behind. */
+  setVisible(visible: boolean): void {
+    this.el.style.display = visible ? "" : "none";
+    if (!visible) this.held = false;
+  }
 }
 
 /**
@@ -134,6 +145,15 @@ export class TouchControls {
   readonly moveStick: TouchJoystick | null = null;
   readonly lookDrag: TouchLookDrag | null = null;
   private readonly attackButton: TouchAttackButton | null = null;
+  /** The off-hand's own attack button -- only shown once dual-wielding
+   * actually puts a second weapon in play (`setOffhandVisible`, driven each
+   * frame from game.ts by `combat.ts`'s `isDualWielding`); hidden by default
+   * so it doesn't clutter the screen for the vastly more common
+   * single-weapon/unarmed case. Stacked directly above the main ATK button
+   * (own `.touch-attack-btn-offhand` modifier in index.html) rather than
+   * mirrored to the move-stick side, so both attack buttons stay under the
+   * same thumb. */
+  private readonly offhandAttackButton: TouchAttackButton | null = null;
   private readonly blockButton: TouchBlockButton | null = null;
 
   /** `gameSurface` is the three.js renderer's own canvas — see
@@ -147,6 +167,10 @@ export class TouchControls {
 
     this.attackButton = new TouchAttackButton();
     container.appendChild(this.attackButton.el);
+
+    this.offhandAttackButton = new TouchAttackButton("OFF", "touch-attack-btn-offhand");
+    this.offhandAttackButton.setVisible(false);
+    container.appendChild(this.offhandAttackButton.el);
 
     this.blockButton = new TouchBlockButton();
     container.appendChild(this.blockButton.el);
@@ -170,6 +194,24 @@ export class TouchControls {
   /** True once for a release -- see `TouchAttackButton.consumeAttackRelease`. */
   consumeAttackRelease(): boolean {
     return this.attackButton?.consumeAttackRelease() ?? false;
+  }
+
+  /** The off-hand attack button's own press/release edges -- see
+   * `consumePressStart`/`consumeAttackRelease` above; only meaningful while
+   * `setOffhandVisible(true)` has made the button visible, but harmless
+   * (always false) otherwise since a hidden button can't be touched. */
+  consumeOffhandPressStart(): boolean {
+    return this.offhandAttackButton?.consumePressStart() ?? false;
+  }
+  consumeOffhandAttackRelease(): boolean {
+    return this.offhandAttackButton?.consumeAttackRelease() ?? false;
+  }
+
+  /** Shows or hides the off-hand attack button -- called every frame from
+   * game.ts with `combat.ts`'s `isDualWielding`, so it only ever appears
+   * while there's actually a second weapon to attack with. */
+  setOffhandVisible(visible: boolean): void {
+    this.offhandAttackButton?.setVisible(visible);
   }
 
   /** Whether the dedicated block button is currently held down -- the touch

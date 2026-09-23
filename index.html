@@ -58,6 +58,17 @@
         background: rgba(217, 67, 63, 0.5);
         border-color: rgba(255, 255, 255, 0.6);
       }
+      /* The off-hand's own attack button, once dual-wielding actually shows
+         it (TouchControls.setOffhandVisible) -- stacked directly above the
+         main ATK circle (same right offset, smaller, further up), rather
+         than mirrored to the move-stick's side, so both attack buttons stay
+         under the one thumb. */
+      .touch-attack-btn-offhand {
+        right: 65px;
+        bottom: 165px;
+        width: 70px;
+        height: 70px;
+      }
       .touch-block-btn {
         position: fixed;
         right: 20px;

@@ -8,7 +8,7 @@ import { characterSystem, physicsSyncSystem, teleportCharacter } from "./ecs/sys
 import { dynamicSyncSystem } from "./ecs/systems/dynamics";
 import { addCharacter, CHARACTER_GROUPS, createPhysics, PHYSICS_DT } from "./physics/world";
 import { doorAnimationSystem, tryInteract } from "./ecs/systems/doors";
-import { applyMeleeDamage, cancelSwingCharge, combatSystem, releaseSwingCharge, setBlocking, tryMeleeAttack, tryStartSwingCharge, type AttackType } from "./ecs/systems/combat";
+import { applyMeleeDamage, cancelSwingCharge, combatSystem, isDualWielding, mainHand, releaseSwingCharge, setBlocking, tryMeleeAttack, tryStartSwingCharge, type AttackType } from "./ecs/systems/combat";
 import { meleeCollisionSystem } from "./ecs/systems/meleeCollision";
 import { getEquippedRangedWeapon, getRangedAmmoLabel, getRangedCombatDebugState, rangedCombatSystem, tryFireRanged } from "./ecs/systems/rangedCombat";
 import { getThrowingCombatDebugState, isEquippedWeaponThrowable, throwingCombatSystem, tryStartThrowCharge, tryThrowWeapon } from "./ecs/systems/throwingCombat";
@@ -17,7 +17,7 @@ import { practiceSystem, startPractice } from "./ecs/systems/practice";
 import { npcSystem, toggleNpcFollow } from "./ecs/systems/npc";
 import { getNpcAnimationDebugState, npcAnimationSystem } from "./ecs/systems/npcAnimation";
 import { corpseCleanupSystem, MIN_LINGER_SECONDS } from "./ecs/systems/corpseCleanup";
-import { BASE_CARRY_WEIGHT, equipItem, equipToOpenHandSlot, findOpenHandSlot, getViewmodelAnimationDebugState, giveItem, isHandSlot, unequipItem, viewmodelSwingSystem, wouldExceedCarryWeight, wouldExceedDualWieldWeight, wouldExceedInventorySlots } from "./ecs/systems/items";
+import { BASE_CARRY_WEIGHT, equipItem, equipToOpenHandSlot, findOpenHandSlot, getViewmodelAnimationDebugState, giveItem, isHandSlot, unequipItem, viewmodelSwingSystem, wouldExceedCarryWeight, wouldExceedDualWieldWeight, wouldExceedInventorySlots, type HandSlot } from "./ecs/systems/items";
 import { syncSystem } from "./ecs/systems/sync";
 import { hudSync } from "./ecs/systems/hudSync";
 import { buildLevel } from "./level/level";
@@ -214,6 +214,8 @@ export function startGame(container: HTMLElement, options: StartGameOptions = {}
   Combat.blocking[player] = 0;
   Combat.agility[player] = 0;
   Combat.charging[player] = 0;
+  Combat.attackRecoveryOffhand[player] = 0;
+  Combat.chargingOffhand[player] = 0;
   Stamina.max[player] = PLAYER_MAX_STAMINA;
   Stamina.current[player] = PLAYER_MAX_STAMINA;
 
@@ -299,8 +301,13 @@ export function startGame(container: HTMLElement, options: StartGameOptions = {}
         hudStore.showMessage("Pick up the wooden sword first.");
         return;
       }
+      // Clears *both* hand slots, not just `hand-right` -- a practice bout
+      // should only ever be fought with the wooden sword, and leaving
+      // whatever's in the other hand equipped would let it get picked over
+      // the wooden sword by `mainHand` (combat.ts), which prefers `hand-left`
+      // whenever anything's there (dual-wielding's own main slot).
       for (const eid of query(world, [Item, Carried])) {
-        if (Carried.ownerEid[eid] === player && Carried.slot[eid] === "hand-right" && eid !== woodenSword) unequipItem(world, eid);
+        if (Carried.ownerEid[eid] === player && isHandSlot(Carried.slot[eid]) && eid !== woodenSword) unequipItem(world, eid);
       }
       if (!isHandSlot(Carried.slot[woodenSword])) equipItem(world, camera, woodenSword, "hand-right");
       startPractice(world, npcEid, agility);
@@ -504,17 +511,26 @@ export function startGame(container: HTMLElement, options: StartGameOptions = {}
     // click/touch-button wiring below calls. For `"swing"` this is the
     // instant bypass (see `tryMeleeAttack`'s own doc comment) rather than a
     // real held charge -- use `startSwingCharge`/`releaseSwingCharge` below
-    // to exercise the actual charge-and-release mechanic.
-    attack: (attackType: AttackType = "jab") => tryMeleeAttack(world, attackType),
+    // to exercise the actual charge-and-release mechanic. `hand` left unset
+    // resolves via `combat.ts`'s `mainHand`, same as real input; pass
+    // `"hand-right"` explicitly to exercise the off hand's own independent
+    // dual-wield attack instead -- see `combat.ts`'s `tryMeleeAttack` for
+    // what it all means.
+    attack: (attackType: AttackType = "jab", hand?: HandSlot) => tryMeleeAttack(world, attackType, hand),
     // Throw-aware the same way the real mouse/touch press/release handling
-    // in `frame()` is (`meleeHeldIsThrowable`) -- a throwable weapon (the
-    // javelin) charges/releases through `throwingCombat.ts` instead of
-    // `combat.ts`'s own swing charge/release, so a test exercising this
-    // through the debug hook sees the same routing real input does.
-    startSwingCharge: () => (isEquippedWeaponThrowable(world, player) ? tryStartThrowCharge(world) : tryStartSwingCharge(world)),
-    releaseSwingCharge: () => (isEquippedWeaponThrowable(world, player) ? tryThrowWeapon(world, physics, camera, scene) : releaseSwingCharge(world)),
-    cancelSwingCharge: () => cancelSwingCharge(world),
-    isSwingCharging: () => Combat.charging[player] > 0,
+    // in `frame()` is (`meleeHeldIsThrowable`/`offhandIsThrowable`) -- a
+    // throwable weapon (the javelin) charges/releases through
+    // `throwingCombat.ts` instead of `combat.ts`'s own swing charge/release,
+    // so a test exercising this through the debug hook sees the same routing
+    // real input does.
+    startSwingCharge: (hand?: HandSlot) => (isEquippedWeaponThrowable(world, player, hand) ? tryStartThrowCharge(world, hand) : tryStartSwingCharge(world, hand)),
+    releaseSwingCharge: (hand?: HandSlot) => (isEquippedWeaponThrowable(world, player, hand) ? tryThrowWeapon(world, physics, camera, scene, hand) : releaseSwingCharge(world, hand)),
+    cancelSwingCharge: (hand?: HandSlot) => cancelSwingCharge(world, hand),
+    isSwingCharging: (hand?: HandSlot) => {
+      const resolved = hand ?? mainHand(world, player);
+      return (resolved === "hand-right" ? Combat.chargingOffhand[player] : Combat.charging[player]) > 0;
+    },
+    isDualWielding: () => isDualWielding(world, player),
     // Debug-only direct triggers for the shared mouse/touch press/release
     // melee-or-ranged state machine (`frame()`, above `meleeMousePressed`'s
     // own doc comment) -- sets the exact same flags the real `mousedown`/
@@ -522,12 +538,17 @@ export function startGame(container: HTMLElement, options: StartGameOptions = {}
     // timing (jab vs. charged swing, or a ranged weapon's hold-to-aim-then-
     // release-to-fire) without simulating actual pointer-lock clicks or
     // touch events, the same reasoning `attack`/`block` above already lean
-    // on.
+    // on. `simulateOffhandAttack*` are the off hand's own equivalents
+    // (right-click's debug stand-in, `offhandMousePressed`/
+    // `offhandMouseReleased`).
     simulateAttackPress: () => { meleeMousePressed = true; },
     simulateAttackRelease: () => { meleeMouseReleased = true; },
+    simulateOffhandAttackPress: () => { offhandMousePressed = true; },
+    simulateOffhandAttackRelease: () => { offhandMouseReleased = true; },
     block: (held: boolean) => setBlocking(world, player, held),
     getCombatState: () => ({
       attackRecovery: Combat.attackRecovery[player],
+      attackRecoveryOffhand: Combat.attackRecoveryOffhand[player],
       blocking: Combat.blocking[player] > 0,
       stamina: Stamina.current[player],
       maxStamina: Stamina.max[player],
@@ -742,13 +763,23 @@ export function startGame(container: HTMLElement, options: StartGameOptions = {}
   // player was just trying to talk to.
   let meleeMousePressed = false;
   let meleeMouseReleased = false;
+  // The off hand's own mouse edges -- right-click, once dual-wielding puts a
+  // second weapon there (`combat.ts`'s `isDualWielding`) -- mirroring
+  // `meleeMousePressed`/`meleeMouseReleased` above exactly, just gated on
+  // `e.button === 2` instead of `0`. `contextmenu` is suppressed so a
+  // right-click attacks instead of popping the browser's own menu.
+  let offhandMousePressed = false;
+  let offhandMouseReleased = false;
   if (!isTouchDevice()) {
     renderer.domElement.addEventListener("mousedown", (e) => {
       if (e.button === 0 && pointerLook.locked) meleeMousePressed = true;
+      if (e.button === 2 && pointerLook.locked) offhandMousePressed = true;
     });
     renderer.domElement.addEventListener("mouseup", (e) => {
       if (e.button === 0) meleeMouseReleased = true;
+      if (e.button === 2) offhandMouseReleased = true;
     });
+    renderer.domElement.addEventListener("contextmenu", (e) => e.preventDefault());
   }
   // The shared press/release melee state machine's own live state (see
   // `frame()`) -- `meleeHeld` covers the whole window from a press that
@@ -777,6 +808,21 @@ export function startGame(container: HTMLElement, options: StartGameOptions = {}
   // no "just released" of its own, so this compares last frame's state to
   // this frame's.
   let wasDigit2Down = false;
+
+  // The off hand's own copy of the jab-vs-charged-swing-or-throw state
+  // machine below -- see `meleeHeld`/`meleeHoldSeconds`/`meleeCharging`/
+  // `meleeHeldIsThrowable` just above for what each one means; there's no
+  // off-hand equivalent of `meleePressWasRanged` at all, since a ranged
+  // weapon (the crossbow) is always two-handed and so can only ever occupy
+  // `hand-right` (`items.ts`'s `equipItem`) -- the off hand's press always
+  // resolves as melee-or-throwable, never ranged. Driven by right-click and
+  // the second touch ATK button (`touch.consumeOffhandPressStart`/
+  // `consumeOffhandAttackRelease`) only -- no keyboard hotkey of its own,
+  // unlike the main hand's Digit1/Digit2.
+  let offhandHeld = false;
+  let offhandHoldSeconds = 0;
+  let offhandCharging = false;
+  let offhandIsThrowable = false;
 
   window.addEventListener("resize", () => {
     camera.aspect = window.innerWidth / window.innerHeight;
@@ -943,6 +989,62 @@ export function startGame(container: HTMLElement, options: StartGameOptions = {}
     // otherwise the eventual release (possibly well after the modal closes)
     // would fire a shot the player never actually meant to take.
     if (isModalActive() && meleePressWasRanged) meleePressWasRanged = false;
+
+    // The off hand's own copy of the state machine just above -- right-click
+    // and the second touch ATK button only (see `offhandHeld`'s own doc
+    // comment for why there's no ranged branch or keyboard hotkey here).
+    // Always the literal `hand-right` slot -- `combat.ts`'s `mainHand`
+    // resolves the *main* input to `hand-left` first (where a lone weapon,
+    // one- or two-handed, actually ends up -- `findOpenHandSlot` fills left
+    // before right), so `hand-right` is exactly the hand that's otherwise
+    // unreachable, never the one `mainHand` would have already picked.
+    // Gated on actually dual-wielding (`isDualWielding`), not just wired up
+    // unconditionally: without this gate, a lone weapon that ever *did* end
+    // up sitting in `hand-right` (an edge case, but not an impossible one)
+    // could be swung through *both* this button and the main one at once,
+    // off two independent recovery timers instead of one -- twice the attack
+    // rate from a single weapon. Consumed either way so a stray press/
+    // release while not dual-wielding doesn't linger into the frame
+    // dual-wielding actually starts.
+    const dualWielding = isDualWielding(world, player);
+    touch.setOffhandVisible(dualWielding);
+    const offhandPressEdge = offhandMousePressed || touch.consumeOffhandPressStart();
+    offhandMousePressed = false;
+    const offhandReleaseEdge = offhandMouseReleased || touch.consumeOffhandAttackRelease();
+    offhandMouseReleased = false;
+
+    if (offhandPressEdge && !isModalActive() && dualWielding) {
+      offhandHeld = true;
+      offhandHoldSeconds = 0;
+      offhandCharging = false;
+      offhandIsThrowable = isEquippedWeaponThrowable(world, player, "hand-right");
+    }
+    if (offhandHeld) {
+      offhandHoldSeconds += dt;
+      if (!offhandCharging && offhandHoldSeconds >= SWING_CHARGE_THRESHOLD_SECONDS) {
+        offhandCharging = offhandIsThrowable ? tryStartThrowCharge(world, "hand-right") : tryStartSwingCharge(world, "hand-right");
+        if (!offhandCharging) offhandHeld = false; // couldn't charge (cooldown/stamina/etc) -- stop retrying every frame
+      }
+    }
+    if (offhandReleaseEdge) {
+      if (offhandCharging) {
+        if (offhandIsThrowable) tryThrowWeapon(world, physics, camera, scene, "hand-right");
+        else releaseSwingCharge(world, "hand-right");
+      }
+      else if (offhandHeld) tryMeleeAttack(world, "jab", "hand-right");
+      offhandHeld = false;
+      offhandCharging = false;
+      offhandIsThrowable = false;
+    }
+    // Same modal-mid-charge safety net as the main hand's own, just below --
+    // an off-hand charge stuck raised (or fired late) when a dialogue/death
+    // overlay opens would be just as jarring as the main hand's.
+    if (isModalActive() && Combat.chargingOffhand[player] > 0) {
+      cancelSwingCharge(world, "hand-right");
+      offhandHeld = false;
+      offhandCharging = false;
+    }
+
     // Skyrim-style held block, not an edge-triggered press: `setBlocking`
     // runs every frame with the input's *current* state -- keyboard.isDown,
     // or the dedicated touch block button's own real held state
