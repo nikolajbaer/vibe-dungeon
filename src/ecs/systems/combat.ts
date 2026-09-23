@@ -16,7 +16,7 @@ import type { CombatBodyPart } from "../../physics/world";
  * mechanic replacing it as the reason to ever pick the stronger option over
  * a jab (risk/reward via timing, not via a separate button). */
 export type AttackType = "jab" | "swing";
-export type WeaponClass = "unarmed" | "dagger" | "oneHanded";
+export type WeaponClass = "unarmed" | "dagger" | "oneHanded" | "twoHanded";
 
 export interface AttackProfile {
   damageMultiplier: number;
@@ -99,6 +99,11 @@ export const BLOCK_MITIGATION: Record<WeaponClass, number> = {
   unarmed: 0.3,
   dagger: 0.5,
   oneHanded: 0.75,
+  // A two-handed reach weapon (the quarterstaff) trades some of a
+  // one-handed weapon's block strength for range/reach elsewhere in its
+  // stats -- still a real weapon block, well above dagger, just not the
+  // sword's best-in-class guard.
+  twoHanded: 0.65,
 };
 
 /** Stamina cost of each attack type -- roughly tracks the balance table
@@ -127,6 +132,11 @@ interface EquippedWeapon {
   damage: number;
   reach: number;
   weaponClass: WeaponClass;
+  /** `ItemAssetDef.attackRecoveryMultiplier`/`attackStaminaMultiplier`, or 1
+   * when the weapon doesn't declare one -- see those fields' own doc
+   * comments (types.ts). */
+  recoveryMultiplier: number;
+  staminaMultiplier: number;
 }
 
 function getEquippedWeapon(world: World, attackerEid: number): EquippedWeapon | undefined {
@@ -139,7 +149,9 @@ function getEquippedWeapon(world: World, attackerEid: number): EquippedWeapon | 
       itemEid: eid,
       damage: def.meleeDamage,
       reach: def.meleeReach ?? UNARMED_REACH,
-      weaponClass: def.id === "dagger" ? "dagger" : "oneHanded",
+      weaponClass: def.twoHanded ? "twoHanded" : def.id === "dagger" ? "dagger" : "oneHanded",
+      recoveryMultiplier: def.attackRecoveryMultiplier ?? 1,
+      staminaMultiplier: def.attackStaminaMultiplier ?? 1,
     };
     if (!best || candidate.damage > best.damage) best = candidate;
   }
@@ -335,15 +347,16 @@ export function applyRangedDamage(world: World, targetEid: number, rawDamage: nu
 export function tryMeleeAttack(world: World, attackType: AttackType = "jab"): boolean {
   const [attackerEid] = query(world, [PlayerControlled, Combat]);
   if (attackerEid === undefined || Combat.attackRecovery[attackerEid] > 0 || Combat.blocking[attackerEid] > 0) return false;
-  const cost = ATTACK_STAMINA_COST[attackType];
+  const weapon = getEquippedWeapon(world, attackerEid);
+  const cost = ATTACK_STAMINA_COST[attackType] * (weapon?.staminaMultiplier ?? 1);
   if (hasComponent(world, attackerEid, Stamina) && Stamina.current[attackerEid] < cost) return false;
 
   const profile = ATTACK_PROFILES[attackType];
   const shape = ATTACK_SHAPES[attackType];
-  const weapon = getEquippedWeapon(world, attackerEid);
-  Combat.attackRecovery[attackerEid] = profile.recovery;
+  const recovery = profile.recovery * (weapon?.recoveryMultiplier ?? 1);
+  Combat.attackRecovery[attackerEid] = recovery;
   if (hasComponent(world, attackerEid, Stamina)) Stamina.current[attackerEid] -= cost;
-  if (weapon) triggerViewmodelSwing(weapon.itemEid, attackType, profile.recovery);
+  if (weapon) triggerViewmodelSwing(weapon.itemEid, attackType, recovery);
 
   const reach = (weapon?.reach ?? UNARMED_REACH) * shape.reachMultiplier;
   const damage = Math.round((weapon?.damage ?? UNARMED_DAMAGE) * profile.damageMultiplier);
@@ -370,9 +383,10 @@ export function tryMeleeAttack(world: World, attackType: AttackType = "jab"): bo
 export function tryStartSwingCharge(world: World): boolean {
   const [attackerEid] = query(world, [PlayerControlled, Combat]);
   if (attackerEid === undefined || Combat.attackRecovery[attackerEid] > 0 || Combat.blocking[attackerEid] > 0 || Combat.charging[attackerEid] > 0) return false;
-  if (hasComponent(world, attackerEid, Stamina) && Stamina.current[attackerEid] < ATTACK_STAMINA_COST.swing) return false;
-  Combat.charging[attackerEid] = 1;
   const weapon = getEquippedWeapon(world, attackerEid);
+  const cost = ATTACK_STAMINA_COST.swing * (weapon?.staminaMultiplier ?? 1);
+  if (hasComponent(world, attackerEid, Stamina) && Stamina.current[attackerEid] < cost) return false;
+  Combat.charging[attackerEid] = 1;
   if (weapon) startViewmodelCharge(weapon.itemEid);
   return true;
 }

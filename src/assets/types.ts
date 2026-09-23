@@ -65,6 +65,19 @@ export interface ItemAssetDef {
    * `UNARMED_REACH` in combat.ts, the same pattern `meleeDamage` already
    * uses for damage. */
   meleeReach?: number;
+  /** Multiplies both attack types' shared recovery time (`ATTACK_PROFILES`
+   * in `ecs/systems/combat.ts`) while this weapon is equipped. `undefined`
+   * means 1 (no change) — every existing weapon's implicit default. A
+   * weapon that trades power for reach (the quarterstaff) sets this above
+   * 1: slower to recover between swings than a sword, on top of already
+   * dealing less `meleeDamage`. */
+  attackRecoveryMultiplier?: number;
+  /** Multiplies both attack types' shared stamina cost (`ATTACK_STAMINA_COST`
+   * in `ecs/systems/combat.ts`) while this weapon is equipped. Same
+   * `undefined` = 1 default as `attackRecoveryMultiplier`, and the same
+   * reach-for-power tradeoff it's meant for: heavier/longer weapons cost
+   * more stamina to swing at all. */
+  attackStaminaMultiplier?: number;
   /** Optional ranged-weapon tuning. Ammo is another stackable item type;
    * firing consumes one unit and the weapon cannot fire again until reload. */
   rangedWeapon?: {

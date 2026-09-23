@@ -8,7 +8,7 @@ try {
   const {ATTACK_PROFILES,ATTACK_STAMINA_COST,BLOCK_MITIGATION,STAMINA_REGEN_PER_SECOND,applyMeleeDamage,combatSystem,setBlocking,tryMeleeAttack}=await server.ssrLoadModule('/src/ecs/systems/combat.ts');
 
   assert.deepEqual(ATTACK_PROFILES,{jab:{damageMultiplier:.7,recovery:.5},swing:{damageMultiplier:1.35,recovery:1}});
-  assert.deepEqual(BLOCK_MITIGATION,{unarmed:.3,dagger:.5,oneHanded:.75});
+  assert.deepEqual(BLOCK_MITIGATION,{unarmed:.3,dagger:.5,oneHanded:.75,twoHanded:.65});
 
   const setup=(weapon)=>{
     const world=createWorld(),defender=addEntity(world);
