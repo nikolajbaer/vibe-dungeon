@@ -98,6 +98,26 @@ export function tryStartThrowCharge(world: World, hand?: HandSlot): boolean {
  * just enough to clear the player's own movement capsule. */
 const THROW_MUZZLE_OFFSET = 0.4;
 
+/** Meters to the side a throw actually launches from -- unlike a fired bolt
+ * (`rangedCombat.ts`), which starts dead-center on the camera, a self-thrown
+ * weapon visibly leaves the hand it's chambered in (`items.ts`'s
+ * `VIEWMODEL_OFFSET`/`throwChamberPos`, off to one side of the screen), so
+ * launching it from dead-center would look like it teleported to the middle
+ * first. Which side depends on which hand it's actually thrown from
+ * (`tryThrowWeapon`'s own `resolvedHand`) -- left for `hand-left`, right for
+ * `hand-right`, matching the viewmodel's own per-hand mirroring. */
+const THROW_LAUNCH_SIDE_OFFSET = 0.25;
+
+/** Meters out along the camera's own aim that a side-launched throw's path
+ * is aimed to re-cross the crosshair -- the same "zeroed sight" idea a real
+ * gun's sights (mounted off to the side of the barrel) are zeroed to: dead
+ * accurate at the chosen range, converging back toward it from either side
+ * everywhere else. Without this, a throw launched from the side but aimed
+ * arrow-straight out of the camera's own forward vector would visibly miss
+ * wherever the crosshair was actually pointed, by roughly
+ * `THROW_LAUNCH_SIDE_OFFSET` the entire way. */
+const THROW_CONVERGENCE_DISTANCE = 10;
+
 /** Gravity (m/s^2) a thrown javelin falls under -- deliberately gentle, the
  * same reasoning `rangedCombat.ts`'s own `BOLT_GRAVITY` (4) gives: the
  * world's real gravity (physics/world.ts's `GRAVITY_Y`, -24) is tuned for a
@@ -243,9 +263,22 @@ export function tryThrowWeapon(world: World, physics: Physics, camera: THREE.Cam
   const mesh = Object3DRef[itemEid]!;
   mesh.visible = true;
 
-  const direction = new THREE.Vector3();
-  camera.getWorldDirection(direction).normalize();
-  const position = camera.getWorldPosition(new THREE.Vector3()).addScaledVector(direction, THROW_MUZZLE_OFFSET);
+  // Launched from beside the camera (whichever side `resolvedHand` actually
+  // holds it), not dead-center like a fired bolt -- then aimed at wherever
+  // the crosshair itself points `THROW_CONVERGENCE_DISTANCE` out, a "zeroed
+  // sight" convergence rather than firing arrow-straight out of a hand
+  // that's visibly off to one side of the reticle (see both constants' own
+  // doc comments above).
+  const forward = new THREE.Vector3();
+  camera.getWorldDirection(forward).normalize();
+  const cameraPosition = camera.getWorldPosition(new THREE.Vector3());
+  const right = new THREE.Vector3(1, 0, 0).applyQuaternion(camera.getWorldQuaternion(new THREE.Quaternion()));
+  const side = resolvedHand === "hand-left" ? -1 : 1;
+  const position = cameraPosition.clone()
+    .addScaledVector(right, side * THROW_LAUNCH_SIDE_OFFSET)
+    .addScaledVector(forward, THROW_MUZZLE_OFFSET);
+  const convergencePoint = cameraPosition.clone().addScaledVector(forward, THROW_CONVERGENCE_DISTANCE);
+  const direction = convergencePoint.sub(position).normalize();
   mesh.position.copy(position);
   mesh.quaternion.setFromUnitVectors(new THREE.Vector3(0, 0, 1), direction);
 
@@ -253,9 +286,27 @@ export function tryThrowWeapon(world: World, physics: Physics, camera: THREE.Cam
   // not the bare visual mesh -- its first child is the real geometry (see
   // `withPickupHitbox`), which is what actually needs measuring; the
   // group's own bounds would be dominated by the much larger invisible
-  // pickup hitbox sphere.
-  const visualMesh = mesh.children[0] ?? mesh;
-  const tipOffset = new THREE.Box3().setFromObject(visualMesh).max.z;
+  // pickup hitbox sphere. Measured off the mesh's own *local* geometry
+  // bounds, not a world-space `Box3` -- `mesh.position`/`.quaternion` were
+  // just set to the muzzle pose above, but three.js only recomputes
+  // `matrixWorld` during the render loop, not synchronously on assignment,
+  // so a world-space measurement here would silently read wherever this
+  // mesh's `matrixWorld` last actually rendered (its spawn table, or
+  // wherever it was last carried) instead of the just-set muzzle pose --
+  // local geometry bounds don't depend on `matrixWorld` at all.
+  const visualMesh = mesh.children[0];
+  let tipOffset: number;
+  if (visualMesh instanceof THREE.Mesh) {
+    if (!visualMesh.geometry.boundingBox) visualMesh.geometry.computeBoundingBox();
+    tipOffset = visualMesh.geometry.boundingBox!.max.z;
+  } else {
+    // Never actually reached in practice (every world item goes through
+    // `withPickupHitbox`, whose first child is always the real mesh) --
+    // kept only so this doesn't crash outright on some future caller that
+    // hands `Object3DRef` something else entirely.
+    mesh.updateWorldMatrix(true, false);
+    tipOffset = new THREE.Box3().setFromObject(mesh).max.z;
+  }
 
   flyingThrown.push({
     itemEid, mesh, position,

@@ -69,6 +69,14 @@ export interface SwordMeshOptions {
   crossguardLength?: number;
   bluntTip?: boolean;
   triangularBlade?: boolean;
+  /** Scales just the blade's own length (both the parallel-sided body and
+   * the tapered tip), independent of the grip/crossguard/pommel -- unlike
+   * `dagger.ts`'s own blanket post-build `.scale(...)` on the whole merged
+   * mesh (which shrinks everything, grip included, for its overall smaller
+   * proportions), this lets a caller shorten *just* the blade, pivoting from
+   * the crossguard so the blade's base stays put and only its reach toward
+   * the tip changes. Defaults to 1 (unchanged) -- only the dagger opts in. */
+  bladeLengthScale?: number;
 }
 
 export function createSwordMesh(options: SwordMeshOptions = {}): THREE.Mesh {
@@ -85,8 +93,11 @@ export function createSwordMesh(options: SwordMeshOptions = {}): THREE.Mesh {
   // Keep the blade parallel-sided through most of its length, then taper
   // only near the end. This reads as a sword rather than an oversized
   // triangular dagger, particularly at inventory-icon scale.
+  const bladeLengthScale = options.bladeLengthScale ?? 1;
+  const bladeBodyLength = BLADE_BODY_LENGTH * bladeLengthScale;
+  const bladeTipLength = BLADE_TIP_LENGTH * bladeLengthScale;
   const bladeBaseY = crossguardY + CROSSGUARD_HEIGHT / 2;
-  const totalBladeLength = BLADE_BODY_LENGTH + BLADE_TIP_LENGTH;
+  const totalBladeLength = bladeBodyLength + bladeTipLength;
   const bladeParts: THREE.BufferGeometry[] = [];
   if (options.triangularBlade) {
     const blade = new THREE.CylinderGeometry(BLADE_WIDTH_TIP, BLADE_WIDTH_BASE, totalBladeLength, 4);
@@ -94,14 +105,14 @@ export function createSwordMesh(options: SwordMeshOptions = {}): THREE.Mesh {
     blade.translate(0, bladeBaseY + totalBladeLength / 2, 0);
     bladeParts.push(blade);
   } else {
-    const bodyLength = options.bluntTip ? totalBladeLength : BLADE_BODY_LENGTH;
+    const bodyLength = options.bluntTip ? totalBladeLength : bladeBodyLength;
     const bladeBody = new THREE.BoxGeometry(BLADE_WIDTH_BASE * 2, bodyLength, BLADE_WIDTH_BASE * 2 * BLADE_FLATTEN);
     bladeBody.translate(0, bladeBaseY + bodyLength / 2, 0);
     bladeParts.push(bladeBody);
     if (!options.bluntTip) {
-      const bladeTip = new THREE.CylinderGeometry(BLADE_WIDTH_TIP, BLADE_WIDTH_BASE, BLADE_TIP_LENGTH, 4);
+      const bladeTip = new THREE.CylinderGeometry(BLADE_WIDTH_TIP, BLADE_WIDTH_BASE, bladeTipLength, 4);
       bladeTip.scale(1, 1, BLADE_FLATTEN);
-      bladeTip.translate(0, bladeBaseY + BLADE_BODY_LENGTH + BLADE_TIP_LENGTH / 2, 0);
+      bladeTip.translate(0, bladeBaseY + bladeBodyLength + bladeTipLength / 2, 0);
       bladeParts.push(bladeTip);
     }
   }
