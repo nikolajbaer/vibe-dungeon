@@ -162,19 +162,21 @@ export function buildCombatTestLevel(world: World, physics: Physics, scene: THRE
   // Long equipment table along the north wall, leaving the west wall clear
   // for archery targets. The player now spawns right in front of this
   // table (see `spawn` below) rather than across the room, so gearing up
-  // is the very first thing they can do.
+  // is the very first thing they can do. Holds only the compact one-handed
+  // weapons plus the crossbow (itself two-handed but short) -- a weapon
+  // whose own length is comparable to or longer than the table's 0.9m
+  // depth (the quarterstaff, the greatsword) doesn't lie flat on this one:
+  // see the second table below.
   addBox(physics, scene, new THREE.Vector3(4.8, 0.12, 0.9), new THREE.Vector3(0, 0.78, -12.5), wood);
   for (const x of [-2.1, 2.1]) {
     addBox(physics, scene, new THREE.Vector3(0.12, 0.72, 0.12), new THREE.Vector3(x, 0.36, -12.75), wood);
     addBox(physics, scene, new THREE.Vector3(0.12, 0.72, 0.12), new THREE.Vector3(x, 0.36, -12.25), wood);
   }
   spawnItems(world, physics, scene, [
-    { id: "dagger", x: -2.0, y: 1.05, z: -12.5 },
-    { id: "sword", x: -1.2, y: 1.05, z: -12.5 },
-    { id: "wooden_sword", x: -0.4, y: 1.05, z: -12.5 },
-    { id: "crossbow", x: 0.4, y: 1.05, z: -12.5 },
-    { id: "quarterstaff", x: 1.2, y: 1.05, z: -12.5 },
-    { id: "greatsword", x: 2.0, y: 1.05, z: -12.5 },
+    { id: "dagger", x: -1.8, y: 1.05, z: -12.5 },
+    { id: "sword", x: -0.9, y: 1.05, z: -12.5 },
+    { id: "wooden_sword", x: 0, y: 1.05, z: -12.5 },
+    { id: "crossbow", x: 0.9, y: 1.05, z: -12.5 },
   ]);
 
   // The projectile barrel currently contains every projectile commodity in
@@ -183,7 +185,31 @@ export function buildCombatTestLevel(world: World, physics: Physics, scene: THRE
   // tabletop and its own ~0.34m radius) rather than across the room, so
   // grabbing a crossbow and its ammo is one stop.
   spawnProps(world, physics, scene, [
-    { id: "barrel", x: 3.6, z: -12.5, contents: [{ id: "bolt", count: 50 }] },
+    { id: "barrel", x: 1.8, z: -12.5, contents: [{ id: "bolt", count: 50 }] },
+  ]);
+
+  // A second, deeper table for weapons whose own length rivals or exceeds
+  // the first table's 0.9m depth -- the quarterstaff and greatsword are
+  // dynamic bodies like every world item (see `buildItemWorldBody`), and a
+  // long, thin one overhanging a too-shallow surface that far tips and
+  // tumbles instead of settling flat, which is exactly what happened
+  // parking the greatsword on the first table: it ended up standing bolt
+  // upright off one end rather than lying down where a player could see or
+  // reach it. 3m of depth comfortably contains either weapon's full length
+  // (both roughly 1.8-1.9m) regardless of exactly where their own mesh
+  // origin (each one's grip, off-center toward one end -- see sword.ts's
+  // and quarterstaff.ts's own doc comments) falls within that span, with
+  // real margin either direction rather than a tightly-tuned exact fit.
+  // Positioned past the barrel, still along the same north-wall gearing-up
+  // area rather than clear across the room.
+  addBox(physics, scene, new THREE.Vector3(1.0, 0.12, 3.0), new THREE.Vector3(5.6, 0.78, -12.5), wood);
+  for (const z of [-13.9, -11.1]) {
+    addBox(physics, scene, new THREE.Vector3(0.12, 0.72, 0.12), new THREE.Vector3(5.15, 0.36, z), wood);
+    addBox(physics, scene, new THREE.Vector3(0.12, 0.72, 0.12), new THREE.Vector3(6.05, 0.36, z), wood);
+  }
+  spawnItems(world, physics, scene, [
+    { id: "quarterstaff", x: 5.3, y: 1.05, z: -12.5 },
+    { id: "greatsword", x: 5.9, y: 1.05, z: -12.5 },
   ]);
 
   for (const x of [-9, 0, 9]) {

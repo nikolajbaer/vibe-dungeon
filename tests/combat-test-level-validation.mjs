@@ -17,8 +17,9 @@ try {
   };
   const physicsModule = await server.ssrLoadModule("/src/physics/world.ts");
   const { buildCombatTestLevel } = await server.ssrLoadModule("/src/level/combatTestLevel.ts");
-  const { Item, Container, Carried, CarryCapacity, Position, Stackable } = await server.ssrLoadModule("/src/ecs/components.ts");
+  const { Item, Container, Carried, CarryCapacity, Position, PhysicsRotation, Stackable } = await server.ssrLoadModule("/src/ecs/components.ts");
   const { maxCarryWeight } = await server.ssrLoadModule("/src/ecs/systems/items.ts");
+  const { dynamicSyncSystem } = await server.ssrLoadModule("/src/ecs/systems/dynamics.ts");
   await physicsModule.initPhysics();
   const world = createWorld();
   const physics = physicsModule.createPhysics();
@@ -47,7 +48,26 @@ try {
   addComponent(world, player, CarryCapacity);
   CarryCapacity.maxWeight[player] = 100;
   assert.equal(maxCarryWeight(world, player), 100, "combat-test player can carry 100kg");
-  console.log("30m combat room, raised floor, wall dressing, weapon table and projectile barrel passed");
+
+  // Regression check: a long, thin dynamic body (every world item falls
+  // under gravity -- see spawning.ts's buildItemWorldBody) resting on too
+  // shallow a surface can tip and settle standing on end rather than lying
+  // flat, exactly what happened to the greatsword before it and the
+  // quarterstaff got their own deeper second table. After physics has had
+  // a few seconds to settle, each one's own long axis (local +Z, "tip" by
+  // every sword-derived mesh's own authored convention -- see sword.ts's
+  // header comment) should still read as mostly horizontal, not vertical.
+  for (let i = 0; i < 180; i++) physics.world.step();
+  dynamicSyncSystem(world);
+  for (const weaponId of ["quarterstaff", "greatsword"]) {
+    const eid = query(world, [Item]).find((e) => Item.itemTypeId[e] === weaponId);
+    assert.ok(eid !== undefined, `${weaponId} exists in the world`);
+    const q = new THREE.Quaternion(PhysicsRotation.x[eid], PhysicsRotation.y[eid], PhysicsRotation.z[eid], PhysicsRotation.w[eid]);
+    const tipDirection = new THREE.Vector3(0, 0, 1).applyQuaternion(q);
+    assert.ok(Math.abs(tipDirection.y) < 0.5, `${weaponId} settles lying roughly flat on the second table, not standing on end (tip direction y: ${tipDirection.y})`);
+  }
+
+  console.log("30m combat room, raised floor, wall dressing, weapon tables (including a deeper one for the quarterstaff/greatsword) and projectile barrel passed");
 } finally {
   await server.close();
 }
