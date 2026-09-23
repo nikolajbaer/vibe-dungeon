@@ -641,13 +641,13 @@ export interface ViewmodelTuning {
   /**
    * A throwable weapon's held ready pose, declared the same right-handed-
    * delta-from-resting way `swingChamberPos`/`Rot` are (see that field's own
-   * doc comment for the full derivation technique) -- for a right-handed
-   * hold, hefted up and back near the shoulder on the wielder's *own* side
-   * (not crossed over the body like a blade's chamber), tip angled steeply
-   * up and slightly outward, ready to throw straight ahead. Reached
-   * gradually over `throwRaiseSeconds` while held, the same
-   * ease-then-hold-indefinitely shape the swing's own chamber uses
-   * (`viewmodelSwingSystem`'s "throw" branch).
+   * doc comment for the full derivation technique) -- level and pointed
+   * straight ahead at a slight upward incline (about 10 degrees), the way a
+   * javelin is actually presented just before it's thrown, rather than the
+   * blade-style chamber's crossed-over-the-body wind-up. Reached gradually
+   * over `throwRaiseSeconds` while held, the same ease-then-hold-indefinitely
+   * shape the swing's own chamber uses (`viewmodelSwingSystem`'s "throw"
+   * branch).
    *
    * Unlike `swingEnd*`, there's no matching release pose: throwing isn't an
    * animated swing at all, it's the weapon leaving the hand outright the
@@ -693,8 +693,8 @@ const DEFAULT_TUNING: Readonly<ViewmodelTuning> = {
   swingEndRot: [1.0427, 1.7742, 4.479],
   swingCutEndT: 0.75,
   throwRaiseSeconds: 0.25,
-  throwChamberPos: [0, 0.15, 0.05],
-  throwChamberRot: [0.1776, 0.5532, 3.2671],
+  throwChamberPos: [-0.05, 0.05, -0.15],
+  throwChamberRot: [-0.3536, 0.4198, 2.9082],
   blockRaiseSeconds: 0.15,
   blockLowerSeconds: 0.15,
   blockRaise: 0.14,
@@ -1001,9 +1001,10 @@ function mirroredPose(base: { pos: THREE.Vector3Tuple; rot: THREE.EulerTuple }, 
  *   right-handed weapon chambers left-across-the-body and cuts clockwise
  *   (seen from above) through to the right, and a left-handed one is the
  *   exact mirror.
- * - **throw**: a throwable weapon's (the javelin's) own held charge --
- *   hefted up and back near the shoulder (`tuning.throwChamberPos`/`Rot`)
- *   while held, same ease-and-hold shape as `swing`'s own chamber. There's
+ * - **throw**: a throwable weapon's (the javelin's) own held charge -- leveled
+ *   out and pointed straight ahead at a slight upward incline
+ *   (`tuning.throwChamberPos`/`Rot`) while held, same ease-and-hold shape as
+ *   `swing`'s own chamber. There's
  *   no release phase to animate here at all: `throwingCombat.ts` detaches
  *   the viewmodel entirely the instant the throw fires
  *   (`releaseViewmodelThrow`), so this state never actually reaches a
