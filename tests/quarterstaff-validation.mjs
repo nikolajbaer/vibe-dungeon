@@ -1,15 +1,17 @@
 import assert from 'node:assert/strict';
 import { createServer } from 'vite';
 
-// The quarterstaff (issue: first two-handed *melee* weapon, the crossbow
-// being two-handed but ranged-only): less damage and reach than the sword,
-// traded for more reach, a slower recovery, and a higher stamina cost via
-// ItemAssetDef.attackRecoveryMultiplier/attackStaminaMultiplier -- new
-// fields this weapon is also the first to use. Real hit detection (does a
-// longer reach actually land where a sword's wouldn't) is already covered
-// generically by melee-collision-validation.mjs; this file covers the
-// weapon-specific data actually flowing through combat.ts's shared attack
-// path, plus the asset's own stat declarations and mesh sanity.
+// The quarterstaff (first two-handed *melee* weapon, the crossbow being
+// two-handed but ranged-only): less damage than the sword, traded for more
+// reach, a uniformly slower recovery, and a higher stamina cost via
+// ItemAssetDef.attackMultipliers -- the same jab/swing recovery/stamina
+// values under both, unlike the greatsword's deliberately different ones
+// (greatsword-validation.mjs). Real hit detection (does a longer reach
+// actually land where a sword's wouldn't) is covered generically by
+// melee-collision-validation.mjs, alongside the greatsword's own equivalent
+// reach test; this file covers the weapon-specific data actually flowing
+// through combat.ts's shared attack path, plus the asset's own stat
+// declarations and mesh sanity.
 
 const server = await createServer({ server: { middlewareMode: true }, appType: 'custom' });
 try {
@@ -30,9 +32,11 @@ try {
   assert.ok(quarterstaff.meleeDamage < sword.meleeDamage, 'less damage than the sword');
   assert.ok(quarterstaff.meleeReach > sword.meleeReach, 'more reach than the sword');
   assert.equal(quarterstaff.twoHanded, true, 'occupies both hands, like the crossbow');
-  assert.ok(quarterstaff.attackRecoveryMultiplier > 1, 'slower recovery than the sword\'s implicit 1x');
-  assert.ok(quarterstaff.attackStaminaMultiplier > 1, 'costs more stamina than the sword\'s implicit 1x');
-  assert.ok(!sword.attackRecoveryMultiplier && !sword.attackStaminaMultiplier, 'the sword itself is unaffected -- still an implicit 1x');
+  for (const attackType of ['jab', 'swing']) {
+    assert.ok(quarterstaff.attackMultipliers[attackType].recovery > 1, `${attackType}: slower recovery than the sword's implicit 1x`);
+    assert.ok(quarterstaff.attackMultipliers[attackType].stamina > 1, `${attackType}: costs more stamina than the sword's implicit 1x`);
+  }
+  assert.ok(!sword.attackMultipliers, 'the sword itself is unaffected -- still an implicit 1x');
 
   // Mesh sanity: a real, renderable merged geometry with the three material
   // groups (wood shaft, metal caps, grip wrap) createQuarterstaffMesh builds.
@@ -81,8 +85,8 @@ try {
 
     const { world: staffWorld, player: staffPlayer } = spawnPlayerWith('quarterstaff');
     assert.equal(tryMeleeAttack(staffWorld, attackType), true);
-    assert.equal(Combat.attackRecovery[staffPlayer], base.recovery * quarterstaff.attackRecoveryMultiplier, `${attackType}: quarterstaff recovery is multiplied`);
-    assert.equal(Stamina.current[staffPlayer], 1000 - baseCost * quarterstaff.attackStaminaMultiplier, `${attackType}: quarterstaff stamina cost is multiplied`);
+    assert.equal(Combat.attackRecovery[staffPlayer], base.recovery * quarterstaff.attackMultipliers[attackType].recovery, `${attackType}: quarterstaff recovery is multiplied`);
+    assert.equal(Stamina.current[staffPlayer], 1000 - baseCost * quarterstaff.attackMultipliers[attackType].stamina, `${attackType}: quarterstaff stamina cost is multiplied`);
   }
 
   // The held-charge path (tryStartSwingCharge/releaseSwingCharge) gates and
@@ -92,8 +96,8 @@ try {
     assert.equal(tryStartSwingCharge(world), true);
     assert.equal(Stamina.current[player], 1000, 'charging itself never spends stamina -- only release does');
     assert.equal(releaseSwingCharge(world), true);
-    assert.equal(Stamina.current[player], 1000 - ATTACK_STAMINA_COST.swing * quarterstaff.attackStaminaMultiplier, 'release spends the multiplied swing cost');
-    assert.equal(Combat.attackRecovery[player], ATTACK_PROFILES.swing.recovery * quarterstaff.attackRecoveryMultiplier, 'release sets the multiplied swing recovery');
+    assert.equal(Stamina.current[player], 1000 - ATTACK_STAMINA_COST.swing * quarterstaff.attackMultipliers.swing.stamina, 'release spends the multiplied swing cost');
+    assert.equal(Combat.attackRecovery[player], ATTACK_PROFILES.swing.recovery * quarterstaff.attackMultipliers.swing.recovery, 'release sets the multiplied swing recovery');
   }
 
   // A too-small stamina pool for the quarterstaff's multiplied cost is

@@ -79,13 +79,17 @@ const quarterstaff: ItemAssetDef = {
   icon: "🦯",
   slot: "hand",
   twoHanded: true,
-  // Less damage and a slower, more stamina-hungry swing than the sword
-  // (15/1/1), traded for meaningfully longer reach -- a reach weapon that
-  // whiff-punishes rather than trades blows toe-to-toe.
+  // Less damage than the sword's 15, traded for meaningfully longer reach
+  // -- a reach weapon that whiff-punishes rather than trades blows
+  // toe-to-toe. Uniformly slower and more stamina-hungry regardless of
+  // attack type (unlike the greatsword's jab/swing split) -- a quarterstaff
+  // is heavy and awkward to recover with no matter how you're swinging it.
   meleeDamage: 12,
   meleeReach: 2.0,
-  attackRecoveryMultiplier: 1.4,
-  attackStaminaMultiplier: 1.35,
+  attackMultipliers: {
+    jab: { recovery: 1.4, stamina: 1.35 },
+    swing: { recovery: 1.4, stamina: 1.35 },
+  },
   mass: 2.5,
   createWorldMesh: createQuarterstaffMesh,
   createViewmodelMesh: () => {
