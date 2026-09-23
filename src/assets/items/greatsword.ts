@@ -48,17 +48,12 @@ const greatsword: ItemAssetDef = {
     mesh.scale.setScalar(0.85);
     return mesh;
   },
-  // Held centered with both hands, the same fixed-transform pattern
-  // quarterstaff.ts/crossbow.ts use -- see viewmodelSwingSystem's `custom`
-  // lookup (ecs/systems/items.ts) for how jab/swing/block animate around
-  // this instead of the generic per-hand VIEWMODEL_OFFSET.
-  // Derived the same way sword.ts's own per-hand VIEWMODEL_OFFSET was: pose
-  // the mesh with `Object3D.lookAt` aiming the blade up and into the scene
-  // ahead of the camera, then read back the resulting Euler angles -- see
-  // that file's header comment for the full method. Centered (x: 0) rather
-  // than per-hand-offset, the same fixed-transform pattern crossbow.ts/
-  // quarterstaff.ts use for their own two-handed grip.
-  viewmodelTransform: { position: [0, -0.3, -0.4], rotation: [-2.0608, 0, -Math.PI] },
+  // No `viewmodelTransform` -- despite being two-handed like the crossbow/
+  // quarterstaff, its *default* held pose is meant to sit off to the side
+  // like the one-handed sword/dagger's, not centered, so it falls back to
+  // the same per-hand `VIEWMODEL_OFFSET` they use (see
+  // `viewmodelSwingSystem`'s `custom` lookup, ecs/systems/items.ts). Its
+  // greater length just rides along at that offset's existing scale/angle.
 };
 
 export default greatsword;
