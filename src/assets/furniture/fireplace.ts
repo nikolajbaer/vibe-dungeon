@@ -59,10 +59,24 @@ function fireMaterial(): THREE.MeshStandardMaterial {
   }));
 }
 
+/** Asset-specific placement params: `scale` grows the whole fireplace
+ * uniformly (surround, hearth, logs, flames all together) for a grander
+ * great-hall-sized hearth, without a second near-duplicate asset — the same
+ * "one asset, a params knob for the one thing that actually varies"
+ * reasoning banner.ts's `BannerParams` uses for heraldry colors. Applied as
+ * a uniform `Object3D.scale` on the finished group rather than threading a
+ * multiplier through every dimension constant above, since every part of a
+ * fireplace should grow together, never independently. Omit (or `1`) for
+ * room-a's original size. */
+export interface FireplaceParams {
+  scale?: number;
+}
+
 /** A stone surround with a mantel shelf, a dark recessed hearth, a few
  * crossed logs, and small emissive "flame" cones nestled among them. */
-function createFireplaceMesh(): THREE.Group {
+function createFireplaceMesh(params?: FireplaceParams): THREE.Group {
   const group = new THREE.Group();
+  group.scale.setScalar(params?.scale ?? 1);
 
   const surround = new THREE.Mesh(new THREE.BoxGeometry(SURROUND_WIDTH, SURROUND_HEIGHT, SURROUND_DEPTH), stoneMaterial());
   surround.position.set(0, SURROUND_HEIGHT / 2, -SURROUND_DEPTH / 2);
@@ -100,10 +114,13 @@ function createFireplaceMesh(): THREE.Group {
   return group;
 }
 
-const fireplace: FurnitureAssetDef = {
+const fireplace: FurnitureAssetDef<FireplaceParams> = {
   id: "fireplace",
-  createMesh: () => createFireplaceMesh(),
-  footprint: { hx: SURROUND_WIDTH / 2, hz: SURROUND_DEPTH / 2, hy: SURROUND_HEIGHT / 2 },
+  createMesh: (params) => createFireplaceMesh(params),
+  footprint: (params) => {
+    const scale = params?.scale ?? 1;
+    return { hx: (SURROUND_WIDTH / 2) * scale, hz: (SURROUND_DEPTH / 2) * scale, hy: (SURROUND_HEIGHT / 2) * scale };
+  },
 };
 
 export default fireplace;

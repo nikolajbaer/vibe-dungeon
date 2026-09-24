@@ -3,29 +3,28 @@ import { wallsOf } from "../tiles";
 
 /**
  * A `great_hall` variant with one extra opening on its local **west** face,
- * middle segment — used only by `room-b` (see `rooms/room-b.ts`), to branch
- * the new downward cellar staircase off it (cellar wing task) without
- * touching `great_hall` itself, which `room-a` also uses unmodified.
+ * middle segment — originally added so `room-b` (see `rooms/room-b.ts`)
+ * could branch the downward cellar staircase off it (cellar wing task)
+ * without touching plain `great_hall`, which `room-a` used unmodified at the
+ * time.
  *
  * This is the same technique `docs/LEVEL_DESIGN.md`'s "worked example"
  * section describes for `hallway` -> `hallway_junction`: a new type that's a
  * strict superset of the old one's openings (same footprint, same existing
- * door, plus one more opening), with only the *one* instance that needs the
- * extra connection (`room-b`) swapped onto it — `room-a` keeps using
- * `great_hall` untouched, so its own solid west wall is completely
- * unaffected. Unlike the `hallway`/`hallway_junction` case, `great_hall` has
- * *two* instances (`room-a` and `room-b`), which is exactly why this can't
- * be an in-place edit to `great_hall.ts` the way `nook`-adjacent retrofits
- * sometimes are for a type with only one instance — editing the shared type
- * would silently add the same opening to `room-a` too, and `room-a`'s local
- * west face has nothing behind it, which `validateOccupancy` would (rightly)
- * reject as an opening facing empty space.
+ * door, plus one more opening). `room-b` places it at `rotation: 180`; local
+ * west maps to world **east** at that rotation (see `rooms/room-b.ts`'s own
+ * header comment on how 180 degrees swaps local east/west), landing the
+ * opening on room-b's east wall, well clear of its shrine/barrel decor.
  *
- * Room-b places this type at `rotation: 180`; local west maps to world
- * **east** at that rotation (see `rooms/room-b.ts`'s own header comment on
- * how 180 degrees swaps local east/west), landing the new opening on
- * room-b's east wall, well clear of its existing shrine/barrel decor (see
- * that file for the exact world cell this resolves to).
+ * `room-a` (great-hall wing task) now uses this same type too, at
+ * `rotation: 0` — local west stays world west unrotated, landing a matching
+ * opening on room-a's own west wall for the new passage into `castle_hall`
+ * (see `rooms/room-a.ts` and `rooms/castle-hall.ts`). Plain `great_hall` has
+ * no other users left as of that change and was retired outright (same "one
+ * evolved type, not a strictly-narrower type left lying around as dead code"
+ * reasoning `hallway_junction` got when `hallway_cross` superseded it — see
+ * that type's own doc comment) — this one type now covers both of
+ * `great_hall`'s two former instances, one per rotation.
  */
 const greatHallBranch: TileType = {
   id: "great_hall_branch",
