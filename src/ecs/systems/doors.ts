@@ -140,7 +140,7 @@ const ndc = new THREE.Vector2();
  * doorway looking straight through it (the natural way to want to close it)
  * doesn't aim at either leaf at all — see that function's own doc comment.
  */
-export function tryInteract(world: World, camera: THREE.Camera, screenPoint?: { x: number; y: number }): boolean {
+export function tryInteract(world: World, camera: THREE.Camera, scene: THREE.Scene, screenPoint?: { x: number; y: number }): boolean {
   const interactables: THREE.Object3D[] = [];
   for (const eid of query(world, [Door, Object3DRef])) {
     const obj = Object3DRef[eid];
@@ -201,17 +201,17 @@ export function tryInteract(world: World, camera: THREE.Camera, screenPoint?: { 
 
     const hits = raycaster.intersectObjects(interactables, true);
     const hitEid = hits.length > 0 ? (hits[0].object.userData.eid as number | undefined) : undefined;
-    if (hitEid !== undefined && dispatchInteract(world, hitEid)) return true;
+    if (hitEid !== undefined && dispatchInteract(world, hitEid, scene)) return true;
   }
 
-  if (tryPickupNearbyItem(world)) return true;
+  if (tryPickupNearbyItem(world, scene)) return true;
   return tryCloseNearbyOpenDoor(world);
 }
 
 /** Dispatches a raycast hit on `hitEid` to whichever interactable type it
  * actually is — factored out of `tryInteract` so both the aim-based raycast
  * and (for items) the proximity fallback below can share it. */
-function dispatchInteract(world: World, hitEid: number): boolean {
+function dispatchInteract(world: World, hitEid: number, scene: THREE.Scene): boolean {
   if (hasComponent(world, hitEid, Door)) return toggleDoor(world, hitEid);
   if (hasComponent(world, hitEid, NPC)) {
     // A dead NPC (any archetype, docile or aggressive) opens the same loot
@@ -231,7 +231,7 @@ function dispatchInteract(world: World, hitEid: number): boolean {
     toggleNpcFollow(hitEid);
     return true;
   }
-  if (hasComponent(world, hitEid, Item)) return pickUpItemEid(world, hitEid);
+  if (hasComponent(world, hitEid, Item)) return pickUpItemEid(world, hitEid, scene);
   if (hasComponent(world, hitEid, Readable)) {
     noticeStore.open(hitEid);
     return true;
@@ -250,10 +250,10 @@ function showPickUpRefusal(result: PickUpResult): void {
   else if (result === "inventory-full") hudStore.showMessage("Inventory is full.");
 }
 
-function pickUpItemEid(world: World, itemEid: number): boolean {
+function pickUpItemEid(world: World, itemEid: number, scene: THREE.Scene): boolean {
   const [playerEid] = query(world, [PlayerControlled]);
   if (playerEid === undefined) return false;
-  showPickUpRefusal(pickUpItem(world, itemEid, playerEid));
+  showPickUpRefusal(pickUpItem(world, itemEid, playerEid, scene));
   return true; // handled either way — don't fall through to something else
 }
 
@@ -265,7 +265,7 @@ function pickUpItemEid(world: World, itemEid: number): boolean {
  * e.g. `npc.ts`'s aggro/leash ranges): an item resting on a tabletop versus
  * the floor shouldn't change whether walking up to it lets you grab it.
  */
-function tryPickupNearbyItem(world: World): boolean {
+function tryPickupNearbyItem(world: World, scene: THREE.Scene): boolean {
   const [playerEid] = query(world, [PlayerControlled]);
   if (playerEid === undefined) return false;
   const px = Position.x[playerEid];
@@ -282,7 +282,7 @@ function tryPickupNearbyItem(world: World): boolean {
     }
   }
   if (nearestEid === undefined) return false;
-  showPickUpRefusal(pickUpItem(world, nearestEid, playerEid));
+  showPickUpRefusal(pickUpItem(world, nearestEid, playerEid, scene));
   return true; // handled either way — don't fall through to something else
 }
 

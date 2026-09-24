@@ -1,6 +1,6 @@
 import * as THREE from "three";
 import { addComponent, addEntity, hasComponent, query, removeComponent, type World } from "bitecs";
-import { Carried, CarryCapacity, Container, Embedded, Item, Object3DRef, PhysicsBody, Stackable, Viewmodel, type CarriedSlot } from "../components";
+import { Carried, CarryCapacity, Container, Embedded, Item, Object3DRef, PhysicsBody, PhysicsRotation, Stackable, Viewmodel, type CarriedSlot } from "../components";
 import { ITEM_REGISTRY } from "../../assets/itemRegistry";
 
 export type HandSlot = "hand-left" | "hand-right";
@@ -277,8 +277,11 @@ export type PickUpResult = "picked-up" | "too-heavy" | "inventory-full";
  * gets that message even when the list also happens to be full) —
  * `doors.ts` is expected to show a message either way and still treat the
  * interact as handled.
+ *
+ * `scene` is only needed for the embedded-projectile case (see below) — an
+ * ordinary item pickup never touches it.
  */
-export function pickUpItem(world: World, itemEid: number, ownerEid: number): PickUpResult {
+export function pickUpItem(world: World, itemEid: number, ownerEid: number, scene: THREE.Scene): PickUpResult {
   if (wouldExceedCarryWeight(world, ownerEid, itemEid)) return "too-heavy";
   if (wouldExceedInventorySlots(world, ownerEid, itemEid)) return "inventory-full";
 
@@ -287,12 +290,29 @@ export function pickUpItem(world: World, itemEid: number, ownerEid: number): Pic
   const obj = Object3DRef[itemEid];
   if (obj) obj.visible = false;
 
-  // An embedded projectile's object is parented to whatever it struck, not
-  // the scene (see `Embedded`'s doc comment) -- clear the tag once it's
-  // picked up so a later drop (which always reparents a fresh mesh under
-  // the scene, via `buildItemWorldBody`) gets the ordinary generic sync
-  // back rather than staying permanently skipped by `syncSystem`.
-  if (hasComponent(world, itemEid, Embedded)) removeComponent(world, itemEid, Embedded);
+  // An embedded projectile's object is parented to whatever it struck (a
+  // character's own bone), not the scene, and `throwingCombat.ts`'s
+  // `stickInCharacter` strips its `PhysicsRotation` so the struck bone's own
+  // transform isn't fought every frame (see that function's doc comment).
+  // Both need undoing here, not just the `Embedded` tag: reparent the mesh
+  // back under the scene (`attach` keeps its current world transform, though
+  // it's about to be hidden anyway) and restore `PhysicsRotation` from the
+  // body's own last orientation, so a later drop/throw gets the ordinary
+  // `dynamicSyncSystem`/`syncSystem` treatment back instead of the mesh
+  // staying parented to a (possibly moving) bone forever and never being
+  // synced to its physics body's new position again.
+  if (hasComponent(world, itemEid, Embedded)) {
+    removeComponent(world, itemEid, Embedded);
+    if (obj && obj.parent !== scene) scene.attach(obj);
+    if (!hasComponent(world, itemEid, PhysicsRotation)) {
+      addComponent(world, itemEid, PhysicsRotation);
+      const r = PhysicsBody[itemEid]?.rotation();
+      PhysicsRotation.x[itemEid] = r?.x ?? 0;
+      PhysicsRotation.y[itemEid] = r?.y ?? 0;
+      PhysicsRotation.z[itemEid] = r?.z ?? 0;
+      PhysicsRotation.w[itemEid] = r?.w ?? 1;
+    }
+  }
 
   // Disabled rather than removed from the physics world, for the same reason
   // the mesh is hidden rather than deleted: a future "drop" is then just

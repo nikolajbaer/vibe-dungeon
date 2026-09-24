@@ -19,13 +19,13 @@ const server = await createServer({ server: { middlewareMode: true }, appType: '
 try {
   const { addComponent, addEntity, createWorld, hasComponent } = await import('bitecs');
   const {
-    Carried, Combat, CharacterBody, DynamicBody, Embedded, Health, Item, Object3DRef, PhysicsBody, PhysicsRotation, PlayerControlled, Position, Rotation, Stamina,
+    Carried, Combat, CharacterBody, Dead, DynamicBody, Embedded, Health, Item, Object3DRef, PhysicsBody, PhysicsRotation, PlayerControlled, Position, Rotation, Stamina,
   } = await server.ssrLoadModule('/src/ecs/components.ts');
   const { default: javelin } = await server.ssrLoadModule('/src/assets/items/javelin.ts');
   const { default: sword } = await server.ssrLoadModule('/src/assets/items/sword.ts');
   const { default: dagger } = await server.ssrLoadModule('/src/assets/items/dagger.ts');
   const {
-    DUAL_WIELD_MAX_COMBINED_WEIGHT, wouldExceedDualWieldWeight,
+    DUAL_WIELD_MAX_COMBINED_WEIGHT, wouldExceedDualWieldWeight, pickUpItem,
   } = await server.ssrLoadModule('/src/ecs/systems/items.ts');
   const { ATTACK_PROFILES, ATTACK_STAMINA_COST } = await server.ssrLoadModule('/src/ecs/systems/combat.ts');
   const { initPhysics, createPhysics, addDynamicBox, addCharacter } = await server.ssrLoadModule('/src/physics/world.ts');
@@ -249,8 +249,54 @@ try {
     assert.equal(Object3DRef[weapon].parent, Object3DRef[targetEid], 'reparented onto the target\'s own mesh, not left a child of the scene');
     assert.equal(body.isEnabled(), false, 'the physics body is frozen once stuck -- it no longer drives the (now parent-relative) visual position');
     assert.equal(hasComponent(world, weapon, PhysicsRotation), false, 'PhysicsRotation is dropped so syncSystem\'s quaternion loop (no Embedded skip) leaves the attach()-given local rotation alone');
+
+    // Mirrors what the real game's death handling does once Health hits 0
+    // (not run by this test) -- without it, the first target would still be
+    // a live, hitbox-registered "character" sitting right where the second
+    // one spawns, and the re-thrown javelin's hit-scan could just as easily
+    // (re-)strike the old corpse instead of the new target below.
+    addComponent(world, targetEid, Dead);
+    PhysicsBody[targetEid].setEnabled(false); // a corpse doesn't block a second throw's flight path either
+
+    // Regression check: pulling a stuck javelin back out (pickUpItem) and
+    // throwing it again used to go nowhere -- `stickInCharacter` strips
+    // `PhysicsRotation` and reparents the mesh onto the struck bone/mesh, and
+    // nothing undid either of those on pickup. Without `PhysicsRotation`,
+    // `dynamicSyncSystem` (which requires it) never copies the physics
+    // body's new translation back into `Position` again, so the re-thrown
+    // javelin's real Rapier flight was invisible -- it physically moved, but
+    // its mesh just sat wherever `tryThrowWeapon` last placed it, still a
+    // child of the (now-dead) target's mesh instead of the scene.
+    assert.equal(pickUpItem(world, weapon, player, scene), 'picked-up');
+    assert.equal(hasComponent(world, weapon, Embedded), false, 'pickup clears the Embedded tag');
+    assert.equal(Object3DRef[weapon].parent, scene, 'pickup reparents the mesh back under the scene, not left a child of the corpse');
+    assert.equal(hasComponent(world, weapon, PhysicsRotation), true, 'pickup restores PhysicsRotation so dynamicSyncSystem/syncSystem sync it again');
+
+    // A different spot than the first target's (-6), not just a different
+    // eid -- the first target's own physics capsule is still sitting there
+    // (marking it `Dead` above only affects the manual hit-scan, not Rapier
+    // itself), and there's no reason to make the javelin's real flight plow
+    // through it on the way to this one.
+    const secondTarget = spawnCharacterTarget(world, 0, -9);
+    meleeCollisionSystem(world, physics, 0); // registers the new target's own combat hitboxes, same as before the first throw
+    Carried.slot[weapon] = 'hand-right'; // simulate re-equipping it from the inventory slot pickUpItem left it in
+    Combat.attackRecovery[player] = 0; // the first throw's own recovery window has long since elapsed by now, same as real play
+    assert.equal(throwing.tryStartThrowCharge(world, 'hand-right'), true, 'can charge a second throw after picking it back up');
+    assert.equal(throwing.tryThrowWeapon(world, physics, camera, scene, 'hand-right'), true, 'release throws it again');
+
+    let hitAgain = false;
+    for (let i = 0; i < 120 && !hitAgain; i++) {
+      physics.world.step();
+      throwing.throwingCombatSystem(world, 1 / 60);
+      if (throwing.getThrowingCombatDebugState().flying === 0) hitAgain = true;
+    }
+    assert.ok(hitAgain, 'the re-thrown javelin actually resolves -- it really flew across the room, not stuck in place');
+    assert.ok(Health.current[secondTarget] <= 0, 'the re-thrown javelin still deals damage on its second flight');
+    assert.equal(hasComponent(world, weapon, Embedded), true, 'and sticks in the new target same as the first time');
+    assert.equal(Object3DRef[weapon].parent, Object3DRef[secondTarget], 'reparented onto the new target this time, not the old corpse');
   }
   console.log('javelin throw: charge, release, real rigid-body flight, and a block-bypassing lethal hit that sticks to the target\'s own mesh passed');
+  console.log('javelin throw: pulling a stuck javelin back out and throwing it again actually flies and sticks in the new target passed');
 
   // --- Hitting a dynamic prop (a barrel, a dropped item) is NOT a
   // character hit -- Rapier's own collision response knocks it around for

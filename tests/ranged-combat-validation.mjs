@@ -120,7 +120,7 @@ try {
   assert.ok(afterSyncPosition.distanceTo(embeddedWorldPosition)<1e-6,
     `syncSystem must not move an embedded bolt (before ${embeddedWorldPosition.toArray()}, after ${afterSyncPosition.toArray()})`);
 
-  assert.equal(pickUpItem(world,recovered,player),'picked-up');
+  assert.equal(pickUpItem(world,recovered,player,scene),'picked-up');
   assert.ok(!hasComponent(world,recovered,Embedded),'pickup clears the Embedded tag so a later drop gets ordinary generic sync back');
   assert.equal(Stackable.count[ammo],3,'recovered bolt merges back into ammo stack');
 

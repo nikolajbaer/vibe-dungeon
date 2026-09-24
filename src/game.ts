@@ -920,7 +920,7 @@ export function startGame(container: HTMLElement, options: StartGameOptions = {}
     // real cursor position to give it — so it falls back to the reticle.
     // See `tryInteract`'s own doc comment for why these are genuinely
     // different rays, not the same one in disguise.
-    if (interactRequested && !isModalActive()) tryInteract(world, camera, touchInteractPoint ?? undefined);
+    if (interactRequested && !isModalActive()) tryInteract(world, camera, scene, touchInteractPoint ?? undefined);
 
     // Digit1 is a plain, always-instant alternate jab trigger (ranged still
     // takes priority if a ranged weapon is equipped, exactly like the mouse/
