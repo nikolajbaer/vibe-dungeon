@@ -893,6 +893,11 @@ export function startGame(container: HTMLElement, options: StartGameOptions = {}
         physics.world.step();
         physicsSyncSystem(world);
         dynamicSyncSystem(world);
+        // A thrown javelin is a real rigid body driven by the step just
+        // above -- this only watches for the one thing plain Rapier
+        // collision can't resolve on its own (a hit on a kinematic
+        // character); see throwingCombat.ts's own header comment.
+        throwingCombatSystem(world, PHYSICS_DT);
       }
       if (steps === MAX_PHYSICS_STEPS_PER_FRAME) accumulator = 0;
       resolvePractice();
@@ -1056,7 +1061,6 @@ export function startGame(container: HTMLElement, options: StartGameOptions = {}
     viewmodelSwingSystem(dt);
     if (!isModalActive()) {
       rangedCombatSystem(world, physics, scene, dt);
-      throwingCombatSystem(world, physics, scene, dt);
       // meleeCollisionSystem only resolves *which* swings connected (real
       // Rapier sensor-cylinder geometry, replacing the old raycast-vs-distance
       // split between the player and NPCs) -- applying the actual damage
