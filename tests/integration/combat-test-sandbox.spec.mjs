@@ -95,6 +95,29 @@ try {
   const health = await debug("getHealth");
   assert(health.current === health.max, `player health restored the instant every opponent is dead (${health.current}/${health.max})`);
 
+  // --- a combat-test opponent looks like its archetype but never offers
+  // that archetype's dialogue (issue: guard-visual sparring dummies were
+  // popping the real "guard-greeting" dialogue on interact) ---
+  await page.click('[data-testid="opponent-config-open"]');
+  await page.waitForSelector('[data-testid="opponent-config-panel"]');
+  await setRange(0, 60);
+  await setRange(2, 1); // count = 1
+  await setSelect(0, "sword"); // -> the "guard" archetype (ARCHETYPE_FOR_WEAPON)
+  await setSelect(1, "passive");
+  await setSelect(2, "1");
+  await page.click('[data-testid="opponent-config-spawn"]');
+  await page.waitForTimeout(300);
+  const dummy = (await debug("getNpcState")).find((n) => !n.dead);
+  assert(dummy.archetypeId === "guard", `spawned the guard archetype for its mesh/stats (got ${dummy.archetypeId})`);
+  await debug("teleportPlayer", dummy.x, 0, dummy.z + 1);
+  const dpos = await debug("getPlayerPosition");
+  const ddx = dummy.x - dpos.x, ddz = dummy.z - dpos.z;
+  await page.evaluate((y) => window.__vibeDungeonDebug.setYaw(y), Math.atan2(-ddx, -ddz));
+  await page.waitForTimeout(150);
+  await page.keyboard.press("KeyE");
+  await page.waitForTimeout(200);
+  assert(!(await debug("getDialogueState")).isOpen, "interacting with a combat-test guard dummy never opens the real guard's dialogue");
+
   // --- two different teams actually fight each other ---
   // Every prior spawn closed the panel (onSpawn's own setOpen(false)); the
   // "Configure opponent" button re-opens it.
