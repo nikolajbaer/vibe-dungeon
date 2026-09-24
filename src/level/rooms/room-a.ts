@@ -3,14 +3,25 @@ import type { RoomContent } from "../placementTypes";
 // Room-a: the level's starting room (issue #21), plus a small rest-area
 // furniture grouping, a couple of west-wall touches, and the level's first
 // two world items (issue #40, extended by #70 and #75). Room A
-// (great_hall, unrotated) has its one door on its south face at grid x=0;
-// see room-b.ts/corridor.ts for how the rest of the original layout
+// (great_hall_branch, unrotated) has its one door on its south face at grid
+// x=0; see room-b.ts/corridor.ts for how the rest of the original layout
 // connects to it, and docs/LEVEL_DESIGN.md for the tile system itself.
 //
-// Room-a (great_hall, unrotated, originCell {x:-1,z:0}) spans world x in
-// [-3,6], z in [0,9], with its one door on the south face (world z=0, x in
+// Room-a (great_hall_branch, unrotated, originCell {x:-1,z:0}) spans world x
+// in [-3,6], z in [0,9], with its one door on the south face (world z=0, x in
 // [0,3]) and interior clear space roughly [-2.85,5.85] x [0.15,8.85] once
 // wall thickness is accounted for.
+//
+// Great-hall wing task: room-a's tile type changed from plain `great_hall`
+// to `great_hall_branch` (see that type's own doc comment) to open a second
+// connection — local west's middle segment, unaffected by rotation (0)
+// here — landing a new door on this room's own west wall, world x=-3, z in
+// [3,6], into the castle's great hall (`rooms/castle-hall.ts`). That opening
+// falls right where the crossed-swords/candelabra grouping used to sit (see
+// the "great-room decor pass" comment further down, before this task moved
+// them) — both relocated north of it, past z=6, onto the same wall's now-bare
+// remaining segment; the west-wall banner at z=2.2 was already clear on the
+// other side and didn't need to move.
 //
 // The player spawns at (1.5,7.5) and the villager NPC (issue #36, now the
 // first docile archetype — src/assets/npcs/villager.ts) loiters around
@@ -43,7 +54,7 @@ const roomA: RoomContent = {
   tiles: [
     {
       id: "room-a",
-      tileTypeId: "great_hall",
+      tileTypeId: "great_hall_branch",
       originCell: { x: -1, z: 0 },
       rotation: 0,
       sectorId: "room-a",
@@ -65,24 +76,28 @@ const roomA: RoomContent = {
     // so the very first room already shows off looting a container.
     { id: "barrel", x: tableX + 1.0, z: tableZ + 1.2, contents: ["gem"] },
 
-    // West-side touches: a candelabra roughly mid-room on the west wall,
-    // plus a banner on each of the west and north walls — clear of the
-    // NPC's wander circle (center (1.5,3.5), radius 1.5), the player's
-    // spawn, both item spawns below, the door swing arc, and the NE
-    // furniture grouping above.
-    { id: "candelabra", x: -2.3, z: 4.6 },
+    // West-side touches: a candelabra on the west wall, plus a banner on
+    // each of the west and north walls — clear of the NPC's wander circle
+    // (center (1.5,3.5), radius 1.5), the player's spawn, both item spawns
+    // below, the door swing arc, and the NE furniture grouping above.
+    // Candelabra/crossed-swords sit north of the new west-wall opening
+    // (world z in [3,6], the great-hall wing task's passage to
+    // `castle_hall` — see header comment) rather than straddling it; the
+    // banner stays where it always was, already clear on the opening's
+    // south side.
+    { id: "candelabra", x: -2.3, z: 7.8 },
     // North wall banner, west of the furniture grouping (which sits up
     // against the same wall further east, around x~5.3).
     { id: "banner", x: -1.3, z: 8.8, rotation: Math.PI },
-    // West wall banner, south of the candelabra.
+    // West wall banner, south of the new opening.
     { id: "banner", x: -2.8, z: 2.2, rotation: Math.PI / 2 },
 
     // North wall fireplace, hearth facing south into the room -- see header
     // comment for clearances.
     { id: "fireplace", x: 2.3, z: 8.5, rotation: Math.PI },
-    // West wall crossed-swords trophy, between the banner and the
-    // candelabra -- see header comment for clearances.
-    { id: "crossed-swords", x: -2.8, z: 3.4, rotation: Math.PI / 2 },
+    // West wall crossed-swords trophy, north of the new opening, south of
+    // the candelabra.
+    { id: "crossed-swords", x: -2.8, z: 6.6, rotation: Math.PI / 2 },
   ],
   items: [
     { id: "sword", x: 4, z: 7 },
