@@ -9,6 +9,7 @@ import { NPC_REGISTRY } from "../assets/npcRegistry";
 import { ITEM_REGISTRY } from "../assets/itemRegistry";
 import { npcAnimationSystem } from "../ecs/systems/npcAnimation";
 import { createPhysics } from "../physics/world";
+import { COMPASS_CARDINALS, bearingFromForward, compassLabelOffset } from "../hud/compassMath";
 
 // The level viewer (menu's "View Tiles"): an external, free-orbit look at
 // the *authored* level — every tile instance, sector, and NPC/item spawn —
@@ -29,6 +30,8 @@ import { createPhysics } from "../physics/world";
 
 const SECTOR_OVERLAY_OPACITY = 0.45;
 const SECTOR_OVERLAY_Y = 0.05; // just above the floor slab (-0.1..+0.1) to avoid z-fighting
+
+const VIEWER_COMPASS_RADIUS_PX = 22;
 
 /** Deterministic (id -> color) so the same sector always gets the same
  * color across a session and across reloads, without hand-authoring a
@@ -187,7 +190,58 @@ function computeLevelBounds(occupancy: OccupancyIndex): LevelBounds {
   return { centerX, centerZ, radius: Math.max(sizeX, sizeZ, UNIT * 3) };
 }
 
-function setupViewerHud(container: HTMLElement, onExit: () => void, sectorColors: Map<string, number>): () => void {
+/**
+ * Builds the viewer's own reference compass — the free-orbit camera has no
+ * fixed "forward" the way the player does, so instead of the player's own
+ * `Rotation.yaw` (what `hud/Compass.tsx` reads), this reads the *camera's*
+ * current look direction each frame (`updateCompass` below, called from the
+ * render loop) and answers "which world direction am I currently looking
+ * toward" — handy alongside the sector legend for describing where a room
+ * actually sits (issue: orientation indicator).
+ *
+ * Reuses `hud-compass-dial`/`hud-compass-label`/`hud-compass-pointer` from
+ * `index.html` verbatim (the same handheld-compass-card visual as the
+ * in-game HUD widget) under a viewer-only positioning class
+ * (`viewer-compass`, bottom-right) — the top-right corner here is already
+ * claimed by the (open-ended, can grow tall) sector legend.
+ */
+function createViewerCompass(): { el: HTMLElement; update: (camera: THREE.Camera) => void } {
+  const el = document.createElement("div");
+  el.className = "hud-compass viewer-compass";
+
+  const pointer = document.createElement("div");
+  pointer.className = "hud-compass-pointer";
+  el.appendChild(pointer);
+
+  const dial = document.createElement("div");
+  dial.className = "hud-compass-dial";
+  el.appendChild(dial);
+
+  const labelEls = new Map<string, HTMLElement>();
+  for (const { label } of COMPASS_CARDINALS) {
+    const span = document.createElement("span");
+    span.className = label === "N" ? "hud-compass-label hud-compass-label-north" : "hud-compass-label";
+    span.textContent = label;
+    dial.appendChild(span);
+    labelEls.set(label, span);
+  }
+
+  const lookDir = new THREE.Vector3();
+  const update = (camera: THREE.Camera) => {
+    camera.getWorldDirection(lookDir);
+    const bearingDeg = bearingFromForward(lookDir.x, lookDir.z);
+    for (const { label, bearing } of COMPASS_CARDINALS) {
+      const { x, y } = compassLabelOffset(bearing, bearingDeg, VIEWER_COMPASS_RADIUS_PX);
+      const labelEl = labelEls.get(label)!;
+      labelEl.style.left = `calc(50% + ${x}px)`;
+      labelEl.style.top = `calc(50% + ${y}px)`;
+    }
+  };
+
+  return { el, update };
+}
+
+function setupViewerHud(container: HTMLElement, onExit: () => void, sectorColors: Map<string, number>): { remove: () => void; updateCompass: (camera: THREE.Camera) => void } {
   const el = document.createElement("div");
   el.id = "viewer-hud";
 
@@ -215,8 +269,11 @@ function setupViewerHud(container: HTMLElement, onExit: () => void, sectorColors
   }
   el.appendChild(legend);
 
+  const compass = createViewerCompass();
+  el.appendChild(compass.el);
+
   container.appendChild(el);
-  return () => el.remove();
+  return { remove: () => el.remove(), updateCompass: compass.update };
 }
 
 /**
@@ -268,7 +325,7 @@ export function startLevelViewer(container: HTMLElement, onExit: () => void): vo
   controls.maxDistance = bounds.radius * 6;
   controls.update();
 
-  const removeHud = setupViewerHud(container, exit, sectorColors);
+  const { remove: removeHud, updateCompass } = setupViewerHud(container, exit, sectorColors);
 
   // Debug-only hook for automated (Playwright) testing — lets a test place
   // the orbit camera exactly (e.g. dead overhead) rather than approximating
@@ -297,6 +354,7 @@ export function startLevelViewer(container: HTMLElement, onExit: () => void): vo
     const dt = Math.min(clock.getDelta(), 0.1);
     npcAnimationSystem(world, dt, false); // idle sway only — no npcSystem, nothing should actually move
     controls.update();
+    updateCompass(camera);
     renderer.render(scene, camera);
   }
   frame();

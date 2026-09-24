@@ -53,6 +53,11 @@ class HudStore {
   healthMax = 100;
   staminaCurrent = 100;
   staminaMax = 100;
+  /** The player's current facing, as a compass bearing in degrees (0 = N,
+   * 90 = E, 180 = S, 270 = W — see `compassMath.ts`) — drives `Compass.tsx`.
+   * Written every frame from `hudSync.ts`, same "write unconditionally"
+   * approach as `setHealth`. */
+  headingDeg = 0;
   /** Every NPC currently `CHASING`/`ATTACKING` the player (see
    * `hudSync.ts`) -- rebuilt fresh every frame, same "write unconditionally,
    * MobX only re-renders on real change" approach `setHealth` already uses.
@@ -118,6 +123,10 @@ class HudStore {
   setStamina(current: number, max: number): void {
     this.staminaCurrent = current;
     this.staminaMax = max;
+  }
+
+  setHeading(bearingDeg: number): void {
+    this.headingDeg = bearingDeg;
   }
 
   /** Replaces the whole in-combat enemy list -- called every frame from

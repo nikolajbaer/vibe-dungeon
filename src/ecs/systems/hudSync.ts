@@ -1,8 +1,9 @@
 import * as THREE from "three";
 import { hasComponent, query, type World } from "bitecs";
-import { Dead, Health, NPC, NpcState, PlayerControlled, Position, Practice, Stamina } from "../components";
+import { Dead, Health, NPC, NpcState, PlayerControlled, Position, Practice, Rotation, Stamina } from "../components";
 import { NPC_REGISTRY } from "../../assets/npcRegistry";
 import { hudStore, type EnemyHealthEntry, type EnemyLabelEntry } from "../../hud/store";
+import { bearingFromYaw } from "../../hud/compassMath";
 import { worldToScreen } from "../../render/worldToScreen";
 import { isHitboxDebugEnabled } from "./hitboxDebug";
 
@@ -38,6 +39,7 @@ export function hudSync(world: World, camera: THREE.Camera, renderer: THREE.WebG
   for (const eid of query(world, [Health, PlayerControlled])) {
     hudStore.setHealth(Health.current[eid], Health.max[eid]);
     if (hasComponent(world, eid, Stamina)) hudStore.setStamina(Stamina.current[eid], Stamina.max[eid]);
+    if (hasComponent(world, eid, Rotation)) hudStore.setHeading(bearingFromYaw(Rotation.yaw[eid]));
     const active = hasComponent(world, eid, Practice) && !!Practice.active[eid];
     const opponent = Practice.opponentEid[eid];
     hudStore.setPractice(active, Practice.points[eid], Practice.maxPoints[eid],
