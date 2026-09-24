@@ -7,7 +7,7 @@ import type { ItemAssetDef } from "../../assets/types";
 import { releaseViewmodelThrow, startViewmodelThrowCharge } from "./items";
 import { ATTACK_PROFILES, ATTACK_STAMINA_COST, applyRangedDamage, getEquippedWeaponInHand, handCombatFields, mainHand } from "./combat";
 import type { HandSlot } from "./items";
-import { BODY_PART_DAMAGE_MULTIPLIER, getCombatHitboxColliders } from "./meleeCollision";
+import { BODY_PART_DAMAGE_MULTIPLIER, getCombatHitboxColliders, stickTarget } from "./meleeCollision";
 import { buildItemWorldBody } from "../../level/spawning";
 import type { CombatBodyPart, Physics } from "../../physics/world";
 
@@ -325,35 +325,17 @@ export function tryThrowWeapon(world: World, physics: Physics, camera: THREE.Cam
   return true;
 }
 
-/** Which of a humanoid rig's own named bones (`characters/humanoidBase.ts`'s
- * `addBone` calls) a struck body part reparents onto -- attaching to the
- * character's root `Object3DRef` mesh instead would *not* actually track a
- * death collapse or a hit flinch: those animations move individual bones
- * (an `AnimationMixer` driving the skeleton), not the root object itself,
- * which stays put at the character's own world position/facing the whole
- * time. A bone is a real `Object3D` in the same scene graph as the mesh
- * (`createHumanoidBase` parents the skeleton's root bone under the
- * `SkinnedMesh` itself), so `getObjectByName` finds it and `attach` follows
- * it exactly like any other reparent. One representative bone per hitbox
- * region, not a precise per-limb pick (`legs` doesn't distinguish which
- * leg) -- good enough for "looks stuck in roughly the right place and
- * genuinely rides along," which is the actual goal here. */
-const STICK_BONE_BY_PART: Record<CombatBodyPart, string> = {
-  head: "head",
-  torso: "chest",
-  legs: "hips",
-};
-
 const stickTipLocal = new THREE.Vector3();
 const stickBodyQuat = new THREE.Quaternion();
 const stickTargetPos = new THREE.Vector3();
 
 /** Sticks `thrown`'s weapon into the character it just struck -- reparented
- * onto the specific bone nearest the hit (`STICK_BONE_BY_PART`, falling back
- * to the target's root mesh if that bone can't be found -- a non-humanoid
- * target, say) so it visibly rides along with whatever that bone does next
- * (walking, a death collapse), exactly as if it were actually lodged in the
- * body. `Object3D.attach` preserves world transform across the reparent.
+ * onto the specific bone nearest the hit (`meleeCollision.ts`'s
+ * `stickTarget`, falling back to the target's root mesh if that bone can't
+ * be found -- a non-humanoid target, say) so it visibly rides along with
+ * whatever that bone does next (walking, a death collapse), exactly as if
+ * it were actually lodged in the body. `Object3D.attach` preserves world
+ * transform across the reparent.
  * The physics body is frozen in place (`setEnabled(false)`) rather than kept
  * live alongside a parent transform that's now driving its visual position
  * -- the two would fight for control of the same mesh every frame.
@@ -378,8 +360,7 @@ const stickTargetPos = new THREE.Vector3();
 function stickInCharacter(world: World, thrown: LiveThrow, targetEid: number, part: CombatBodyPart): void {
   const body = PhysicsBody[thrown.itemEid];
   const itemMesh = Object3DRef[thrown.itemEid];
-  const targetRoot = Object3DRef[targetEid];
-  const targetBone = targetRoot?.getObjectByName(STICK_BONE_BY_PART[part]) ?? targetRoot;
+  const targetBone = stickTarget(Object3DRef[targetEid], part);
   if (body && itemMesh && targetBone) {
     const r = body.rotation();
     stickBodyQuat.set(r.x, r.y, r.z, r.w);

@@ -134,6 +134,41 @@ export function getBodyPartAt(eid: number, y: number): CombatBodyPart | undefine
   return undefined;
 }
 
+/** Which of a humanoid rig's own named bones (`characters/humanoidBase.ts`'s
+ * `addBone` calls) a struck body part reparents onto when a projectile
+ * embeds in a character -- attaching to the character's root `Object3DRef`
+ * mesh instead would *not* actually track a death collapse or a hit flinch:
+ * those animations move individual bones (an `AnimationMixer` driving the
+ * skeleton), not the root object itself, which stays put at the character's
+ * own world position/facing the whole time. A bone is a real `Object3D` in
+ * the same scene graph as the mesh (`createHumanoidBase` parents the
+ * skeleton's root bone under the `SkinnedMesh` itself), so `getObjectByName`
+ * finds it and `attach` follows it exactly like any other reparent. One
+ * representative bone per hitbox region, not a precise per-limb pick
+ * (`legs` doesn't distinguish which leg) -- good enough for "looks stuck in
+ * roughly the right place and genuinely rides along," which is the actual
+ * goal here. Shared by throwingCombat.ts's `stickInCharacter` (a thrown
+ * javelin) and rangedCombat.ts's `makeRecoverableBolt` (a fired bolt) --
+ * the two places a projectile can end up embedded in a character. */
+const STICK_BONE_BY_PART: Record<CombatBodyPart, string> = {
+  head: "head",
+  torso: "chest",
+  legs: "hips",
+};
+
+/** The actual `Object3D` an embedded projectile should reparent onto, given
+ * the character it struck (`targetRoot`, its `Object3DRef`) and which hitbox
+ * region (`part`) the hit resolved against -- `STICK_BONE_BY_PART`'s bone if
+ * it exists, otherwise `targetRoot` itself (a non-humanoid target, `part`
+ * unknown, or the corpse's own mesh already gone) -- and `undefined` only
+ * when `targetRoot` itself is, so a caller can fall back to whatever else it
+ * hit (a wall, a prop) instead. */
+export function stickTarget(targetRoot: THREE.Object3D | undefined, part: CombatBodyPart | undefined): THREE.Object3D | undefined {
+  if (!targetRoot) return undefined;
+  const bone = part && targetRoot.getObjectByName(STICK_BONE_BY_PART[part]);
+  return bone || targetRoot;
+}
+
 interface PendingSwing {
   attackerEid: number;
   box: MeleeSwingBox;

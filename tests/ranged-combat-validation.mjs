@@ -9,7 +9,7 @@ try {
   const {default:crossbow}=await server.ssrLoadModule('/src/assets/items/crossbow.ts');
   const {pickUpItem}=await server.ssrLoadModule('/src/ecs/systems/items.ts');
   const {syncSystem}=await server.ssrLoadModule('/src/ecs/systems/sync.ts');
-  const {BODY_PART_DAMAGE_MULTIPLIER,meleeCollisionSystem,getCombatHitboxColliders}=await server.ssrLoadModule('/src/ecs/systems/meleeCollision.ts');
+  const {BODY_PART_DAMAGE_MULTIPLIER,meleeCollisionSystem,getCombatHitboxColliders,stickTarget}=await server.ssrLoadModule('/src/ecs/systems/meleeCollision.ts');
   const ranged=await server.ssrLoadModule('/src/ecs/systems/rangedCombat.ts');
 
   assert.equal(crossbow.rangedWeapon.reloadSeconds,1.5);
@@ -232,5 +232,27 @@ try {
   const expectedHeadDamage=Math.max(1,Math.round(crossbow.rangedWeapon.damage*BODY_PART_DAMAGE_MULTIPLIER.head));
   assert.equal(Health.current[target4],100-expectedHeadDamage,'a bolt landing at head height applies the head damage multiplier');
 
+  // Regression check for "an arrow stuck in an NPC stays floating exactly
+  // where it hit instead of following the corpse's death collapse": both
+  // this module's own embed path and throwingCombat.ts's used to reparent
+  // straight onto whatever raw mesh the hit landed on -- a character's own
+  // root object, whose transform stays fixed at its ECS Position/Rotation
+  // the whole time, since a death/hit animation moves individual bones (an
+  // AnimationMixer) rather than the root. `stickTarget` is the shared fix:
+  // it walks to the specific bone nearest the struck part instead, falling
+  // back to the root for anything that doesn't have one.
+  const rig=new THREE.Object3D();
+  const hips=new THREE.Object3D();hips.name='hips';rig.add(hips);
+  const chest=new THREE.Object3D();chest.name='chest';rig.add(chest);
+  const head=new THREE.Object3D();head.name='head';rig.add(head);
+  assert.equal(stickTarget(rig,'head'),head,'a head hit reparents onto the head bone, not the rig root');
+  assert.equal(stickTarget(rig,'torso'),chest,'a torso hit reparents onto the chest bone');
+  assert.equal(stickTarget(rig,'legs'),hips,'a legs hit reparents onto the hips bone');
+  assert.equal(stickTarget(rig,undefined),rig,'no resolved body part falls back to the rig root');
+  const bareBox=new THREE.Object3D(); // no named bones at all -- a non-humanoid target
+  assert.equal(stickTarget(bareBox,'head'),bareBox,'a target with no matching bone falls back to its own root');
+  assert.equal(stickTarget(undefined,'head'),undefined,'no target root at all resolves to nothing to attach to');
+
   console.log('crossbow ammo label, reload, surface sticking, bolt recovery, clatter physics and body-part multiplier passed');
+  console.log('stickTarget: embedded projectiles resolve to the struck bone, not the character root, so they follow death/hit animations');
 } finally {await server.close();}

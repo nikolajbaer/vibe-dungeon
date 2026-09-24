@@ -1,5 +1,6 @@
-import { query, type World } from "bitecs";
-import { Dead, DeathSector, Object3DRef } from "../components";
+import { query, removeEntity, type World } from "bitecs";
+import { Dead, DeathSector, Embedded, Item, Object3DRef } from "../components";
+import { owningEid } from "./rangedCombat";
 
 /** Minimum time (seconds) a corpse stays on-screen no matter what, counted
  * down by this system from the moment `DeathSector` is added (see
@@ -42,6 +43,26 @@ export function corpseCleanupSystem(world: World, playerSector: string | undefin
     DeathSector.lingerRemaining[eid] = Math.max(0, DeathSector.lingerRemaining[eid] - dt);
     if (DeathSector.lingerRemaining[eid] > 0) continue; // hasn't had its minimum time on-screen yet
     if (deathSector === playerSector) continue; // player hasn't left yet
+
+    // Any arrow/bolt/javelin still stuck in this corpse (`Embedded`,
+    // reparented onto one of its bones -- see throwingCombat.ts's
+    // `stickInCharacter`/rangedCombat.ts's `makeRecoverableBolt`) would
+    // otherwise never actually go away: its `Object3D` rides along with the
+    // corpse's own subtree when that's unhooked from the scene below (so it
+    // does visually disappear), but nothing else ever removes *its* bitECS
+    // entity -- it would sit in `world` forever, still matching every
+    // `[Item, ...]`/`[Embedded, ...]` query from here on. Found by walking
+    // each embedded item's live parent chain back to whichever
+    // `userData.eid`-tagged root it's currently attached to (`owningEid`,
+    // the same lookup rangedCombat.ts's own hit resolution already uses),
+    // since that's the one source of truth for "which corpse is this
+    // actually stuck in right now" -- recording the eid once at embed time
+    // instead would go stale the moment `items.ts`'s `pickUpItem` reparents
+    // it back out to the scene.
+    for (const itemEid of query(world, [Item, Embedded])) {
+      const obj = Object3DRef[itemEid];
+      if (obj && owningEid(obj) === eid) removeEntity(world, itemEid);
+    }
 
     Object3DRef[eid]?.removeFromParent();
     DeathSector.sectorId[eid] = undefined;
