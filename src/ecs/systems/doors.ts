@@ -224,7 +224,14 @@ function dispatchInteract(world: World, hitEid: number, scene: THREE.Scene): boo
     }
     const archetype = NPC_REGISTRY[NPC.archetypeId[hitEid]];
     if (archetype?.behavior === "aggressive") return false; // nothing to talk to
-    if (archetype?.dialogueId) {
+    // A combat-test sparring dummy (`NPC.testStyle` set only by
+    // CombatTestSandbox.spawnOpponent, empty for every real dungeon NPC --
+    // see that field's own doc comment) keeps whichever archetype it was
+    // configured with for its mesh/stats (picking "sword" spawns the same
+    // "guard" archetype a real dungeon guard uses, greeting and all), but
+    // it's a test target, not someone to talk to -- never opens that
+    // archetype's dialogue, regardless of which one it is.
+    if (archetype?.dialogueId && NPC.testStyle[hitEid] === undefined) {
       dialogueStore.open(hitEid, archetype.dialogueId);
       return true;
     }
