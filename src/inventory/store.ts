@@ -126,6 +126,14 @@ class InventoryStore {
    * by tapping the drop zone again to cancel. */
   dropArmed = false;
 
+  /** True while the full inventory dialog (`InventoryDialog.tsx`) is shown
+   * — a Minecraft/Skyrim-style pop-up opened from the always-visible
+   * `EquipmentBar.tsx`, rather than the paper doll/list being on screen the
+   * whole time. Included in `game.ts`'s `isModalActive()` the same way
+   * `containerStore.isOpen` already is, so combat/movement/interact pause
+   * while it's up. */
+  isOpen = false;
+
   private actions: InventoryActions = noopActions;
 
   constructor() {
@@ -188,6 +196,25 @@ class InventoryStore {
 
   unequip(itemEid: number): void {
     this.actions.unequip(itemEid);
+  }
+
+  /** Opens the full inventory dialog (`EquipmentBar.tsx`'s tap target) —
+   * clears any pending selection/drop-arm state left over from before it was
+   * last closed, so it never opens mid-gesture. */
+  open(): void {
+    this.isOpen = true;
+    this.selectedItemEid = null;
+    this.dropArmed = false;
+  }
+
+  /** Closes the dialog (`InventoryDialog.tsx`'s own close button, or
+   * whatever else dismisses it — e.g. opening a container from within it,
+   * see `InventoryList.tsx`). Same state cleanup as `open` — nothing should
+   * carry over into the next time it's opened. */
+  close(): void {
+    this.isOpen = false;
+    this.selectedItemEid = null;
+    this.dropArmed = false;
   }
 
   /** Called when the drop zone is tapped (`DropZone.tsx`) — arms or
