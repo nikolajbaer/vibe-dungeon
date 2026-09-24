@@ -684,12 +684,19 @@ export function buildGeometryFromOccupancy(world: World, physics: Physics, scene
         continue; // still no geometry across the opening's own walkable height
       }
 
-      // A door's header must reach the taller of the two rooms it connects
-      // (e.g. a great_hall door opening onto a lower-ceilinged hallway) —
-      // otherwise the boundary is emitted from whichever side "owns" it
-      // (see `owner` above) and a header sized only to the *shorter* side's
-      // `wallHeight` would still leave the taller room's gap open above it.
-      const doorHeaderHeight = neighbor ? Math.max(wallHeight, neighbor.heightCells * UNIT) : wallHeight;
+      // A shared boundary must reach the taller of the two rooms it joins
+      // (e.g. a great_hall door opening onto a lower-ceilinged hallway, or a
+      // solid wall between a 9m great hall and the 3m corridor beside it) —
+      // otherwise the boundary is emitted from whichever side "owns" it (see
+      // `owner` above), and sizing it to only the *owning* side's own
+      // `wallHeight` would leave the taller room's own wall/header gap open
+      // above it whenever the *shorter* side happens to be the owner. Used
+      // for both a door's header (via `addDoorPair` below) and a plain solid
+      // "wall" segment (via `wallSegments` below) — a solid wall is no
+      // different from a door's header here: either way, the boundary has to
+      // reach whichever ceiling is higher, regardless of which side's cell
+      // happened to own the boundary in the occupancy walk.
+      const sharedBoundaryHeight = neighbor ? Math.max(wallHeight, neighbor.heightCells * UNIT) : wallHeight;
 
       const requiredItemTypeId = lockedDoorLookup.get(lockedDoorKey(x, z, dir.side));
 
@@ -701,14 +708,14 @@ export function buildGeometryFromOccupancy(world: World, physics: Physics, scene
             orientation: "x",
             planeCell,
             rangeStartCell: z,
-            wallHeight,
+            wallHeight: sharedBoundaryHeight,
             instanceId: cell.instanceId,
             roomSized: isRoomSizedTileType(cell.tileTypeId),
             interiorSign: (dir.dx > 0 ? -1 : 1) as 1 | -1,
             floor: cell.floor,
           });
         } else {
-          addDoorPair(world, physics, scene, "x", planeCell * UNIT, z * UNIT, (z + 1) * UNIT, doorHeaderHeight, floorBase, requiredItemTypeId);
+          addDoorPair(world, physics, scene, "x", planeCell * UNIT, z * UNIT, (z + 1) * UNIT, sharedBoundaryHeight, floorBase, requiredItemTypeId);
         }
       } else {
         // +z or -z boundary: a plane of constant Z, spanning this cell's X extent.
@@ -718,14 +725,14 @@ export function buildGeometryFromOccupancy(world: World, physics: Physics, scene
             orientation: "z",
             planeCell,
             rangeStartCell: x,
-            wallHeight,
+            wallHeight: sharedBoundaryHeight,
             instanceId: cell.instanceId,
             roomSized: isRoomSizedTileType(cell.tileTypeId),
             interiorSign: (dir.dz > 0 ? -1 : 1) as 1 | -1,
             floor: cell.floor,
           });
         } else {
-          addDoorPair(world, physics, scene, "z", planeCell * UNIT, x * UNIT, (x + 1) * UNIT, doorHeaderHeight, floorBase, requiredItemTypeId);
+          addDoorPair(world, physics, scene, "z", planeCell * UNIT, x * UNIT, (x + 1) * UNIT, sharedBoundaryHeight, floorBase, requiredItemTypeId);
         }
       }
     }

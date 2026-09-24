@@ -10,19 +10,24 @@ import { wallsOf } from "../tiles";
  * box." Four connection points, one per side, entrance/throne on the short
  * axis and the two side passages on the long one:
  *
- * - **south** (all 4 segments solid `"wall"`): the hall's presumed main
+ * - **north** (all 4 segments solid `"wall"`): the hall's presumed main
  *   entrance from outside the castle — nothing is built beyond this wall
- *   (there's no "outside the castle" in the level yet), so it can never be a
- *   real `"door"`/`"opening"` face (`validateOccupancy` rejects any open
- *   segment facing empty space). The oversized double doors implied by that
- *   entrance are instead a purely decorative fixture
+ *   (there's no "outside the castle" in the level yet, and this is genuinely
+ *   the map's own edge in this direction — see `rooms/castle-hall.ts`'s
+ *   header comment for why that matters), so it can never be a real
+ *   `"door"`/`"opening"` face (`validateOccupancy` rejects any open segment
+ *   facing empty space). The oversized double doors implied by that entrance
+ *   are instead a purely decorative fixture
  *   (`assets/furniture/grand-doors.ts`) mounted flush against this wall —
  *   see `rooms/castle-hall.ts` for the placement. "Locked at all times" in
  *   the sense that matters: there is no door component here at all to ever
  *   unlock.
- * - **north** (all 4 segments solid `"wall"`): the far wall the throne backs
- *   onto — a dead end architecturally, same reasoning as the south wall,
- *   just without even the decorative doors.
+ * - **south** (all 4 segments solid `"wall"`): the far wall the throne backs
+ *   onto — a dead end architecturally, same reasoning as the north wall,
+ *   just without even the decorative doors. (Also, unlike the north wall,
+ *   this one genuinely does have something on its far side — the stairwell
+ *   wing's corridor — which is exactly why the throne, not the entrance,
+ *   backs onto it; see `rooms/castle-hall.ts`.)
  * - **east** (index 2 of 6, the segment at local z=2): the door back to
  *   `room-a` (the level's original starting room) — see `rooms/room-a.ts`,
  *   which reuses `great_hall_branch`'s existing west opening (rotation 0)
