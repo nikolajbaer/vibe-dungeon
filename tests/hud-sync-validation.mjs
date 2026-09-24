@@ -5,7 +5,7 @@ import {addComponent,addEntity,createWorld} from 'bitecs';
 
 const server=await createServer({server:{middlewareMode:true},appType:'custom'});
 try {
-  const {Dead,Health,NPC,NpcState,PlayerControlled,Position,Practice,Stamina}=await server.ssrLoadModule('/src/ecs/components.ts');
+  const {Dead,Health,NPC,NpcState,PlayerControlled,Position,Practice,Rotation,Stamina}=await server.ssrLoadModule('/src/ecs/components.ts');
   const {hudStore}=await server.ssrLoadModule('/src/hud/store.ts');
   const {hudSync}=await server.ssrLoadModule('/src/ecs/systems/hudSync.ts');
   const {setHitboxDebugEnabled}=await server.ssrLoadModule('/src/ecs/systems/hitboxDebug.ts');
@@ -19,9 +19,10 @@ try {
 
   const world=createWorld();
   const player=addEntity(world);
-  addComponent(world,player,PlayerControlled);addComponent(world,player,Health);addComponent(world,player,Stamina);
+  addComponent(world,player,PlayerControlled);addComponent(world,player,Health);addComponent(world,player,Stamina);addComponent(world,player,Rotation);
   Health.current[player]=Health.max[player]=100;
   Stamina.current[player]=42;Stamina.max[player]=80;
+  Rotation.yaw[player]=0;Rotation.pitch[player]=0; // yaw=0 -> facing south, per room-a.ts's own convention
 
   // Stamina syncs into the store the same way Health already does.
   hudSync(world,camera,renderer);
@@ -30,6 +31,13 @@ try {
   assert.equal(hudStore.inCombat,false,'no NPCs at all means not in combat');
   assert.deepEqual(hudStore.enemyHealthBars,[]);
   assert.deepEqual(hudStore.enemyLabels,[]);
+
+  // Compass heading syncs the same way -- yaw=0 (south) -> 180 deg, and
+  // yaw=Math.PI (north) -> 0 deg, per compassMath.ts's bearingFromYaw.
+  assert.equal(hudStore.headingDeg,180,'yaw=0 is facing south (bearing 180)');
+  Rotation.yaw[player]=Math.PI;
+  hudSync(world,camera,renderer);
+  assert.equal(hudStore.headingDeg,0,'yaw=PI is facing north (bearing 0)');
 
   const spawnNpc=(state,{dz=-5}={})=>{
     const eid=addEntity(world);

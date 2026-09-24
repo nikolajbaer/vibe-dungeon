@@ -388,6 +388,53 @@
       .equip-bar-weight {
         text-align: center;
       }
+      /* Orientation compass (Compass.tsx), stacked below the equip bar in
+         the same top-right corner. A fixed downward-pointing notch marks
+         "forward"; the N/E/S/W labels inside the dial orbit around it as the
+         player turns (position set inline per-frame — see
+         `compassLabelOffset` in `src/hud/compassMath.ts`), the same
+         "housing fixed, card rotates" reading a real handheld compass gives.
+         The same two classes (`.hud-compass-dial`/`.hud-compass-label`) are
+         reused verbatim by the level viewer's own reference compass
+         (`src/viewer/levelViewer.ts`), which sets the identical inline
+         left/top itself every frame from the orbit camera's look direction
+         rather than from this component — one visual language for "which
+         way is north" in both places. */
+      .hud-compass {
+        position: fixed;
+        right: max(12px, env(safe-area-inset-right));
+        top: calc(92px + env(safe-area-inset-top));
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        pointer-events: none;
+      }
+      .hud-compass-pointer {
+        width: 0;
+        height: 0;
+        border-left: 5px solid transparent;
+        border-right: 5px solid transparent;
+        border-bottom: 7px solid rgba(255, 255, 255, 0.85);
+        margin-bottom: -2px;
+      }
+      .hud-compass-dial {
+        position: relative;
+        width: 56px;
+        height: 56px;
+        border-radius: 50%;
+        background: rgba(0, 0, 0, 0.45);
+        border: 1px solid rgba(255, 255, 255, 0.3);
+      }
+      .hud-compass-label {
+        position: absolute;
+        transform: translate(-50%, -50%);
+        font: 700 11px/1 system-ui, sans-serif;
+        color: rgba(255, 255, 255, 0.75);
+        text-shadow: 0 1px 2px rgba(0, 0, 0, 0.8);
+      }
+      .hud-compass-label-north {
+        color: #ff6b63;
+      }
       #game-menu-overlay {
         position: fixed;
         inset: 0;
@@ -1179,6 +1226,17 @@
         height: 10px;
         border-radius: 2px;
         flex: none;
+      }
+      /* The viewer's own reference compass (levelViewer.ts's
+         `createViewerCompass`) -- bottom-right rather than the in-game HUD
+         compass's top-right, since that corner here is already claimed by
+         the sector legend above, which can grow arbitrarily tall as sectors
+         are added. Positions itself; the dial/label/pointer look is shared
+         with `.hud-compass` verbatim (see that block's own comment). */
+      .viewer-compass {
+        right: max(12px, env(safe-area-inset-right));
+        bottom: calc(12px + env(safe-area-inset-bottom));
+        top: auto;
       }
     </style>
   </head>
