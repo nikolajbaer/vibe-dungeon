@@ -857,7 +857,7 @@ export function startGame(container: HTMLElement, options: StartGameOptions = {}
     // "not open yet" value (this was the actual villager-killing bug: a tap
     // that opened dialogue and a same-frame attack both used one value
     // computed before the dialogue existed).
-    const isModalActive = () => dialogueStore.isOpen || noticeStore.isOpen || containerStore.isOpen || hudStore.playerDefeated || (combatTest?.combatConfigOpen ?? false);
+    const isModalActive = () => dialogueStore.isOpen || noticeStore.isOpen || containerStore.isOpen || inventoryStore.isOpen || hudStore.playerDefeated || (combatTest?.combatConfigOpen ?? false);
 
     const modalActive = isModalActive();
     if (modalActive) {

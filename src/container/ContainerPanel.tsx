@@ -16,6 +16,17 @@ import { ItemIcon } from "../inventory/ItemIcon";
  * shows up in the main `WeightReadout.tsx` total, not here — see
  * `carriedWeight`'s doc comment in ecs/systems/items.ts. Same "own fixed
  * overlay, own Preact tree" pattern as `NoticePanel`/`HUD` (see mount.tsx).
+ *
+ * Reads as the same kind of screen as `InventoryDialog.tsx` (matching panel
+ * chrome — title, centered floating card, a closing button) rather than a
+ * wholly separate UI, and "Back to Inventory" is the explicit link between
+ * them: it's how a backpack opened from inside the main dialog
+ * (`InventoryList.tsx`'s `isContainer` tap, which closes that dialog first)
+ * gets back to the paper doll to equip whatever was just taken out, without
+ * a detour through gameplay in between. "Close" (dismissing both screens
+ * back to gameplay) stays available too — this is an added way out, not a
+ * replacement for the direct one, since a barrel opened straight from the
+ * world (no inventory dialog involved) should still just close outright.
  */
 export function ContainerPanel() {
   const { isOpen, title, contents, capacity, isFull, isLootOnly, playerItems, pendingTransfer } = useObserved(() => ({
@@ -103,9 +114,22 @@ export function ContainerPanel() {
           </div>
         </div>
       </div>
-      <button type="button" class="container-close-btn" data-testid="container-close" onClick={() => containerStore.close()}>
-        Close
-      </button>
+      <div class="container-actions">
+        <button
+          type="button"
+          class="container-back-btn"
+          data-testid="container-back-to-inventory"
+          onClick={() => {
+            containerStore.close();
+            inventoryStore.open();
+          }}
+        >
+          Back to Inventory
+        </button>
+        <button type="button" class="container-close-btn" data-testid="container-close" onClick={() => containerStore.close()}>
+          Close
+        </button>
+      </div>
       {pendingTransfer && (
         <div class="container-transfer-overlay" data-testid="container-transfer">
           <div class="container-transfer-header">

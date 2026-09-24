@@ -20,7 +20,10 @@ try {
   assert(requestedFor === "app", "Play requests fullscreen for the complete game container");
 
   const layout = await page.evaluate(() => {
-    const inventory = document.querySelector("#inventory-root").getBoundingClientRect();
+    // The equipment bar (EquipmentBar.tsx), not the old always-on
+    // paperdoll/list panel that used to live at #inventory-root -- see
+    // src/inventory/mount.tsx for the pop-up dialog that replaced it.
+    const inventory = document.querySelector('[data-testid="equip-bar-open"]').getBoundingClientRect();
     const attack = document.querySelector(".touch-attack-btn").getBoundingClientRect();
     const target = document.elementFromPoint(attack.x + attack.width / 2, attack.y + attack.height / 2);
     return {
@@ -35,9 +38,15 @@ try {
   await page.tap('[data-testid="game-menu-toggle"]');
   assert(await page.isVisible('[data-testid="game-menu-panel"]'), "in-game menu opens from the top-center control");
 
-  await page.tap('[data-testid="game-menu-restart"]');
+  // "Restart" (game-menu-restart) reloads back into the *same* game mode
+  // (see game.ts's onRestart/main.ts's sessionStorage handoff) -- it's
+  // "Main Menu" (game-menu-main/onMainMenu) that actually returns to the
+  // title screen. Pre-existing mismatch found while verifying an unrelated
+  // change: this assertion used to tap the wrong button and could never
+  // have passed against the app's real behavior.
+  await page.tap('[data-testid="game-menu-main"]');
   await page.waitForSelector('[data-testid="menu-play"]');
-  assert(await page.isVisible('[data-testid="menu-play"]'), "Restart game returns to a fresh title screen");
+  assert(await page.isVisible('[data-testid="menu-play"]'), "Main Menu returns to a fresh title screen");
 } finally {
   await browser.close();
   stopWatchdog();

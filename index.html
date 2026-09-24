@@ -323,38 +323,70 @@
         text-align: center;
         text-shadow: 0 1px 2px rgba(0, 0, 0, 0.8);
       }
-      /* Inventory UI (issue #39): paper doll + inventory list, right side of
-         screen. A separate fixed overlay from #hud-overlay (own container,
-         see src/inventory/mount.tsx) since — unlike the HUD, which is purely
-         read-only display — its buttons need pointer events; the panel root
-         stays pointer-events:none like the HUD overlay and opts individual
-         buttons back in, so the rest of the screen still passes touches
-         through to the look-drag/move-stick controls underneath. */
+      /* Equipment bar (EquipmentBar.tsx): the always-on top-right summary —
+         what's in each hand, and the running carry weight — that replaced
+         having the whole paper doll/inventory list on screen at all times
+         (issue #39's original design). A separate fixed overlay from
+         #hud-overlay (own container, see src/inventory/mount.tsx) since —
+         unlike the HUD, which is purely read-only display — its one button
+         needs pointer events; the root stays pointer-events:none like the
+         HUD overlay and opts the button back in, so the rest of the screen
+         still passes touches through to the look-drag/move-stick controls
+         underneath. The pop-up it opens (InventoryDialog.tsx) is a *separate*
+         overlay (#inventory-dialog-overlay, below, alongside
+         #container-overlay) rather than a child of this one — see
+         src/inventory/mount.tsx's own doc comment for why nesting it here
+         wouldn't work. */
       #inventory-overlay {
         position: fixed;
         inset: 0;
         pointer-events: none;
-        /* Reserve the attack control's full 90px diameter, its 20px bottom
-           offset, and a 16px breathing gap. The inventory can scroll within
-           the remaining height but can never cover the attack hit target. */
-        padding-bottom: calc(126px + env(safe-area-inset-bottom));
-        box-sizing: border-box;
         z-index: 20;
       }
-      #inventory-root {
+      .equip-bar {
         position: fixed;
         right: max(12px, env(safe-area-inset-right));
         top: max(12px, env(safe-area-inset-top));
-        width: clamp(150px, 34vw, 220px);
         display: flex;
         flex-direction: column;
-        gap: 8px;
+        align-items: stretch;
+        gap: 4px;
+        padding: 6px 8px;
         font: 12px/1.3 system-ui, sans-serif;
         color: #eee;
-        /* The inventory has a fixed maximum of six loose slots, so compact
-           its cells at phone sizes rather than clipping or scrolling the
-           panel inside the attack-button reservation below. */
-        height: max-content;
+        background: rgba(0, 0, 0, 0.45);
+        border: 1px solid rgba(255, 255, 255, 0.3);
+        border-radius: 8px;
+        cursor: pointer;
+        pointer-events: auto;
+      }
+      .equip-bar:active {
+        background: rgba(255, 255, 255, 0.12);
+      }
+      .equip-bar-hands {
+        display: flex;
+        gap: 6px;
+      }
+      .equip-bar-hand {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        width: 34px;
+        height: 34px;
+        background: rgba(255, 255, 255, 0.08);
+        border: 1px solid rgba(255, 255, 255, 0.3);
+        border-radius: 6px;
+      }
+      .equip-bar-hand-empty {
+        font-size: 10px;
+        color: rgba(255, 255, 255, 0.4);
+      }
+      .equip-bar-icon {
+        font-size: 20px;
+        line-height: 1;
+      }
+      .equip-bar-weight {
+        text-align: center;
       }
       #game-menu-overlay {
         position: fixed;
@@ -667,12 +699,62 @@
         border-style: dashed;
         border-color: #ff6b6b;
       }
+      /* Inventory dialog (InventoryDialog.tsx): the Minecraft/Skyrim-style
+         pop-up the equipment bar opens, mounted into its own overlay
+         (#inventory-dialog-overlay, src/inventory/mount.tsx) at the same
+         z-index tier as #container-overlay/#dialogue-overlay/#notice-overlay
+         below, since it's the same kind of modal screen -- centered floating
+         card, own close button, same shape as .container-root. */
+      #inventory-dialog-overlay {
+        position: fixed;
+        inset: 0;
+        pointer-events: none;
+        z-index: 50;
+      }
+      .inventory-dialog-root {
+        position: fixed;
+        left: 50%;
+        top: 50%;
+        transform: translate(-50%, -50%);
+        width: min(calc(100vw - 32px), 320px);
+        max-height: min(calc(100vh - 64px), 620px);
+        overflow-y: auto;
+        overscroll-behavior: contain;
+        display: flex;
+        flex-direction: column;
+        gap: 10px;
+        padding: 18px 20px;
+        background: rgba(14, 14, 18, 0.92);
+        border: 1px solid rgba(255, 255, 255, 0.3);
+        border-radius: 10px;
+        color: #eee;
+        font: 14px/1.5 system-ui, sans-serif;
+        pointer-events: auto;
+        box-sizing: border-box;
+      }
+      .inventory-dialog-title {
+        font-weight: 700;
+        font-size: 18px;
+        letter-spacing: 0.02em;
+        color: #ffcc44;
+        border-bottom: 1px solid rgba(255, 255, 255, 0.25);
+        padding-bottom: 8px;
+      }
+      .inventory-dialog-close {
+        align-self: flex-end;
+        font: inherit;
+        font-weight: 600;
+        color: inherit;
+        padding: 8px 14px;
+        background: rgba(255, 255, 255, 0.08);
+        border: 1px solid rgba(255, 255, 255, 0.3);
+        border-radius: 6px;
+        cursor: pointer;
+      }
+      .inventory-dialog-close:active {
+        background: rgba(255, 255, 255, 0.2);
+      }
       @media (max-width: 600px), (max-height: 700px) {
-        #inventory-root {
-          width: clamp(112px, 30vw, 150px);
-          gap: 4px;
-          font-size: 10px;
-        }
         .inv-paperdoll,
         .inv-list {
           gap: 3px;
@@ -704,11 +786,6 @@
         }
       }
       @media (max-height: 450px) {
-        #inventory-root {
-          width: 90px;
-          gap: 3px;
-          font-size: 9px;
-        }
         .inv-paperdoll,
         .inv-list {
           gap: 2px;
@@ -901,8 +978,13 @@
         font-size: 12px;
         color: rgba(255, 255, 255, 0.6);
       }
+      .container-actions {
+        display: flex;
+        justify-content: flex-end;
+        gap: 8px;
+      }
+      .container-back-btn,
       .container-close-btn {
-        align-self: flex-end;
         font: inherit;
         font-weight: 600;
         color: inherit;
@@ -912,6 +994,7 @@
         border-radius: 6px;
         cursor: pointer;
       }
+      .container-back-btn:active,
       .container-close-btn:active {
         background: rgba(255, 255, 255, 0.2);
       }

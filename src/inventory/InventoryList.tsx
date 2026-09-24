@@ -65,8 +65,13 @@ export function InventoryList() {
             style={selected ? SELECTED_STYLE : undefined}
             onClick={() => {
               if (dropArmed) inventoryStore.dropTapped(item.eid);
-              else if (item.isContainer) containerStore.open(item.eid);
-              else if (item.readable) noticeStore.open(item.eid);
+              else if (item.isContainer) {
+                // Closes this dialog first -- see `ContainerPanel.tsx`'s own
+                // doc comment for why the two never stay open together, and
+                // its "Back to Inventory" button for the way back here.
+                inventoryStore.close();
+                containerStore.open(item.eid);
+              } else if (item.readable) noticeStore.open(item.eid);
               else if (item.equippable) inventoryStore.tapItem(item.eid);
             }}
           >
