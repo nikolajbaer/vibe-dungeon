@@ -5,9 +5,9 @@ import { ITEM_REGISTRY } from "../../assets/itemRegistry";
 import type { ItemAssetDef } from "../../assets/types";
 import { isHandSlot } from "./items";
 import { applyRangedDamage } from "./combat";
-import { BODY_PART_DAMAGE_MULTIPLIER, getBodyPartAt } from "./meleeCollision";
+import { BODY_PART_DAMAGE_MULTIPLIER, getBodyPartAt, stickTarget } from "./meleeCollision";
 import { buildItemWorldBody, withPickupHitbox } from "../../level/spawning";
-import type { Physics } from "../../physics/world";
+import type { CombatBodyPart, Physics } from "../../physics/world";
 import { hudStore } from "../../hud/store";
 
 interface EquippedRangedWeapon {
@@ -198,14 +198,32 @@ export function tryFireRanged(world: World, camera: THREE.Camera, scene: THREE.S
   return "fired";
 }
 
-function owningEid(object: THREE.Object3D): number | undefined {
+/** Walks `object` up to whichever ancestor (including itself) carries
+ * `userData.eid` -- the same tagging convention every raycastable mesh uses
+ * (`doors.ts`'s interact dispatch, `level/spawning.ts`, `npcAnimation.ts`).
+ * Exported for `corpseCleanup.ts`, which uses it the same way this module
+ * does: given an embedded projectile's own `Object3DRef` (reparented onto
+ * one of a character's bones -- `stickTarget` in meleeCollision.ts), find
+ * which character it's *currently* stuck in by walking its live parent
+ * chain, rather than remembering the eid separately at embed time (which
+ * would go stale the moment `items.ts`'s `pickUpItem` reparents it back out
+ * to the scene). */
+export function owningEid(object: THREE.Object3D): number | undefined {
   for (let current: THREE.Object3D | null = object; current; current = current.parent) {
     if (typeof current.userData.eid === "number") return current.userData.eid;
   }
   return undefined;
 }
 
-function makeRecoverableBolt(world: World, physics: Physics, scene: THREE.Scene, bolt: FlyingBolt, hit?: THREE.Intersection): void {
+function makeRecoverableBolt(
+  world: World,
+  physics: Physics,
+  scene: THREE.Scene,
+  bolt: FlyingBolt,
+  hit?: THREE.Intersection,
+  targetEid?: number,
+  part?: CombatBodyPart,
+): void {
   bolt.mesh.removeFromParent();
   const eid = addEntity(world);
   addComponent(world, eid, Item);
@@ -238,7 +256,17 @@ function makeRecoverableBolt(world: World, physics: Physics, scene: THREE.Scene,
     Position.y[eid] = group.position.y;
     Position.z[eid] = group.position.z;
     scene.add(group);
-    hit.object.attach(group); // follows any moving surface while embedded
+    // Reparenting onto `hit.object` directly used to leave a bolt stuck in a
+    // character floating exactly where it hit, permanently -- `hit.object`
+    // is that character's whole root mesh, whose own transform stays fixed
+    // at its ECS Position/Rotation the entire time, since a death collapse
+    // or hit flinch moves individual bones (an AnimationMixer driving the
+    // skeleton) rather than the root. `stickTarget` (meleeCollision.ts,
+    // shared with throwingCombat.ts's own embedded-javelin case) finds the
+    // specific bone nearest the hit instead, falling back to `hit.object`
+    // itself for anything that isn't a rigged character (a wall, a prop).
+    const attachTo = stickTarget(targetEid !== undefined ? Object3DRef[targetEid] : undefined, part) ?? hit.object;
+    attachTo.attach(group); // follows any moving surface/bone while embedded
     Object3DRef[eid] = group;
   } else {
     const p = hit?.point ?? bolt.position;
@@ -299,19 +327,25 @@ export function rangedCombatSystem(world: World, physics: Physics, scene: THREE.
     });
     if (hit) {
       const targetEid = owningEid(hit.object);
+      // Whichever combat hitbox cylinder the impact point falls inside (a
+      // plain height lookup, not a physics query -- see getBodyPartAt),
+      // computed even for an already-dead target (a corpse still on screen,
+      // not yet cleaned up -- see corpseCleanup.ts) or one with no combat
+      // hitboxes at all (a wall, a prop; `getBodyPartAt` just finds nothing
+      // and returns undefined) -- `makeRecoverableBolt` below needs it
+      // either way to find the right bone to stick into, not just to scale
+      // damage.
+      const part = targetEid !== undefined ? getBodyPartAt(targetEid, hit.point.y) : undefined;
       if (targetEid !== undefined && hasComponent(world, targetEid, Health) && !hasComponent(world, targetEid, Dead)) {
         // Melee moved to flat damage regardless of struck body part (see
         // meleeCollision.ts's BODY_PART_DAMAGE_MULTIPLIER doc comment), but
         // a bolt still has one real hit point to place, so ranged keeps the
-        // precision reward: whichever combat hitbox cylinder the impact
-        // point falls inside (a plain height lookup, not a physics query --
-        // see getBodyPartAt) scales the damage the same way it used to for
-        // melee.
-        const part = getBodyPartAt(targetEid, hit.point.y);
+        // precision reward: the struck body part scales the damage the same
+        // way it used to for melee.
         const damage = part ? bolt.damage * BODY_PART_DAMAGE_MULTIPLIER[part] : bolt.damage;
         applyRangedDamage(world, targetEid, damage, bolt.attackerEid, part);
       }
-      makeRecoverableBolt(world, physics, scene, bolt, hit);
+      makeRecoverableBolt(world, physics, scene, bolt, hit, targetEid, part);
       flyingBolts.splice(i, 1);
       continue;
     }

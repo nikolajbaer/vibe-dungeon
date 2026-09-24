@@ -707,6 +707,26 @@ export function startGame(container: HTMLElement, options: StartGameOptions = {}
   const keyboard = new Keyboard();
   const pointerLook = new PointerLook(renderer.domElement);
   const touch = new TouchControls(container, renderer.domElement);
+
+  // Tapping the 3D view itself, not just the dialog's own Close button,
+  // dismisses the inventory (Skyrim/Minecraft convention: the game world is
+  // still visible behind the pop-up, so a tap on it reads as "back to the
+  // game"). Registered on `pointerdown`, ahead of `PointerLook`'s own click
+  // handler and `TouchControls`'/the desktop mousedown listener further
+  // down (both on this same element), and `preventDefault()`d rather than
+  // just closing the store: per the Pointer Events spec that also suppresses
+  // the compatibility mouse/touch events (click, mousedown, touchstart) a
+  // browser would otherwise synthesize right after it -- without this, the
+  // very same tap could also engage Pointer Lock (harmless) or, worse, land
+  // a melee swing the instant the dialog closes (`meleeMousePressed` below
+  // only checks `pointerLook.locked`, not whether a modal *was* open a
+  // moment ago).
+  renderer.domElement.addEventListener("pointerdown", (e) => {
+    if (inventoryStore.isOpen) {
+      inventoryStore.close();
+      e.preventDefault();
+    }
+  });
   generateItemIcons();
   mountHud(container);
   mountInventory(container);

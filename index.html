@@ -740,6 +740,39 @@
         border-bottom: 1px solid rgba(255, 255, 255, 0.25);
         padding-bottom: 8px;
       }
+      /* Plain top-to-bottom stack by default (portrait) -- .inventory-dialog-
+         column is just a grouping wrapper here, same as .container-column
+         without the landscape media query below. */
+      .inventory-dialog-columns {
+        display: flex;
+        flex-direction: column;
+        gap: 10px;
+        min-height: 0;
+      }
+      .inventory-dialog-column {
+        display: flex;
+        flex-direction: column;
+        gap: 10px;
+      }
+      /* Side by side once there's more width than height to work with (a
+         landscape phone, a desktop window) -- rather than the paper doll,
+         weight, drop zone AND the six-slot list all stacked in one column
+         that has to scroll on a short screen. Widens the dialog itself to
+         fit both columns; the root's own overflow-y:auto (above) still
+         covers the rare case where even that isn't enough vertical room. */
+      @media (orientation: landscape) {
+        .inventory-dialog-root {
+          width: min(calc(100vw - 32px), 560px);
+        }
+        .inventory-dialog-columns {
+          flex-direction: row;
+          align-items: flex-start;
+        }
+        .inventory-dialog-column {
+          flex: 1;
+          min-width: 0;
+        }
+      }
       .inventory-dialog-close {
         align-self: flex-end;
         font: inherit;
