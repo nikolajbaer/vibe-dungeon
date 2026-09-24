@@ -77,19 +77,20 @@ function makeLabel(text: string, color: string): THREE.Sprite {
  * authoring data with no visual today (see README "Sectors"). Returns the
  * id->color map used for the legend so the two stay in sync by construction.
  *
- * Issue #86 (multi-level/stairs): **only floor 0 is overlaid.** Once two
- * floors can share an XZ column (a staircase's two landings), a naive "one
- * quad per occupied cell" pass would drop an upper-floor tint directly on
- * top of a ground-floor one at the same XZ, at roughly the same
- * `SECTOR_OVERLAY_Y` height above *its own* floor — from a top-down orbit
- * they'd visually stack and blend into a confusing double-tinted cell. A
- * full fix (offsetting each floor's overlay to its own real world Y, adding
- * a per-floor toggle to the viewer HUD) is more UI than this pass is
- * scoped for; restricting to floor 0 is the cheap version that avoids the
- * actively-misleading overlap without adding any new UI. Floor 1 still
- * renders in full (walls/floors/ceilings/props/NPCs/items) — it's just not
- * sector-tinted from above. See the PR description for what this
- * deliberately leaves undone. */
+ * Issue #86 (multi-level/stairs) originally restricted this to floor 0 only,
+ * over concern that two floors sharing an XZ column (a staircase's two
+ * landings) would stack their tints into a confusing double-tinted cell
+ * viewed from directly overhead. That concern doesn't actually apply once
+ * each floor's quad is placed at *its own* real world Y
+ * (`floorBaseline(cell.floor) + SECTOR_OVERLAY_Y`, not always
+ * `SECTOR_OVERLAY_Y`) rather than all stacked near Y=0: a staircase's lower
+ * and upper landing then sit `FLOOR_RISE` (6m) apart, clearly separated at
+ * any angled or orbiting viewing angle, not just literally coincident. The
+ * two dormitory/cellar-wing sectors this fix actually shipped for (floor 1
+ * and floor -1, neither of which shares an XZ column with anything on
+ * another floor at all) were never at any stacking risk to begin with — the
+ * old floor-0-only restriction was simply hiding them from the legend/
+ * overlay with no upside. */
 function addSectorOverlays(scene: THREE.Scene, occupancy: OccupancyIndex): Map<string, number> {
   const colors = new Map<string, number>();
   const geometry = new THREE.PlaneGeometry(UNIT * 0.92, UNIT * 0.92);
@@ -99,11 +100,10 @@ function addSectorOverlays(scene: THREE.Scene, occupancy: OccupancyIndex): Map<s
       color = hashColor(cell.sectorId);
       colors.set(cell.sectorId, color);
     }
-    if (cell.floor !== 0) continue; // see doc comment above
     const { x, z } = parseWorldCellKey(key);
     const mesh = new THREE.Mesh(geometry, new THREE.MeshBasicMaterial({ color, transparent: true, opacity: SECTOR_OVERLAY_OPACITY, depthWrite: false, side: THREE.DoubleSide }));
     mesh.rotation.x = -Math.PI / 2;
-    mesh.position.set(x * UNIT + UNIT / 2, SECTOR_OVERLAY_Y, z * UNIT + UNIT / 2);
+    mesh.position.set(x * UNIT + UNIT / 2, floorBaseline(cell.floor) + SECTOR_OVERLAY_Y, z * UNIT + UNIT / 2);
     scene.add(mesh);
   }
   return colors;

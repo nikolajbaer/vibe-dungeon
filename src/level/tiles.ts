@@ -119,8 +119,18 @@ export function floorForY(y: number): number {
 /** What a single unit-cell-wide segment of a tile's perimeter is. Doors and
  * openings are always exactly one segment (never a whole multi-unit wall) —
  * enforced by the face map's shape (one entry per unit-cell segment), not
- * by a runtime check. */
-export type FaceKind = "wall" | "opening" | "door";
+ * by a runtime check.
+ *
+ * `"door"` and `"singleDoor"` are both real, interactable, lockable doors
+ * (a `Door` ECS entity, built by `tileBuilder.ts`) — they differ only in
+ * scale: `"door"` is the original full-cell-width double-leaf door (grand
+ * halls, corridors between room-sized spaces), while `"singleDoor"` is a
+ * single narrow leaf inset within the cell (flanked by ordinary wall on
+ * both sides), sized just bigger than an NPC — the right fit for a small
+ * room (a nook-scale bedroom, a lockpicking alcove) where a full-width
+ * double door would look oversized. See `addDoorPair`/`addSingleDoor` in
+ * `tileBuilder.ts`. */
+export type FaceKind = "wall" | "opening" | "door" | "singleDoor";
 
 /** The four perimeter sides of an *unrotated* tile footprint, named by the
  * local axis they face (local +z = north, +x = east — these are local-space

@@ -68,8 +68,12 @@ specific things that trip people up:
   below) plus a **face map** (`faces: Record<Side, FaceKind[]>`). The face
   map says, for every unit-cell segment around the unrotated perimeter,
   whether that segment is `"wall"`, `"opening"` (a permanently open gap —
-  no door entity, just no wall), or `"door"` (an interactable double-door,
-  built by `tileBuilder.ts`'s `addDoorPair`). `faces.north`/`faces.south`
+  no door entity, just no wall), `"door"` (an interactable double-door,
+  built by `tileBuilder.ts`'s `addDoorPair`), or `"singleDoor"` (an
+  interactable single-leaf door, narrower and human-scale rather than
+  full-cell-width — built by `addSingleDoor`, the right fit for a small room
+  like a `nook`-scale bedroom where a full double door would look oversized;
+  see `tiles.ts`'s `FaceKind` doc comment). `faces.north`/`faces.south`
   have length `w` (indexed by local x, increasing); `faces.east`/`faces.west`
   have length `d` (indexed by local z, increasing).
 - **Every door/opening is exactly one unit-cell segment wide (3m), never
@@ -97,12 +101,13 @@ specific things that trip people up:
   and indexes them by `"x,z"` world cell. `validateOccupancy()` then walks
   every occupied cell and checks each of its 4 neighbor directions:
   - A wall/opening/door facing an **occupied neighbor cell** must match
-    that neighbor's facing side exactly on open-vs-wall (`"opening"` and
-    `"door"` both count as "open" for this check — a level author can put
-    the actual `"door"` `FaceKind` on whichever of the two tile types
-    declares that connection, and it still renders as one working door
-    either way, since `tileBuilder.ts`'s `combineKind()` picks `"door"`
-    over `"opening"` when the two sides disagree).
+    that neighbor's facing side exactly on open-vs-wall (`"opening"`,
+    `"door"`, and `"singleDoor"` all count as "open" for this check — a
+    level author can put the actual door `FaceKind` on whichever of the two
+    tile types declares that connection, and it still renders as one working
+    door either way, since `tileBuilder.ts`'s `combineKind()` resolves a
+    disagreement in the order `"wall"` > `"door"` > `"singleDoor"` >
+    `"opening"`).
   - A wall/opening/door facing **empty space** (no instance placed there)
     must be `"wall"` — an `"opening"`/`"door"` facing nothing throws
     immediately, with a message naming the offending instance and cell.

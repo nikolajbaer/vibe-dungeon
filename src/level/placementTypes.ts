@@ -170,8 +170,8 @@ export interface StairConnector {
 }
 
 /**
- * Marks one already-authored "door" face (a `TileType.faces` segment set to
- * `"door"` — see `tiles.ts`'s `FaceKind`) as locked, requiring an item in the
+ * Marks one already-authored door face (a `TileType.faces` segment set to
+ * `"door"` or `"singleDoor"` — see `tiles.ts`'s `FaceKind`) as locked, requiring an item in the
  * player's inventory to open (see `doors.ts`'s `toggleDoor`). This doesn't
  * place a door itself — the face map already does that — it just attaches
  * lock data to the specific door boundary tileBuilder.ts would otherwise

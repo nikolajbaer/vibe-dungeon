@@ -33,6 +33,18 @@ const DOOR_HEIGHT = 2.35; // apex of the arch
 const DOOR_ARCH_RISE = DOOR_HEIGHT - DOOR_SPRING_HEIGHT;
 const DOOR_FRAME_WIDTH = 0.16;
 
+// A `"singleDoor"` (tiles.ts) is a single narrow leaf, inset within the
+// cell's own 3m span rather than spanning all of it — flanked by ordinary
+// wall on both sides, plus a flat header above (see `addSingleDoor` below),
+// rather than the arch/spandrel/stone-frame `addDoorPair` needs to fill a
+// *whole*-cell-width doorway. Sized "slightly bigger than an NPC": an NPC's
+// own collision footprint is `2 * halfExtent` = 0.8m wide and
+// `HUMANOID_HEIGHT` = 1.79m tall (`spawning.ts`) — 1.0m/2.0m leaves a small
+// margin on both without reading as a grand doorway.
+const SINGLE_DOOR_WIDTH = 1.0;
+const SINGLE_DOOR_HEIGHT = 2.0;
+const SINGLE_DOOR_THICKNESS = 0.08; // half-thickness of the single leaf slab
+
 /**
  * Adds a wall box spanning [cx-hx,cx+hx] x [cz-hz,cz+hz], from `baseY` up to
  * `baseY + height` (default `baseY = 0`, i.e. floor-to-height like a regular
@@ -382,6 +394,97 @@ function addDoorPair(world: World, physics: Physics, scene: THREE.Scene, orienta
   addDoorFrame(scene, orientation, planeCoord, rangeStart, rangeEnd, floorBase);
 }
 
+/**
+ * Adds one `"singleDoor"` leaf — a plain rectangular slab (no arch; a
+ * single narrow door doesn't need one the way a whole-cell-wide doorway
+ * does) hinged on one vertical edge, the same hinge-group-plus-kinematic-
+ * body shape `addDoorLeaf` uses for a double door's leaves, just simpler
+ * geometry and `SINGLE_DOOR_HEIGHT` instead of `DOOR_HEIGHT`. Unlike
+ * `addDoorPair`'s two leaves, a single door is never paired with another —
+ * `Door.pairId[eid] = eid` (its own default) is left as-is, since nothing
+ * else ever shares this doorway.
+ */
+function addSingleDoorLeaf(
+  world: World,
+  physics: Physics,
+  scene: THREE.Scene,
+  leafCx: number,
+  leafCz: number,
+  hx: number,
+  hz: number,
+  hingeX: number,
+  hingeZ: number,
+  hingeSign: number,
+  floorBase: number,
+  requiredItemTypeId: string | undefined,
+): number {
+  const closedY = floorBase + SINGLE_DOOR_HEIGHT / 2;
+  const offsetX = leafCx - hingeX;
+  const offsetZ = leafCz - hingeZ;
+
+  const group = new THREE.Group();
+  group.position.set(hingeX, closedY, hingeZ);
+  scene.add(group);
+
+  const mesh = new THREE.Mesh(new THREE.BoxGeometry(hx * 2, SINGLE_DOOR_HEIGHT, hz * 2), doorMaterial(!!requiredItemTypeId));
+  mesh.userData.surfaceMaterial = "wood";
+  mesh.position.set(offsetX, 0, offsetZ);
+  mesh.castShadow = mesh.receiveShadow = true;
+  group.add(mesh);
+
+  const eid = addEntity(world);
+  addComponent(world, eid, Door);
+  addComponent(world, eid, Object3DRef);
+  addComponent(world, eid, PhysicsBody);
+  Door.state[eid] = DoorState.CLOSED;
+  Door.progress[eid] = 0;
+  Door.hingeSign[eid] = hingeSign;
+  Door.pairId[eid] = eid;
+  Door.locked[eid] = requiredItemTypeId ? 1 : 0;
+  Door.requiredItemTypeId[eid] = requiredItemTypeId;
+  Object3DRef[eid] = group;
+  PhysicsBody[eid] = addKinematicBox(physics, hingeX, closedY, hingeZ, offsetX, 0, offsetZ, hx, SINGLE_DOOR_HEIGHT / 2, hz);
+  mesh.userData.eid = eid;
+
+  return eid;
+}
+
+/**
+ * Builds a `"singleDoor"` boundary: a `SINGLE_DOOR_WIDTH`-wide doorway
+ * centered in the cell, one hinged leaf, and ordinary solid wall filling
+ * the rest of the cell's span on both sides plus a flat header above —
+ * unlike `addDoorPair`, no arch/spandrel/stone-frame is needed, since a
+ * plain rectangular doorway narrower than the cell is already fully framed
+ * by ordinary wall geometry on every side (`addWall` fills each side and
+ * the header; the floor slab and the leaf itself close the rest).
+ */
+function addSingleDoor(world: World, physics: Physics, scene: THREE.Scene, orientation: "x" | "z", planeCoord: number, rangeStart: number, rangeEnd: number, wallHeight: number, floorBase: number, requiredItemTypeId: string | undefined): void {
+  const center = (rangeStart + rangeEnd) / 2;
+  const doorwayHalf = SINGLE_DOOR_WIDTH / 2;
+  const doorwayStart = center - doorwayHalf;
+  const doorwayEnd = center + doorwayHalf;
+
+  if (orientation === "x") {
+    addWall(physics, scene, planeCoord, (rangeStart + doorwayStart) / 2, WALL_THICKNESS, (doorwayStart - rangeStart) / 2, wallHeight, floorBase);
+    addWall(physics, scene, planeCoord, (doorwayEnd + rangeEnd) / 2, WALL_THICKNESS, (rangeEnd - doorwayEnd) / 2, wallHeight, floorBase);
+  } else {
+    addWall(physics, scene, (rangeStart + doorwayStart) / 2, planeCoord, (doorwayStart - rangeStart) / 2, WALL_THICKNESS, wallHeight, floorBase);
+    addWall(physics, scene, (doorwayEnd + rangeEnd) / 2, planeCoord, (rangeEnd - doorwayEnd) / 2, WALL_THICKNESS, wallHeight, floorBase);
+  }
+
+  const headerHeight = wallHeight - SINGLE_DOOR_HEIGHT;
+  if (headerHeight > 0) {
+    if (orientation === "x") addWall(physics, scene, planeCoord, center, WALL_THICKNESS, doorwayHalf, headerHeight, floorBase + SINGLE_DOOR_HEIGHT);
+    else addWall(physics, scene, center, planeCoord, doorwayHalf, WALL_THICKNESS, headerHeight, floorBase + SINGLE_DOOR_HEIGHT);
+  }
+
+  if (orientation === "x") {
+    addSingleDoorLeaf(world, physics, scene, planeCoord, doorwayStart + doorwayHalf, SINGLE_DOOR_THICKNESS, doorwayHalf, planeCoord, doorwayStart, 1, floorBase, requiredItemTypeId);
+  } else {
+    addSingleDoorLeaf(world, physics, scene, doorwayStart + doorwayHalf, planeCoord, doorwayHalf, SINGLE_DOOR_THICKNESS, doorwayStart, planeCoord, 1, floorBase, requiredItemTypeId);
+  }
+}
+
 interface InstanceBounds {
   minX: number;
   maxX: number;
@@ -448,10 +551,16 @@ const WALL_DIRS: Array<{
  * declares the connection (see GREAT_HALL's face map) and it still renders
  * as a single door either way. Wall always wins over open (should never
  * actually happen here since validateOccupancy already rejects that
- * mismatch, but this keeps the function total). */
+ * mismatch, but this keeps the function total). `"door"` (double-leaf)
+ * outranks `"singleDoor"` in turn — a boundary authored as a grand double
+ * door on one side and a mere opening on the other should still read as a
+ * full double door, not get quietly downgraded — though in practice a
+ * boundary's two sides are always authored to agree on which kind of door
+ * it is. */
 function combineKind(mine: FaceKind, theirs: FaceKind): FaceKind {
   if (mine === "wall" || theirs === "wall") return "wall";
   if (mine === "door" || theirs === "door") return "door";
+  if (mine === "singleDoor" || theirs === "singleDoor") return "singleDoor";
   return "opening";
 }
 
@@ -714,6 +823,8 @@ export function buildGeometryFromOccupancy(world: World, physics: Physics, scene
             interiorSign: (dir.dx > 0 ? -1 : 1) as 1 | -1,
             floor: cell.floor,
           });
+        } else if (effective === "singleDoor") {
+          addSingleDoor(world, physics, scene, "x", planeCell * UNIT, z * UNIT, (z + 1) * UNIT, sharedBoundaryHeight, floorBase, requiredItemTypeId);
         } else {
           addDoorPair(world, physics, scene, "x", planeCell * UNIT, z * UNIT, (z + 1) * UNIT, sharedBoundaryHeight, floorBase, requiredItemTypeId);
         }
@@ -731,6 +842,8 @@ export function buildGeometryFromOccupancy(world: World, physics: Physics, scene
             interiorSign: (dir.dz > 0 ? -1 : 1) as 1 | -1,
             floor: cell.floor,
           });
+        } else if (effective === "singleDoor") {
+          addSingleDoor(world, physics, scene, "z", planeCell * UNIT, x * UNIT, (x + 1) * UNIT, sharedBoundaryHeight, floorBase, requiredItemTypeId);
         } else {
           addDoorPair(world, physics, scene, "z", planeCell * UNIT, x * UNIT, (x + 1) * UNIT, sharedBoundaryHeight, floorBase, requiredItemTypeId);
         }

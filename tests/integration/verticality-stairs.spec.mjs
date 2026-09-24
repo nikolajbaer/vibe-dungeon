@@ -55,11 +55,39 @@ try {
   assert(phys.grounded === true, "grounded on the upper floor, not falling or hovering");
   assert((await debug("getPlayerFloor")) === 1, "getPlayerFloor resolves to 1 after the climb");
 
-  // upper-room-north: world cell x in [-24,-21], z in [-3,0], center (-22.5,-1.5).
-  reached = await walkThroughDoors(-22.5, -1.5, 1.5, 80);
-  assert(reached, "reached upper-room-north");
+  // dorm-room-n1 (dormitory-expansion task): a straight walkTo from here
+  // would cut diagonally across the new north dormitory corridor's own west
+  // wall rather than through its (1m-wide) door -- teleport into the
+  // corridor first, aligned with dorm-room-n1's door (world cell x in
+  // [-27,-24], z in [-3,0], center (-25.5,-1.5)).
+  //
+  // Unlike every other door this test walks through (all reached after a
+  // long transit that gives the door's own animation plenty of real
+  // wall-clock time to finish while the player is still closing the
+  // distance), this one starts right next to its door -- too close for
+  // walkThroughDoors' "press E every few steps while walking" approach to
+  // outrun the door's own swing in this environment's slow (~1 real FPS)
+  // software-rendered browser, where OPEN_DURATION's nominal 0.8 seconds
+  // (doors.ts) actually takes several real seconds of animation-system
+  // frames to complete. So: stand still and open it first (poll `progress`
+  // the same "press and wait until it's actually done" pattern
+  // dormitory-decor.spec.mjs's openContainerInFront uses for containers,
+  // rather than a fixed number of presses), *then* walk the short remaining
+  // distance through it.
+  await debug("teleportPlayer", -22.5, 6.1, -1.5);
+  await page.evaluate(() => window.__vibeDungeonDebug.setYaw(Math.PI / 2)); // face west, toward the door
+  let doorOpen = false;
+  for (let i = 0; i < 30 && !doorOpen; i++) {
+    await page.keyboard.press("KeyE");
+    await page.waitForTimeout(300);
+    const door = (await debug("getDoorStates")).find((d) => Math.abs(d.x - -24) < 0.5 && Math.abs(d.z - -2) < 0.5);
+    doorOpen = !!door && door.progress >= 0.85;
+  }
+  assert(doorOpen, "dorm-room-n1's bedroom door actually opened");
+  reached = await walkThroughDoors(-25.5, -1.5, 1.5, 60);
+  assert(reached, "reached dorm-room-n1 through its bedroom door");
   pos = await debug("getPlayerPosition");
-  assert(pos.y > 5.0, "still on floor 1 inside the nook (didn't fall back down)");
+  assert(pos.y > 5.0, "still on floor 1 inside the bedroom (didn't fall back down)");
 
   // --- Regression: the original east branch (side-chamber) still reachable ---
   // Teleport partway down the east corridor (skipping the crossroads return

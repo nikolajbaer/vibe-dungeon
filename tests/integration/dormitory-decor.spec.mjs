@@ -33,14 +33,16 @@ try {
   assert(Math.abs(pos.x - 1.5) < 0.1 && Math.abs(pos.z - 7.5) < 0.1, "level loaded and player spawned in room-a as usual");
 
   // --- Dormitory chests: each is a real Container with its seeded starting
-  // loot, openable via the ordinary interact raycast. ---
+  // loot, openable via the ordinary interact raycast. Positions are the
+  // dormitory-expansion task's dorm-room-n1/s1 (each bedroom's chest sits
+  // beside its own bed, at x=-25.6 -- see rooms/stairwell.ts). ---
   const containers = await debug("getContainerEntities");
 
-  const southChest = containers.find((c) => Math.abs(c.x - -21.7) < 0.6 && Math.abs(c.z - -10.0) < 0.6);
-  assert(!!southChest, "upper-room-south's chest exists as a container entity");
-  await debug("teleportPlayer", southChest.x + 0.8, 6.2, southChest.z);
-  await page.evaluate(() => window.__vibeDungeonDebug.setYaw(Math.PI / 2)); // face -x, toward the chest
-  assert(await openContainerInFront(page, debug), "upper-room-south's chest opens on interact");
+  const n1Chest = containers.find((c) => Math.abs(c.x - -25.6) < 0.6 && Math.abs(c.z - -1.5) < 0.6);
+  assert(!!n1Chest, "dorm-room-n1's chest exists as a container entity");
+  await debug("teleportPlayer", n1Chest.x, 6.2, n1Chest.z + 0.8);
+  await page.evaluate(() => window.__vibeDungeonDebug.setYaw(0)); // face -z (south), toward the chest
+  assert(await openContainerInFront(page, debug), "dorm-room-n1's chest opens on interact");
   let state = await debug("getContainerState");
   assert(
     state.contents.some((i) => i.itemTypeId === "coin" && i.count === 8),
@@ -48,11 +50,11 @@ try {
   );
   await debug("closeContainer");
 
-  const northChest = containers.find((c) => Math.abs(c.x - -21.7) < 0.6 && Math.abs(c.z - -1.0) < 0.6);
-  assert(!!northChest, "upper-room-north's chest exists as a container entity");
-  await debug("teleportPlayer", northChest.x + 0.8, 6.2, northChest.z);
-  await page.evaluate(() => window.__vibeDungeonDebug.setYaw(Math.PI / 2));
-  assert(await openContainerInFront(page, debug), "upper-room-north's chest opens on interact");
+  const s1Chest = containers.find((c) => Math.abs(c.x - -25.6) < 0.6 && Math.abs(c.z - -19.5) < 0.6);
+  assert(!!s1Chest, "dorm-room-s1's chest exists as a container entity");
+  await debug("teleportPlayer", s1Chest.x, 6.2, s1Chest.z + 0.8);
+  await page.evaluate(() => window.__vibeDungeonDebug.setYaw(0)); // face -z (south), toward the chest
+  assert(await openContainerInFront(page, debug), "dorm-room-s1's chest opens on interact");
   state = await debug("getContainerState");
   assert(
     state.contents.some((i) => i.itemTypeId === "gem"),
