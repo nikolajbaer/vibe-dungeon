@@ -1,7 +1,7 @@
 import { useState } from "preact/hooks";
 
 export type OpponentStyle = "aggressive" | "defensive" | "passive";
-export type OpponentWeapon = "unarmed" | "dagger" | "sword" | "wooden_sword";
+export type OpponentWeapon = "unarmed" | "dagger" | "sword" | "wooden_sword" | "quarterstaff" | "greatsword";
 
 export interface OpponentConfig {
   health: number;
@@ -63,6 +63,8 @@ export function OpponentConfigurator({ onSpawn, onOpenChange }: { onSpawn(config
                 <option value="unarmed">Unarmed</option>
                 <option value="dagger">Dagger</option>
                 <option value="sword">Sword</option>
+                <option value="quarterstaff">Quarterstaff</option>
+                <option value="greatsword">Great sword</option>
                 <option value="wooden_sword">Wooden sword</option>
               </select>
             </label>

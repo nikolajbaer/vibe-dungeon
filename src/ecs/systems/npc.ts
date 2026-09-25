@@ -3,6 +3,7 @@ import { Dead, Health, NPC, NpcState, Position, Rotation, Stamina, Velocity, Pla
 import { NPC_REGISTRY } from "../../assets/npcRegistry";
 import type { NpcArchetypeDef } from "../../assets/types";
 import { isMovementLocked, triggerAttack, triggerWeaponDraw } from "./npcAnimation";
+import { beginTwoHandedAttack } from './twoHandedNpcAnimation';
 import { NPC_ATTACK_ACTIVE_WINDOW, NPC_ATTACK_SHAPE, NPC_ATTACK_STAMINA_COST, UNARMED_REACH } from "./combat";
 import { isHostileTo, registerMeleeSwing } from "./meleeCollision";
 
@@ -365,6 +366,15 @@ function updateAggressive(world: World, eid: number, archetype: NpcArchetypeDef,
   const hasStamina = Stamina.current[eid] !== undefined;
   if (NPC.drawRemaining[eid] <= 0 && NPC.attackCooldownRemaining[eid] <= 0
       && (!hasStamina || Stamina.current[eid] >= NPC_ATTACK_STAMINA_COST)) {
+    const twoHandedDuration=beginTwoHandedAttack(eid,(type)=>{
+      if(!hasComponent(world,eid,NPC))return;
+      const yaw=Rotation.yaw[eid];
+      registerMeleeSwing(eid,Math.sin(yaw),Math.cos(yaw),archetype.attackReach??1.8,type==='swing'?1.2:.45,1.1,(archetype.attackDamage??12)*(type==='swing'?1.35:.7),NPC_ATTACK_ACTIVE_WINDOW);
+    });
+    if(twoHandedDuration!==undefined) {
+      if(twoHandedDuration>0){if(hasStamina)Stamina.current[eid]-=NPC_ATTACK_STAMINA_COST;NPC.attackCooldownRemaining[eid]=twoHandedDuration;}
+      return;
+    }
     triggerAttack(eid);
     const fallbackDamage = archetype.weaponClass === "oneHanded" ? 7 : archetype.weaponClass === "dagger" ? 5 : 3;
     const fallbackReach = archetype.weaponClass === "oneHanded" ? 1.4 : archetype.weaponClass === "dagger" ? 1.0 : UNARMED_REACH;

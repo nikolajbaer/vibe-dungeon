@@ -3,6 +3,7 @@ import * as SkeletonUtils from "three/examples/jsm/utils/SkeletonUtils.js";
 import { hasComponent, type World } from "bitecs";
 import { NPC, NpcState, Velocity } from "../components";
 import type { HumanoidRig } from "../../characters/humanoidRig";
+import { twoHandedWeapon, twoHandedLocked, reactTwoHanded, updateTwoHandedNpcs } from './twoHandedNpcAnimation';
 
 const MOVING_EPSILON = 0.05; // m/s — Velocity magnitude above this counts as "walking" (issue #54); NpcState
 // alone isn't enough since LOITERING covers both a paused-between-legs NPC and one mid-wander-leg.
@@ -113,6 +114,7 @@ export function createAnimatedNpcMesh(rig: HumanoidRig, eid: number): THREE.Obje
  * actually reveals it. Exists for `hitboxDebug.ts`'s play-testing overlay,
  * which needs a real `Object3D` to wrap in a box helper. */
 export function getNpcWeaponMesh(eid: number): THREE.Object3D | undefined {
+  if(twoHandedWeapon(eid))return twoHandedWeapon(eid);
   return npcAnimations.get(eid)?.weapon;
 }
 
@@ -130,6 +132,7 @@ export function getNpcWeaponMesh(eid: number): THREE.Object3D | undefined {
  * moving-during-attack case to guard against. `"death"` never needs this --
  * a corpse doesn't move under its own AI at all. */
 export function isMovementLocked(eid: number): boolean {
+  if(twoHandedWeapon(eid))return twoHandedLocked(eid);
   const oneShot = npcAnimations.get(eid)?.oneShot;
   return oneShot === "draw" || oneShot === "parry" || oneShot === "hit";
 }
@@ -161,6 +164,7 @@ export function triggerWeaponDraw(eid: number): boolean {
  * `triggerViewmodelSwing`'s re-trigger behavior.
  */
 export function triggerHitReaction(eid: number): void {
+  if(reactTwoHanded(eid,'hit'))return;
   const state = npcAnimations.get(eid);
   if (!state || state.oneShot === "death") return; // a corpse doesn't flinch
   state.idleAction.stopFading();
@@ -183,6 +187,7 @@ export function triggerHitReaction(eid: number): void {
 
 /** Plays the short defensive weapon deflection for a successful NPC parry. */
 export function triggerParry(eid: number): void {
+  if(reactTwoHanded(eid,'block'))return;
   const state = npcAnimations.get(eid);
   if (!state || state.oneShot === "death") return;
   for (const action of [state.idleAction, state.walkAction, state.combatIdleAction, state.drawAction, state.attackAction, state.hitAction]) {
@@ -220,6 +225,7 @@ export function triggerAttack(eid: number): void {
  * registered animation state.
  */
 export function triggerDeathCollapse(eid: number): void {
+  if(reactTwoHanded(eid,'death'))return;
   const state = npcAnimations.get(eid);
   if (!state || state.oneShot === "death") return;
   state.idleAction.stopFading();
@@ -265,6 +271,7 @@ export function triggerDeathCollapse(eid: number): void {
  * unfinished, not-lying-flat pose once the pause outlived the clip.
  */
 export function npcAnimationSystem(world: World, dt: number, paused: boolean): void {
+  updateTwoHandedNpcs(world,dt,paused);
   for (const [eid, state] of npcAnimations) {
     if (!hasComponent(world, eid, NPC)) {
       // The NPC entity is gone; nothing left to drive (never happens today —
