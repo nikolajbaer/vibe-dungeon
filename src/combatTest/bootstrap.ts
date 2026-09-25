@@ -18,6 +18,8 @@ const ARCHETYPE_FOR_WEAPON: Record<OpponentWeapon, string> = {
   dagger: "bandit",
   sword: "guard",
   wooden_sword: "weapons-master",
+  quarterstaff: "quarterstaff-fighter",
+  greatsword: "greatsword-fighter",
 };
 
 /** Meters between adjacent opponents in the same spawned batch -- more than
