@@ -4,6 +4,7 @@ import { hasComponent, type World } from "bitecs";
 import { NPC, NpcState, Velocity } from "../components";
 import type { HumanoidRig } from "../../characters/humanoidRig";
 import { twoHandedWeapon, twoHandedLocked, reactTwoHanded, updateTwoHandedNpcs } from './twoHandedNpcAnimation';
+import { rangedNpcWeapon, rangedNpcLocked, reactRangedNpc, updateRangedNpcs } from './rangedNpcAnimation';
 
 const MOVING_EPSILON = 0.05; // m/s — Velocity magnitude above this counts as "walking" (issue #54); NpcState
 // alone isn't enough since LOITERING covers both a paused-between-legs NPC and one mid-wander-leg.
@@ -115,6 +116,7 @@ export function createAnimatedNpcMesh(rig: HumanoidRig, eid: number): THREE.Obje
  * which needs a real `Object3D` to wrap in a box helper. */
 export function getNpcWeaponMesh(eid: number): THREE.Object3D | undefined {
   if(twoHandedWeapon(eid))return twoHandedWeapon(eid);
+  if(rangedNpcWeapon(eid))return rangedNpcWeapon(eid);
   return npcAnimations.get(eid)?.weapon;
 }
 
@@ -133,6 +135,7 @@ export function getNpcWeaponMesh(eid: number): THREE.Object3D | undefined {
  * a corpse doesn't move under its own AI at all. */
 export function isMovementLocked(eid: number): boolean {
   if(twoHandedWeapon(eid))return twoHandedLocked(eid);
+  if(rangedNpcWeapon(eid))return rangedNpcLocked(eid);
   const oneShot = npcAnimations.get(eid)?.oneShot;
   return oneShot === "draw" || oneShot === "parry" || oneShot === "hit";
 }
@@ -165,6 +168,7 @@ export function triggerWeaponDraw(eid: number): boolean {
  */
 export function triggerHitReaction(eid: number): void {
   if(reactTwoHanded(eid,'hit'))return;
+  if(reactRangedNpc(eid,'hit'))return;
   const state = npcAnimations.get(eid);
   if (!state || state.oneShot === "death") return; // a corpse doesn't flinch
   state.idleAction.stopFading();
@@ -226,6 +230,7 @@ export function triggerAttack(eid: number): void {
  */
 export function triggerDeathCollapse(eid: number): void {
   if(reactTwoHanded(eid,'death'))return;
+  if(reactRangedNpc(eid,'death'))return;
   const state = npcAnimations.get(eid);
   if (!state || state.oneShot === "death") return;
   state.idleAction.stopFading();
@@ -272,6 +277,7 @@ export function triggerDeathCollapse(eid: number): void {
  */
 export function npcAnimationSystem(world: World, dt: number, paused: boolean): void {
   updateTwoHandedNpcs(world,dt,paused);
+  updateRangedNpcs(world,dt,paused);
   for (const [eid, state] of npcAnimations) {
     if (!hasComponent(world, eid, NPC)) {
       // The NPC entity is gone; nothing left to drive (never happens today —

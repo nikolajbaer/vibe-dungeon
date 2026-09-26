@@ -4,6 +4,8 @@ import { NPC_REGISTRY } from "../../assets/npcRegistry";
 import type { NpcArchetypeDef } from "../../assets/types";
 import { isMovementLocked, triggerAttack, triggerWeaponDraw } from "./npcAnimation";
 import { beginTwoHandedAttack } from './twoHandedNpcAnimation';
+import { beginRangedNpcAttack, rangedNpcHasJavelin } from './rangedNpcAnimation';
+import * as THREE from 'three';
 import { NPC_ATTACK_ACTIVE_WINDOW, NPC_ATTACK_SHAPE, NPC_ATTACK_STAMINA_COST, UNARMED_REACH } from "./combat";
 import { isHostileTo, registerMeleeSwing } from "./meleeCollision";
 
@@ -114,7 +116,7 @@ export function toggleNpcFollow(eid: number): void {
  * itself; whether it actually lands is resolved later, the same as a
  * player's own attack.
  */
-export function npcSystem(world: World, dt: number, sectorAt: SectorAt): void {
+export function npcSystem(world: World, dt: number, sectorAt: SectorAt, scene?: THREE.Scene): void {
   const [playerEid] = query(world, [PlayerControlled, Position]);
 
   for (const eid of query(world, [NPC, Position, Velocity])) {
@@ -148,11 +150,11 @@ export function npcSystem(world: World, dt: number, sectorAt: SectorAt): void {
       continue;
     }
     if (testStyle === "aggressive") {
-      updateAggressive(world, eid, archetype, dt, sectorAt, true);
+      updateAggressive(world, eid, archetype, dt, sectorAt, true, scene);
       continue;
     }
     if (testStyle === "defensive") {
-      if (NPC.provoked[eid]) updateAggressive(world, eid, archetype, dt, sectorAt, true);
+      if (NPC.provoked[eid]) updateAggressive(world, eid, archetype, dt, sectorAt, true, scene);
       else {
         Velocity.x[eid] = 0;
         Velocity.z[eid] = 0;
@@ -161,7 +163,7 @@ export function npcSystem(world: World, dt: number, sectorAt: SectorAt): void {
     }
     const sparring = hasComponent(world, eid, Practice) && !!Practice.active[eid];
     if (archetype?.behavior === "aggressive" || sparring || !!NPC.provoked[eid]) {
-      updateAggressive(world, eid, archetype, dt, sectorAt, sparring);
+      updateAggressive(world, eid, archetype, dt, sectorAt, sparring, scene);
       continue;
     }
 
@@ -279,7 +281,7 @@ function giveUpAndLoiter(eid: number): void {
  * `findHostileTarget`) and never leashes at all -- a training dummy that
  * wandered off (or gave up) mid-bout would defeat the point.
  */
-function updateAggressive(world: World, eid: number, archetype: NpcArchetypeDef, dt: number, sectorAt: SectorAt, sparring = false): void {
+function updateAggressive(world: World, eid: number, archetype: NpcArchetypeDef, dt: number, sectorAt: SectorAt, sparring = false, scene?: THREE.Scene): void {
   const targetEid = sparring ? query(world, [PlayerControlled, Position])[0] : findHostileTarget(world, eid);
   if (targetEid === undefined) {
     // Nothing left to fight -- stand down from a chase/attack rather than
@@ -322,7 +324,8 @@ function updateAggressive(world: World, eid: number, archetype: NpcArchetypeDef,
   const dx = Position.x[targetEid] - Position.x[eid];
   const dz = Position.z[targetEid] - Position.z[eid];
   const distToTarget = Math.hypot(dx, dz);
-  const attackRange = archetype.attackRange ?? (NPC.provoked[eid] ? 1.5 : 0);
+  const attackRange = archetype.id === 'javelin-fighter' && !rangedNpcHasJavelin(eid)
+    ? 1.3 : archetype.attackRange ?? (NPC.provoked[eid] ? 1.5 : 0);
 
   if (NPC.drawRemaining[eid] > 0) {
     if (triggerWeaponDraw(eid)) NPC.drawRemaining[eid] = Math.max(0, NPC.drawRemaining[eid] - dt);
@@ -338,6 +341,10 @@ function updateAggressive(world: World, eid: number, archetype: NpcArchetypeDef,
   // this holds position (but keeps facing the target, above) until
   // whichever one finishes and hands back control to idle/walk/combatIdle.
   if (isMovementLocked(eid)) {
+    // Count the crossbow's five-second shot interval from the start of the
+    // firing animation, including its windup and follow-through.
+    if (archetype.id === 'crossbow-fighter' && NPC.attackCooldownRemaining[eid] > 0)
+      NPC.attackCooldownRemaining[eid] = Math.max(0, NPC.attackCooldownRemaining[eid] - dt);
     Velocity.x[eid] = 0;
     Velocity.z[eid] = 0;
     return;
@@ -366,6 +373,11 @@ function updateAggressive(world: World, eid: number, archetype: NpcArchetypeDef,
   const hasStamina = Stamina.current[eid] !== undefined;
   if (NPC.drawRemaining[eid] <= 0 && NPC.attackCooldownRemaining[eid] <= 0
       && (!hasStamina || Stamina.current[eid] >= NPC_ATTACK_STAMINA_COST)) {
+    const rangedDuration = scene && beginRangedNpcAttack(eid, targetEid, world, scene);
+    if (rangedDuration !== undefined) {
+      if (rangedDuration > 0) NPC.attackCooldownRemaining[eid] = rangedDuration;
+      return;
+    }
     const twoHandedDuration=beginTwoHandedAttack(eid,(type)=>{
       if(!hasComponent(world,eid,NPC))return;
       const yaw=Rotation.yaw[eid];

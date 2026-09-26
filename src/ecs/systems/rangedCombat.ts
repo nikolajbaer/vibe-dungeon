@@ -5,7 +5,7 @@ import { ITEM_REGISTRY } from "../../assets/itemRegistry";
 import type { ItemAssetDef } from "../../assets/types";
 import { isHandSlot } from "./items";
 import { applyRangedDamage } from "./combat";
-import { BODY_PART_DAMAGE_MULTIPLIER, getBodyPartAt, stickTarget } from "./meleeCollision";
+import { BODY_PART_DAMAGE_MULTIPLIER, getBodyPartAt, isHostileTo, stickTarget } from "./meleeCollision";
 import { buildItemWorldBody, withPickupHitbox } from "../../level/spawning";
 import type { CombatBodyPart, Physics } from "../../physics/world";
 import { hudStore } from "../../hud/store";
@@ -30,6 +30,7 @@ interface FlyingBolt {
   maxRange: number;
   damage: number;
   attackerEid: number;
+  itemTypeId?: "javelin";
 }
 
 const reloads = new Map<number, ReloadState>();
@@ -198,6 +199,39 @@ export function tryFireRanged(world: World, camera: THREE.Camera, scene: THREE.S
   return "fired";
 }
 
+/** NPCs use the same swept flight and wall collision as player bolts. Their
+ * ammo supply is virtual; only fired projectiles enter the world as pickup
+ * items, so an arena crossbow can fire indefinitely without stack bookkeeping. */
+export function launchNpcProjectile(
+  scene: THREE.Scene, attackerEid: number, targetEid: number,
+  kind: "crossbow" | "javelin", muzzle: THREE.Vector3, random = Math.random,
+): void {
+  const def = ITEM_REGISTRY[kind];
+  const stats = kind === "crossbow" ? def.rangedWeapon! : def.throwable!;
+  const distance = Math.hypot(Position.x[targetEid] - muzzle.x, Position.z[targetEid] - muzzle.z);
+  const flightSeconds = distance / stats.projectileSpeed;
+  const gravityCompensation = BOLT_GRAVITY * flightSeconds * flightSeconds * .5;
+  // Spread grows with range: approximately 0.12m at 2m and 1.4m at 18m.
+  // Aimed at the torso; misses remain physical and can lodge in the wall.
+  const spread = kind === "crossbow" ? .08 + distance * .065 : .14 + distance * .045;
+  const direction = new THREE.Vector3(
+    Position.x[targetEid] + (random() * 2 - 1) * spread - muzzle.x,
+    Position.y[targetEid] + 1.1 + gravityCompensation + (random() * 2 - 1) * spread * .45 - muzzle.y,
+    Position.z[targetEid] + (random() * 2 - 1) * spread - muzzle.z,
+  ).normalize();
+  const itemTypeId = kind === "crossbow" ? "bolt" : "javelin";
+  const mesh = ITEM_REGISTRY[itemTypeId].createWorldMesh();
+  mesh.position.copy(muzzle);
+  mesh.quaternion.setFromUnitVectors(new THREE.Vector3(0, 0, 1), direction);
+  scene.add(mesh);
+  flyingBolts.push({
+    mesh, position: muzzle.clone(), velocity: direction.multiplyScalar(stats.projectileSpeed),
+    distance: 0, maxRange: stats.maxRange,
+    damage: kind === "crossbow" ? stats.damage : 20,
+    attackerEid, itemTypeId: kind === "javelin" ? "javelin" : undefined,
+  });
+}
+
 /** Walks `object` up to whichever ancestor (including itself) carries
  * `userData.eid` -- the same tagging convention every raycastable mesh uses
  * (`doors.ts`'s interact dispatch, `level/spawning.ts`, `npcAnimation.ts`).
@@ -225,6 +259,17 @@ function makeRecoverableBolt(
   part?: CombatBodyPart,
 ): void {
   bolt.mesh.removeFromParent();
+  if (bolt.itemTypeId === "javelin") {
+    // A thrown spear becomes a real world pickup at its first impact or
+    // range limit, including a wall miss. Its mesh is no longer the flying
+    // cosmetic copy; the normal item body handles its resting position.
+    const eid = addEntity(world);
+    addComponent(world, eid, Item);
+    Item.itemTypeId[eid] = "javelin";
+    const point = hit?.point ?? bolt.position;
+    buildItemWorldBody(world, physics, scene, eid, ITEM_REGISTRY.javelin, point.x, point.y, point.z);
+    return;
+  }
   const eid = addEntity(world);
   addComponent(world, eid, Item);
   addComponent(world, eid, Stackable);
@@ -235,7 +280,8 @@ function makeRecoverableBolt(
   const normal = worldSurfaceNormal(hit); // hit=undefined falls back to a level floor's normal
   const incidence = Math.abs(direction.dot(normal));
 
-  if (hit && shouldEmbedProjectile(bolt.velocity.length(), true, incidence)) {
+  if (hit && !(targetEid !== undefined && hasComponent(world, targetEid, PlayerControlled))
+      && shouldEmbedProjectile(bolt.velocity.length(), true, incidence)) {
     addComponent(world, eid, Position);
     addComponent(world, eid, Object3DRef);
     addComponent(world, eid, Embedded);
@@ -321,12 +367,27 @@ export function rangedCombatSystem(world: World, physics: Physics, scene: THREE.
     raycaster.far = stepLength;
     const hit = raycaster.intersectObjects(scene.children, true).find(candidate => {
       for (let current: THREE.Object3D | null = candidate.object; current; current = current.parent) {
-        if (current === bolt.mesh || current instanceof THREE.Camera) return false;
+        if (current === bolt.mesh || current instanceof THREE.Camera || current === Object3DRef[bolt.attackerEid]) return false;
       }
       return candidate.object.visible;
     });
-    if (hit) {
-      const targetEid = owningEid(hit.object);
+    // The local player has no third-person body mesh in the scene. Check the
+    // swept segment against the same torso/head space as an NPC silhouette,
+    // then compare distances so a wall in front still catches the shot.
+    const playerEid = query(world, [PlayerControlled, Position, Health])[0];
+    let playerHit: THREE.Intersection | undefined;
+    if (playerEid !== undefined && playerEid !== bolt.attackerEid && !hasComponent(world, playerEid, Dead)) {
+      for (const [height, radius] of [[1.05, .36], [1.58, .23]]) {
+        const center = new THREE.Vector3(Position.x[playerEid], Position.y[playerEid] + height, Position.z[playerEid]);
+        const point = raycaster.ray.intersectSphere(new THREE.Sphere(center, radius), new THREE.Vector3());
+        if (point && point.distanceTo(previous) <= stepLength && (!playerHit || point.distanceTo(previous) < playerHit.distance)) {
+          playerHit = { distance: point.distanceTo(previous), point, object: Object3DRef[playerEid] ?? scene } as THREE.Intersection;
+        }
+      }
+    }
+    const impact = playerHit && (!hit || playerHit.distance < hit.distance) ? playerHit : hit;
+    if (impact) {
+      const targetEid = impact === playerHit ? playerEid : owningEid(impact.object);
       // Whichever combat hitbox cylinder the impact point falls inside (a
       // plain height lookup, not a physics query -- see getBodyPartAt),
       // computed even for an already-dead target (a corpse still on screen,
@@ -335,8 +396,9 @@ export function rangedCombatSystem(world: World, physics: Physics, scene: THREE.
       // and returns undefined) -- `makeRecoverableBolt` below needs it
       // either way to find the right bone to stick into, not just to scale
       // damage.
-      const part = targetEid !== undefined ? getBodyPartAt(targetEid, hit.point.y) : undefined;
-      if (targetEid !== undefined && hasComponent(world, targetEid, Health) && !hasComponent(world, targetEid, Dead)) {
+      const part = targetEid !== undefined ? getBodyPartAt(targetEid, impact.point.y) : undefined;
+      if (targetEid !== undefined && hasComponent(world, targetEid, Health) && !hasComponent(world, targetEid, Dead)
+          && isHostileTo(world, bolt.attackerEid, targetEid)) {
         // Melee moved to flat damage regardless of struck body part (see
         // meleeCollision.ts's BODY_PART_DAMAGE_MULTIPLIER doc comment), but
         // a bolt still has one real hit point to place, so ranged keeps the
@@ -345,7 +407,7 @@ export function rangedCombatSystem(world: World, physics: Physics, scene: THREE.
         const damage = part ? bolt.damage * BODY_PART_DAMAGE_MULTIPLIER[part] : bolt.damage;
         applyRangedDamage(world, targetEid, damage, bolt.attackerEid, part);
       }
-      makeRecoverableBolt(world, physics, scene, bolt, hit, targetEid, part);
+      makeRecoverableBolt(world, physics, scene, bolt, impact, targetEid, part);
       flyingBolts.splice(i, 1);
       continue;
     }

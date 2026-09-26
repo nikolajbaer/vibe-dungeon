@@ -65,7 +65,7 @@ export function createTwoHandedRig(kind:TwoHandedWeapon, species:HumanoidSpecies
     worldRotation(lower,new THREE.Quaternion().setFromUnitVectors(tip.position.clone().normalize(),target.clone().sub(point(lower)).normalize()));
   }
   function bake(name:string,keys:Key[]) {
-    const duration=keys.at(-1)!.t,count=Math.ceil(duration*60),times:number[]=[],positions:number[]=[],wp:number[]=[],wq:number[]=[],rot=bones.map(()=>[] as number[]);
+    const duration=keys[keys.length-1].t,count=Math.ceil(duration*60),times:number[]=[],positions:number[]=[],wp:number[]=[],wq:number[]=[],rot=bones.map(()=>[] as number[]);
     for(let i=0;i<=count;i++) {
       const t=i*duration/count; times.push(t);
       let k=0;while(k<keys.length-2&&t>keys[k+1].t)k++;
