@@ -42,3 +42,23 @@ Exports and render data are regenerated under `public/characters/` (ignored).
 Optional offline GIFs: `python tests/render-humanoids.py` or append `--actions`,
 `--attack`, or `--combat`;
 this renderer requires NumPy, Pillow, and the DejaVu Sans system font.
+
+## Skeleton warrior
+
+`createSkeletonWarriorRig()` replaces the human body geometry while keeping
+the exact 23-bone bind pose, animation clips, and right-hand sword attachment.
+The registered NPC archetype is `skeleton-warrior`. Its body is one skinned
+mesh with 2,318 triangles and two material groups: solid bone and a 256×256
+alpha-tested rib texture. The texture is generated once and shared between
+instances. Recessed sockets, slanted brows, cheekbones, jaw, and teeth form
+the skull geometry; the ribcage has transparent gaps.
+
+Open `/character.html?species=skeleton&clip=idle` for the workshop preview.
+`npm run test:skeleton` checks bind-pose compatibility, normalized weights,
+independent clones, triangle/material budgets, and existing animation clips.
+To render an offline model sheet and walk GIF from the actual skinned vertices:
+
+```sh
+node tests/skeleton-preview.mjs /tmp/skeleton-preview
+python tests/render-skeleton.py /tmp/skeleton-preview
+```

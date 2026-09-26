@@ -147,7 +147,7 @@ export function createHumanoidBase(options: HumanoidOptions = {}) {
   geo.setAttribute('color',new THREE.Float32BufferAttribute(colors,3));
   geo.setAttribute('skinIndex',new THREE.Uint16BufferAttribute(si,4));
   geo.setAttribute('skinWeight',new THREE.Float32BufferAttribute(sw,4)); geo.setIndex(indices); geo.computeVertexNormals();
-  const mesh = new THREE.SkinnedMesh(geo,new THREE.MeshStandardMaterial({vertexColors:true,roughness:.9,flatShading:true}));
+  const mesh: THREE.SkinnedMesh<THREE.BufferGeometry, THREE.MeshStandardMaterial | THREE.MeshStandardMaterial[]> = new THREE.SkinnedMesh(geo,new THREE.MeshStandardMaterial({vertexColors:true,roughness:.9,flatShading:true}));
   mesh.name = `Humanoid_${options.species ?? 'human'}`;
   mesh.add(bones[0]); mesh.updateMatrixWorld(true);
   const skeleton = new THREE.Skeleton(bones); mesh.bind(skeleton);
