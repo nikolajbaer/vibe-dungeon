@@ -43,7 +43,14 @@ export function getSkeletonRibTexture(): THREE.DataTexture {
 /** Shares the human bind pose, all 23 joints, weapon attachment and clips.
  * Bone pieces are merged into one skin; the alpha-tested cage is group two. */
 export function createSkeletonWarriorRig(options: Pick<HumanoidOptions, 'weapon'> = { weapon: 'shortSword' }) {
-  const rig = createHumanoidBase(options);
+  const rig = createHumanoidBase({...options, nasalHelmet: true});
+  // Fit the shared rounded iron helmet above the skeleton's brows. Keep
+  // its shortened nasal guard clear of the triangular nose aperture.
+  const helmet = rig.mesh.getObjectByName('nasalHelmet')!;
+  helmet.position.y += .044;
+  const nasalGuard = rig.mesh.getObjectByName('noseGuard')!;
+  nasalGuard.scale.y = .47;
+  nasalGuard.position.set(0, .17, .121);
   const ids = Object.fromEntries(rig.skeleton.bones.map((bone, i) => [bone.name, i]));
   const joints = Object.fromEntries(rig.skeleton.bones.map(bone => [bone.name, bone.getWorldPosition(new THREE.Vector3())]));
   const parts: THREE.BufferGeometry[] = [];
@@ -153,7 +160,7 @@ export function createSkeletonWarriorRig(options: Pick<HumanoidOptions, 'weapon'
     for (let i = 0; i < 4; i++) {
       const x = hx + (i - 1.5) * .012;
       rod(v(x, .837, .013), v(x, .798, .018), .006, hand, EDGE);
-      rod(v(x, .798, .018), v(x, .77 + Math.abs(i - 1.5) * .004, .036), .0055, hand);
+      rod(v(x, .798, .018), v(x, .75 + Math.abs(i - 1.5) * .006, .041), .0055, hand);
     }
     rod(v(hx - sign * .025, .841, .010), v(hx - sign * .037, .805, .033), .008, `thumb.${side}`);
     for (let i = 0; i < 4; i++) {
@@ -182,7 +189,7 @@ export function createSkeletonWarriorRig(options: Pick<HumanoidOptions, 'weapon'
   };
   for (let i = 0; i < source.count; i += 3) {
     let polygon = Array.from({length: 3}, (_, k) => new THREE.Vector3().fromBufferAttribute(source, i + k));
-    polygon = clipPolygon(polygon, p => Math.max(.025 - p.z, p.y - (1.683 + Math.abs(p.x) * .34)));
+    polygon = clipPolygon(polygon, p => Math.max(.025 - p.z, p.y - (1.683 + Math.abs(p.x) * .26)));
     polygon = clipPolygon(polygon, p => p.y - 1.605);
     for (let k = 1; k < polygon.length - 1; k++) kept.push(...polygon[0].toArray(), ...polygon[k].toArray(), ...polygon[k + 1].toArray());
   }
@@ -191,7 +198,7 @@ export function createSkeletonWarriorRig(options: Pick<HumanoidOptions, 'weapon'
   for (const side of [-1, 1]) {
     // Sloping inner brow + high outer corner gives a stern, angry expression.
     plate([[side * .012, 1.683, .068], [side * .097, 1.711, .068], [side * .104, 1.663, .068], [side * .063, 1.642, .068], [side * .022, 1.651, .068]], .012, 'head', SOCKET);
-    rod(v(side * .015, 1.686, .109), v(side * .096, 1.720, .071), .0155, 'head', EDGE);
+    rod(v(side * .015, 1.686, .109), v(side * .096, 1.711, .071), .0155, 'head', EDGE);
     rod(v(side * .096, 1.709, .067), v(side * .108, 1.661, .06), .013, 'head');
     rod(v(side * .105, 1.664, .068), v(side * .060, 1.640, .105), .018, 'head', EDGE);
     rod(v(side * .060, 1.640, .105), v(side * .040, 1.618, .109), .014, 'head');
@@ -199,7 +206,8 @@ export function createSkeletonWarriorRig(options: Pick<HumanoidOptions, 'weapon'
     rod(v(side * .075, 1.566, .026), v(side * .039, 1.553, .093), .017, 'head');
   }
   rod(v(0, 1.704, .098), v(0, 1.658, .106), .014, 'head', EDGE);
-  plate([[-.020, 1.650, .107], [.020, 1.650, .107], [0, 1.622, .107]], .006, 'head', SOCKET);
+  plate([[0, 1.655, .112], [.017, 1.624, .112], [-.017, 1.624, .112]], .006, 'head', SOCKET);
+  for (const side of [-1, 1]) rod(v(0, 1.659, .119), v(side * .021, 1.622, .116), .006, 'head', EDGE);
   box([0, 1.619, .081], [.095, .025, .040], 'head');
   box([0, 1.585, .082], [.096, .030, .014], 'head', SOCKET);
   box([0, 1.552, .082], [.090, .020, .041], 'head', BONE);

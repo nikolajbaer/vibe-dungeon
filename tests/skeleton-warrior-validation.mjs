@@ -20,6 +20,7 @@ try {
   const duplicate=clone(rig.mesh);
   assert.notEqual(duplicate.skeleton.bones[0],rig.skeleton.bones[0]);
   assert.equal(duplicate.getObjectByName('shortSword').parent.name,'hand.R');
+  assert.equal(duplicate.getObjectByName('nasalHelmet').parent.name,'head','helmet follows the animated head');
   const mixer=new THREE.AnimationMixer(rig.mesh), point=new THREE.Vector3();
   for(const name of ['walk','weaponJab','weaponCross','parry','hit','death']) {
     mixer.stopAllAction(); rig.skeleton.pose();

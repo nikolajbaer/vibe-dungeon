@@ -48,10 +48,13 @@ this renderer requires NumPy, Pillow, and the DejaVu Sans system font.
 `createSkeletonWarriorRig()` replaces the human body geometry while keeping
 the exact 23-bone bind pose, animation clips, and right-hand sword attachment.
 The registered NPC archetype is `skeleton-warrior`. Its body is one skinned
-mesh with 2,318 triangles and two material groups: solid bone and a 256×256
+mesh with 2,350 triangles and two material groups: solid bone and a 256×256
 alpha-tested rib texture. The texture is generated once and shared between
 instances. Recessed sockets, slanted brows, cheekbones, jaw, and teeth form
-the skull geometry; the ribcage has transparent gaps.
+the skull geometry; the ribcage has transparent gaps. A fitted version of
+the shared iron nasal helmet follows the head bone, with the guard shortened
+to leave the triangular nose opening visible. The model sheet and GIFs show
+walking, a jab, a swing, and the held block pose.
 
 Open `/character.html?species=skeleton&clip=idle` for the workshop preview.
 `npm run test:skeleton` checks bind-pose compatibility, normalized weights,
