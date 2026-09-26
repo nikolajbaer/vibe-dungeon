@@ -50,6 +50,8 @@ try {
     still:bake('idle',0),
     walk:Array.from({length:32},(_,i)=>bake('walk',i/32*rig.clips.walk.duration)),
     swing:Array.from({length:48},(_,i)=>bake('weaponCross',Math.min(Math.max(i/24-.3,0),rig.clips.weaponCross.duration))),
+    jab:Array.from({length:48},(_,i)=>bake('weaponJab',Math.min(Math.max(i/24-.3,0),rig.clips.weaponJab.duration))),
+    block:Array.from({length:48},(_,i)=>bake('parry',Math.min(Math.max(i/24-.3,0),.30))),
   };
   await writeFile(`${destination}/model.json`,JSON.stringify(data));
   console.log(destination,`${data.triangles} body triangles`);
