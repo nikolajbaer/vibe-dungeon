@@ -397,6 +397,18 @@ function addDoorPair(world: World, physics: Physics, scene: THREE.Scene, orienta
     addWall(physics, scene, (outerEnd + rangeEnd) / 2, planeCoord, (rangeEnd - outerEnd) / 2, WALL_THICKNESS, wallHeight, floorBase);
   }
 
+  // Above each jamb, fill the narrow strip between the inset arch and the
+  // full-height pier. The arched spandrels only cover doorwayStart..doorwayEnd;
+  // leaving these strips out exposes two slots over the shoulders of the door.
+  const shoulderHeight = wallHeight - DOOR_SPRING_HEIGHT;
+  if (shoulderHeight > 0) {
+    const shoulderY = floorBase + DOOR_SPRING_HEIGHT;
+    for (const [start, end] of [[outerStart, doorwayStart], [doorwayEnd, outerEnd]]) {
+      if (orientation === "x") addWall(physics, scene, planeCoord, (start + end) / 2, WALL_THICKNESS, (end - start) / 2, shoulderHeight, shoulderY);
+      else addWall(physics, scene, (start + end) / 2, planeCoord, (end - start) / 2, WALL_THICKNESS, shoulderHeight, shoulderY);
+    }
+  }
+
   let eidA: number;
   let eidB: number;
   if (orientation === "x") {
