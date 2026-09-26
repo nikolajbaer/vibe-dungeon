@@ -17,6 +17,7 @@ import { practiceSystem, startPractice } from "./ecs/systems/practice";
 import { npcSystem, toggleNpcFollow } from "./ecs/systems/npc";
 import { getNpcAnimationDebugState, npcAnimationSystem } from "./ecs/systems/npcAnimation";
 import { corpseCleanupSystem, MIN_LINGER_SECONDS } from "./ecs/systems/corpseCleanup";
+import { deathWeaponSystem } from "./ecs/systems/deathWeapon";
 import { BASE_CARRY_WEIGHT, equipItem, equipToOpenHandSlot, findOpenHandSlot, getViewmodelAnimationDebugState, giveItem, isHandSlot, unequipItem, viewmodelSwingSystem, wouldExceedCarryWeight, wouldExceedDualWieldWeight, wouldExceedInventorySlots, type HandSlot } from "./ecs/systems/items";
 import { syncSystem } from "./ecs/systems/sync";
 import { hudSync } from "./ecs/systems/hudSync";
@@ -1088,6 +1089,7 @@ export function startGame(container: HTMLElement, options: StartGameOptions = {}
       // has, so parry mitigation/death/practice-scoring stay in one place.
       for (const hit of meleeCollisionSystem(world, physics, dt)) applyMeleeDamage(world, hit.targetEid, hit.damage, hit.attackerEid, hit.part);
     }
+    deathWeaponSystem(world, physics, scene);
     hitboxDebugSystem(scene, dt);
 
     // Belt-and-suspenders alongside the pause above: if the NPC a dialogue

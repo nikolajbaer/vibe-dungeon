@@ -25,6 +25,7 @@ const states = new Map<number, State>();
 export function createRangedNpcMesh(kind: Kind, eid: number): THREE.Object3D {
   const rig = createRangedRig(kind);
   rig.mesh.userData.eid = eid;
+  rig.weapon.userData.itemTypeId = kind;
   rig.projectile.visible = false; // the clip's projectile is preview-only; gameplay launches an actual item
   const mixer = new THREE.AnimationMixer(rig.mesh);
   const upper = rig.clips.hold.tracks.filter(t => !/^hips\.|^(upperLeg|lowerLeg|foot|toe)\./.test(t.name));
@@ -123,7 +124,7 @@ export function reactRangedNpc(eid: number, event: "hit" | "death"): boolean {
   s.release = undefined;
   s.contact = undefined;
   s.rig.mesh.updateMatrixWorld(true);
-  if (!s.thrown) s.rig.skeleton.bones.find(b => b.name === "hand.R")!.attach(s.rig.weapon);
+  if (event === "hit" && !s.thrown) s.rig.skeleton.bones.find(b => b.name === "hand.R")!.attach(s.rig.weapon);
   play(s, event);
   return true;
 }

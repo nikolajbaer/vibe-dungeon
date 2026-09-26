@@ -1,5 +1,5 @@
-import { query, type World } from "bitecs";
-import { CharacterBody, PhysicsBody, PhysicsCollider, Position, Velocity } from "../components";
+import { hasComponent, query, type World } from "bitecs";
+import { CharacterBody, Dead, NPC, PhysicsBody, PhysicsCollider, Position, Velocity } from "../components";
 import { CHARACTER_GROUPS, GRAVITY_Y, capsuleCenterOffset, type Physics } from "../../physics/world";
 
 // Moves every character (the player, every NPC) through Rapier's
@@ -91,6 +91,15 @@ export function characterSystem(world: World, physics: Physics, dt: number): voi
     const body = PhysicsBody[eid];
     const collider = PhysicsCollider[eid];
     if (!body || !collider) continue;
+    // The death pose is purely visual: the corpse's capsule no longer
+    // collides and should not keep falling or sliding through the controller.
+    if (hasComponent(world, eid, Dead) && hasComponent(world, eid, NPC)) {
+      Velocity.x[eid] = 0;
+      Velocity.z[eid] = 0;
+      body.setNextKinematicTranslation(body.translation());
+      stuckSeconds.delete(eid);
+      continue;
+    }
 
     const grounded = CharacterBody.grounded[eid] === 1;
     const fallSpeed = grounded
