@@ -9,6 +9,7 @@ import { parseWorldCellKey, worldCellKey } from "./occupancy";
 import type { LockedDoorSpec } from "./placementTypes";
 import { wallMaterial, floorMaterial, ceilingMaterial, doorMaterial } from "./materials";
 import { applyWorldStoneUV } from "./stoneUV";
+import { StoneDressing, addHallwayHanging } from "./stoneDressing";
 import { addKinematicBox, addStaticBox, type Physics } from "../physics/world";
 
 // Decomposes a validated tile occupancy index into the wall/floor/ceiling/
@@ -261,6 +262,7 @@ function addTorch(
   orientation: "x" | "z",
   interiorSign: 1 | -1,
   floorBase: number,
+  castShadows = true,
 ): void {
   const mountY = floorBase + Math.min(TORCH_MOUNT_Y, wallHeight - 0.4);
   const offsetX = orientation === "x" ? interiorSign : 0;
@@ -294,7 +296,7 @@ function addTorch(
   // shadow map is cheap; `shadow.camera.far` matches the light's own falloff
   // range since nothing past it is lit brightly enough for a missing shadow
   // to be visible anyway.
-  light.castShadow = true;
+  light.castShadow = castShadows;
   light.shadow.mapSize.set(256, 256);
   light.shadow.camera.near = 0.1;
   light.shadow.camera.far = TORCH_LIGHT_RANGE;
@@ -379,7 +381,7 @@ function addDoorLeaf(
  * doorway (see `addWall`). It's a separate box from the door leaves and
  * never affects leaf swinging, which still only occupies `0..DOOR_HEIGHT`.
  */
-function addDoorPair(world: World, physics: Physics, scene: THREE.Scene, orientation: "x" | "z", planeCoord: number, rangeStart: number, rangeEnd: number, wallHeight: number, floorBase: number, requiredItemTypeId: string | undefined): void {
+function addDoorPair(world: World, physics: Physics, scene: THREE.Scene, orientation: "x" | "z", planeCoord: number, rangeStart: number, rangeEnd: number, wallHeight: number, floorBase: number, requiredItemTypeId: string | undefined, dressing: StoneDressing): void {
   const center = (rangeStart + rangeEnd) / 2;
   const doorwayStart = center - DOUBLE_DOOR_WIDTH / 2;
   const doorwayEnd = center + DOUBLE_DOOR_WIDTH / 2;
@@ -426,6 +428,7 @@ function addDoorPair(world: World, physics: Physics, scene: THREE.Scene, orienta
   Door.pairId[eidB] = eidA;
   addArchSpandrels(physics, scene, orientation, planeCoord, doorwayStart, doorwayEnd, wallHeight, floorBase);
   addDoorFrame(scene, orientation, planeCoord, doorwayStart, doorwayEnd, floorBase);
+  dressing.doorFrame(orientation, planeCoord, center, DOUBLE_DOOR_WIDTH / 2, DOOR_SPRING_HEIGHT, DOOR_ARCH_RISE, floorBase);
 }
 
 /**
@@ -492,7 +495,7 @@ function addSingleDoorLeaf(
  * by ordinary wall geometry on every side (`addWall` fills each side and
  * the header; the floor slab and the leaf itself close the rest).
  */
-function addSingleDoor(world: World, physics: Physics, scene: THREE.Scene, orientation: "x" | "z", planeCoord: number, rangeStart: number, rangeEnd: number, wallHeight: number, floorBase: number, requiredItemTypeId: string | undefined): void {
+function addSingleDoor(world: World, physics: Physics, scene: THREE.Scene, orientation: "x" | "z", planeCoord: number, rangeStart: number, rangeEnd: number, wallHeight: number, floorBase: number, requiredItemTypeId: string | undefined, dressing: StoneDressing): void {
   const center = (rangeStart + rangeEnd) / 2;
   const doorwayHalf = SINGLE_DOOR_WIDTH / 2;
   const doorwayStart = center - doorwayHalf;
@@ -517,6 +520,7 @@ function addSingleDoor(world: World, physics: Physics, scene: THREE.Scene, orien
   } else {
     addSingleDoorLeaf(world, physics, scene, doorwayStart + doorwayHalf, planeCoord, doorwayHalf, SINGLE_DOOR_THICKNESS, doorwayStart, planeCoord, 1, floorBase, requiredItemTypeId);
   }
+  dressing.singleFrame(orientation, planeCoord, center, doorwayHalf, SINGLE_DOOR_HEIGHT, floorBase);
 }
 
 interface InstanceBounds {
@@ -546,6 +550,7 @@ interface Segment {
   wallHeight: number;
   instanceId: string; // owning tile instance (the cell this segment was emitted from) — used to place torches per-room, not per-segment
   roomSized: boolean; // true for a "room-sized" tile instance (both footprint dimensions > 1 cell) — corridors (e.g. hallway, 1 cell wide) are never torch-eligible
+  corridor: boolean; // long, one-cell-wide passage eligible for sparse dressing
   interiorSign: 1 | -1; // which way, along this segment's perpendicular axis, the owning cell's interior (the room) lies relative to the wall plane
   /** Which floor the owning cell is on — sets the world Y this segment's
    * wall (and any torch on it) is actually built at (`floorBaseline`). */
@@ -559,6 +564,11 @@ interface Segment {
 function isRoomSizedTileType(tileTypeId: string): boolean {
   const type = TILE_TYPES[tileTypeId];
   return !!type && type.w > 1 && type.d > 1;
+}
+
+function isCorridorTileType(tileTypeId: string): boolean {
+  const type = TILE_TYPES[tileTypeId];
+  return !!type && ((type.w === 1 && type.d >= 3) || (type.d === 1 && type.w >= 3));
 }
 
 /** Direction helpers for wall/door emission. `owner: true` means this is
@@ -662,14 +672,32 @@ function pickTorchSegments(segments: Segment[]): Set<Segment> {
   return chosen;
 }
 
-function emitWalls(physics: Physics, scene: THREE.Scene, segments: Segment[]): void {
+function emitWalls(physics: Physics, scene: THREE.Scene, segments: Segment[], dressing: StoneDressing): void {
   const zWallCorners = new Set<string>(); // corners touched by a z-oriented (plane-at-constant-Z) wall
+  const xWallCorners = new Map<string, number>();
+  const zWallHeights = new Map<string, number>();
 
   for (const seg of segments) {
     if (seg.orientation === "z") {
       zWallCorners.add(cornerKey(seg.rangeStartCell, seg.planeCell, seg.floor));
       zWallCorners.add(cornerKey(seg.rangeStartCell + 1, seg.planeCell, seg.floor));
+      for (const x of [seg.rangeStartCell, seg.rangeStartCell + 1]) {
+        const key = cornerKey(x, seg.planeCell, seg.floor);
+        zWallHeights.set(key, Math.max(zWallHeights.get(key) ?? 0, seg.wallHeight));
+      }
+    } else {
+      for (const z of [seg.rangeStartCell, seg.rangeStartCell + 1]) {
+        const key = cornerKey(seg.planeCell, z, seg.floor);
+        xWallCorners.set(key, Math.max(xWallCorners.get(key) ?? 0, seg.wallHeight));
+      }
     }
+  }
+
+  for (const [key, xHeight] of xWallCorners) {
+    const zHeight = zWallHeights.get(key);
+    if (!zHeight) continue;
+    const [x, z, floor] = key.split(",").map(Number);
+    dressing.corner(x * UNIT, z * UNIT, Math.min(xHeight, zHeight), floorBaseline(floor));
   }
 
   const torchSegments = pickTorchSegments(segments);
@@ -691,10 +719,12 @@ function emitWalls(physics: Physics, scene: THREE.Scene, segments: Segment[]): v
       const cz = (rangeStart + rangeEnd) / 2;
       const hz = (rangeEnd - rangeStart) / 2;
       addWall(physics, scene, planeCoord, cz, WALL_THICKNESS, hz, seg.wallHeight, floorBase);
+      dressing.wallTrim("x", planeCoord, rangeStart, rangeEnd, seg.wallHeight, floorBase);
     } else {
       const cx = (rangeStart + rangeEnd) / 2;
       const hx = (rangeEnd - rangeStart) / 2;
       addWall(physics, scene, cx, planeCoord, hx, WALL_THICKNESS, seg.wallHeight, floorBase);
+      dressing.wallTrim("z", planeCoord, rangeStart, rangeEnd, seg.wallHeight, floorBase);
     }
   }
 
@@ -705,6 +735,34 @@ function emitWalls(physics: Physics, scene: THREE.Scene, segments: Segment[]): v
     const floorBase = floorBaseline(seg.floor);
     if (seg.orientation === "x") addTorch(scene, seg.planeCell * UNIT + seg.interiorSign * WALL_THICKNESS, along, seg.wallHeight, "x", seg.interiorSign, floorBase);
     else addTorch(scene, along, seg.planeCell * UNIT + seg.interiorSign * WALL_THICKNESS, seg.wallHeight, "z", seg.interiorSign, floorBase);
+  }
+
+  // One feature every few corridor cells, alternating a torch and a cloth
+  // hanging. Select a solid wall first so no dressing lands across a door.
+  const corridorWalls = new Map<string, Segment[]>();
+  for (const seg of segments) {
+    if (!seg.corridor) continue;
+    const list = corridorWalls.get(seg.instanceId) ?? [];
+    list.push(seg);
+    corridorWalls.set(seg.instanceId, list);
+  }
+  for (const list of corridorWalls.values()) {
+    list.sort((a, b) => a.rangeStartCell - b.rangeStartCell || a.planeCell - b.planeCell);
+    const used = new Set<string>();
+    let decoration = 0;
+    for (const seg of list) {
+      if (seg.wallHeight < 2.6) continue;
+      const cellX = seg.orientation === "x" ? seg.planeCell - (seg.interiorSign < 0 ? 1 : 0) : seg.rangeStartCell;
+      const cellZ = seg.orientation === "z" ? seg.planeCell - (seg.interiorSign < 0 ? 1 : 0) : seg.rangeStartCell;
+      const key = `${cellX}:${cellZ}`;
+      if (used.has(key) || seg.rangeStartCell % 2 !== 0) continue;
+      used.add(key);
+      const along = (seg.rangeStartCell + .5) * UNIT;
+      const plane = seg.planeCell * UNIT + seg.interiorSign * WALL_THICKNESS;
+      const base = floorBaseline(seg.floor);
+      if (decoration++ % 2 === 0) addTorch(scene, seg.orientation === "x" ? plane : along, seg.orientation === "z" ? plane : along, seg.wallHeight, seg.orientation, seg.interiorSign, base, false);
+      else addHallwayHanging(scene, seg.orientation === "x" ? plane : along, seg.orientation === "z" ? plane : along, seg.orientation, seg.interiorSign, base);
+    }
   }
 }
 
@@ -720,6 +778,7 @@ function lockedDoorKey(x: number, z: number, side: string): string {
  * faces should be built locked — see `LockedDoorSpec`'s doc comment.
  */
 export function buildGeometryFromOccupancy(world: World, physics: Physics, scene: THREE.Scene, index: OccupancyIndex, lockedDoors: LockedDoorSpec[] = []): void {
+  const dressing = new StoneDressing();
   const lockedDoorLookup = new Map<string, string>(); // cell+side key -> requiredItemTypeId
   for (const spec of lockedDoors) {
     lockedDoorLookup.set(lockedDoorKey(spec.x, spec.z, spec.side), spec.requiredItemTypeId);
@@ -845,13 +904,14 @@ export function buildGeometryFromOccupancy(world: World, physics: Physics, scene
             wallHeight: sharedBoundaryHeight,
             instanceId: cell.instanceId,
             roomSized: isRoomSizedTileType(cell.tileTypeId),
+            corridor: isCorridorTileType(cell.tileTypeId),
             interiorSign: (dir.dx > 0 ? -1 : 1) as 1 | -1,
             floor: cell.floor,
           });
         } else if (effective === "singleDoor") {
-          addSingleDoor(world, physics, scene, "x", planeCell * UNIT, z * UNIT, (z + 1) * UNIT, sharedBoundaryHeight, floorBase, requiredItemTypeId);
+          addSingleDoor(world, physics, scene, "x", planeCell * UNIT, z * UNIT, (z + 1) * UNIT, sharedBoundaryHeight, floorBase, requiredItemTypeId, dressing);
         } else {
-          addDoorPair(world, physics, scene, "x", planeCell * UNIT, z * UNIT, (z + 1) * UNIT, sharedBoundaryHeight, floorBase, requiredItemTypeId);
+          addDoorPair(world, physics, scene, "x", planeCell * UNIT, z * UNIT, (z + 1) * UNIT, sharedBoundaryHeight, floorBase, requiredItemTypeId, dressing);
         }
       } else {
         // +z or -z boundary: a plane of constant Z, spanning this cell's X extent.
@@ -864,17 +924,19 @@ export function buildGeometryFromOccupancy(world: World, physics: Physics, scene
             wallHeight: sharedBoundaryHeight,
             instanceId: cell.instanceId,
             roomSized: isRoomSizedTileType(cell.tileTypeId),
+            corridor: isCorridorTileType(cell.tileTypeId),
             interiorSign: (dir.dz > 0 ? -1 : 1) as 1 | -1,
             floor: cell.floor,
           });
         } else if (effective === "singleDoor") {
-          addSingleDoor(world, physics, scene, "z", planeCell * UNIT, x * UNIT, (x + 1) * UNIT, sharedBoundaryHeight, floorBase, requiredItemTypeId);
+          addSingleDoor(world, physics, scene, "z", planeCell * UNIT, x * UNIT, (x + 1) * UNIT, sharedBoundaryHeight, floorBase, requiredItemTypeId, dressing);
         } else {
-          addDoorPair(world, physics, scene, "z", planeCell * UNIT, x * UNIT, (x + 1) * UNIT, sharedBoundaryHeight, floorBase, requiredItemTypeId);
+          addDoorPair(world, physics, scene, "z", planeCell * UNIT, x * UNIT, (x + 1) * UNIT, sharedBoundaryHeight, floorBase, requiredItemTypeId, dressing);
         }
       }
     }
   }
 
-  emitWalls(physics, scene, wallSegments);
+  emitWalls(physics, scene, wallSegments, dressing);
+  dressing.flush(scene);
 }
