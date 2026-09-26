@@ -106,7 +106,9 @@ const castleHallWing: RoomContent = {
 
     // A grander hearth than room-a's (see fireplace.ts's own `scale` param),
     // east wall, clear of both the room-a door and the north window.
-    { id: "fireplace", x: -3.15, z: 7.5, rotation: -Math.PI / 2, params: { scale: 1.6 } },
+    // At 1.6x scale the hearth is .64m deep. Set its back at the hall's
+    // inner wall face (-3.15), so it cannot emerge in room-a next door.
+    { id: "fireplace", x: -3.79, z: 7.5, rotation: -Math.PI / 2, params: { scale: 1.6 } },
 
     // The throne, far (south) wall from the entrance, flanked by the
     // hall's own royal-blue-and-gold heraldry. Rotation 0 (the default,

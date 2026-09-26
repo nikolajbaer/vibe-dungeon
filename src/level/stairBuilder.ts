@@ -1,6 +1,7 @@
 import * as THREE from "three";
 import { UNIT, STAIR_LANDING_HEIGHT_CELLS, floorBaseline } from "./tiles";
 import { wallMaterial } from "./materials";
+import { applyWorldStoneUV } from "./stoneUV";
 import { WALL_THICKNESS } from "./tileBuilder";
 import { addStaticBox, addStaticRampBox, MAX_SLOPE_CLIMB_DEGREES, type Physics } from "../physics/world";
 import type { StairConnector } from "./placementTypes";
@@ -173,6 +174,7 @@ function buildStairVisual(scene: THREE.Scene, geo: RampGeometry): void {
 
     const mesh = new THREE.Mesh(new THREE.BoxGeometry(hx * 2, stepHeight, hz * 2), material);
     mesh.position.set(cx, centerY, cz);
+    applyWorldStoneUV(mesh);
     mesh.castShadow = true;
     mesh.receiveShadow = true;
     scene.add(mesh);
@@ -203,14 +205,11 @@ function buildStairVisual(scene: THREE.Scene, geo: RampGeometry): void {
  * run's two long sides, never its ends, so they can safely span the whole
  * rise without touching that opening.
  *
- * Deliberately spans the *whole* `floorBelow`-to-`floorAbove` range,
- * overlapping the shorter walls each landing already builds, rather than
- * starting exactly where those leave off — computing the precise gap here
- * would mean hardcoding an assumption about where those per-landing walls
- * actually end, in a file that has no direct reference to either tile type.
- * The small overlap costs nothing (two coincident static colliders behave
- * exactly like one) and keeps this correct even if a landing's own height
- * ever changes.
+ * The lower landing already has a wall up to its own ceiling for the first
+ * half-cell of the ramp. Start the full-height guard at that cell edge; fill
+ * only the upper gap in the first half-cell. Drawing a full-height guard
+ * across both regions used to put the same stone face on top of the lower
+ * landing's wall and caused visible z-fighting.
  */
 function buildShaftGuardWalls(physics: Physics, scene: THREE.Scene, geo: RampGeometry): void {
   // `geo.entry.y`/`geo.exit.y` are already `floorBaseline(floorBelow)`/
@@ -219,30 +218,30 @@ function buildShaftGuardWalls(physics: Physics, scene: THREE.Scene, geo: RampGeo
   // for any pair of floors, not just 0-and-1.
   const loY = geo.entry.y;
   const hiY = geo.exit.y;
-  const cy = (loY + hiY) / 2;
-  const halfHeight = (hiY - loY) / 2;
-
   const alongEntry = geo.climbAxis === "x" ? geo.entry.x : geo.entry.z;
   const alongExit = geo.climbAxis === "x" ? geo.exit.x : geo.exit.z;
-  const centerAlong = (alongEntry + alongExit) / 2;
-  const halfAlong = Math.abs(alongExit - alongEntry) / 2;
+  const lowerEdge = alongEntry + Math.sign(alongExit - alongEntry) * UNIT / 2;
 
-  for (const sign of [1, -1] as const) {
-    // Centered exactly on the shaft's cell boundary (`UNIT / 2` out from its
-    // center), matching how every generic tile wall is placed — flush with
-    // the landings' own walls above and below, no seam or visible offset.
+  function guard(sign: 1 | -1, from: number, to: number, bottom: number, top: number): void {
+    if (Math.abs(to - from) < .001 || top <= bottom) return;
     const perp = geo.perpCoord + sign * (UNIT / 2);
-    const cx = geo.climbAxis === "x" ? centerAlong : perp;
-    const cz = geo.climbAxis === "x" ? perp : centerAlong;
-    const hx = geo.climbAxis === "x" ? halfAlong : WALL_THICKNESS;
-    const hz = geo.climbAxis === "x" ? WALL_THICKNESS : halfAlong;
-
+    const cx = geo.climbAxis === "x" ? (from + to) / 2 : perp;
+    const cz = geo.climbAxis === "x" ? perp : (from + to) / 2;
+    const hx = geo.climbAxis === "x" ? Math.abs(to - from) / 2 : WALL_THICKNESS;
+    const hz = geo.climbAxis === "x" ? WALL_THICKNESS : Math.abs(to - from) / 2;
+    const cy = (bottom + top) / 2;
+    const halfHeight = (top - bottom) / 2;
     addStaticBox(physics, cx, cy, cz, hx, halfHeight, hz);
     const mesh = new THREE.Mesh(new THREE.BoxGeometry(hx * 2, halfHeight * 2, hz * 2), wallMaterial());
     mesh.position.set(cx, cy, cz);
-    mesh.castShadow = true;
-    mesh.receiveShadow = true;
+    applyWorldStoneUV(mesh);
+    mesh.castShadow = mesh.receiveShadow = true;
     scene.add(mesh);
+  }
+
+  for (const sign of [1, -1] as const) {
+    guard(sign, alongEntry, lowerEdge, loY + STAIR_LANDING_HEIGHT_CELLS * UNIT, hiY);
+    guard(sign, lowerEdge, alongExit, loY, hiY);
   }
 }
 
@@ -292,6 +291,7 @@ function buildEntryHeader(physics: Physics, scene: THREE.Scene, geo: RampGeometr
   addStaticBox(physics, cx, cy, cz, hx, halfHeight, hz);
   const mesh = new THREE.Mesh(new THREE.BoxGeometry(hx * 2, halfHeight * 2, hz * 2), wallMaterial());
   mesh.position.set(cx, cy, cz);
+  applyWorldStoneUV(mesh);
   mesh.castShadow = true;
   mesh.receiveShadow = true;
   scene.add(mesh);
