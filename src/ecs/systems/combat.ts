@@ -263,11 +263,9 @@ function weaponClassFor(world: World, eid: number): WeaponClass {
  * death spot as an obstacle, which a living character can shove up against
  * but never truly reach (an interact raycast at point-blank range can end
  * up just short of a corpse it should be standing right next to). Zeroing
- * *this* collider's own collision groups is one-directional: nothing else
- * treats it as an obstacle any more, but the corpse's own still-running
- * `characterSystem` query (which always uses the constant `CHARACTER_GROUPS`
- * for what *it* looks for, independent of its own collider's group) keeps
- * finding the floor and staying grounded exactly as before. */
+ * *this* collider's own collision groups makes it transparent to both the
+ * player's and other NPCs' movement queries. `characterSystem` also stops
+ * issuing movement for dead NPCs, leaving the collapse at its death spot. */
 function disableCorpseCollision(targetEid: number): void {
   PhysicsCollider[targetEid]?.setCollisionGroups(0);
 }

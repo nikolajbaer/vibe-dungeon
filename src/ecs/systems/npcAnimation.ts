@@ -36,6 +36,40 @@ interface NpcAnimationState {
  * items.ts for non-ECS per-entity animation bookkeeping. */
 const npcAnimations = new Map<number, NpcAnimationState>();
 
+export interface DeathWeaponPose {
+  itemTypeId: string;
+  position: THREE.Vector3;
+  rotation: THREE.Quaternion;
+}
+const pendingDeathWeapons = new Map<number, DeathWeaponPose>();
+
+/** Snapshot the weapon before the skeleton begins falling, then hide its rig
+ * prop. The gameplay system turns this into a loose physics item (or removes
+ * the carried copy) once it has access to the scene and physics world. */
+function captureDeathWeapon(eid: number): void {
+  const weapon = getNpcWeaponMesh(eid);
+  if (!weapon || weapon.userData.deathCaptured) return;
+  weapon.userData.deathCaptured = true;
+  const name = weapon.userData.itemTypeId ?? weapon.userData.weaponKind ?? weapon.name;
+  const itemTypeId = name === "shortSword" ? "sword" : name === "woodenSword" ? "wooden_sword" : name === "backupDagger" ? "dagger" : name;
+  // Unarmed fighters have no prop; unknown props should never produce an
+  // unregistered item through the drop system.
+  if (!["sword", "wooden_sword", "dagger", "quarterstaff", "greatsword", "crossbow", "javelin"].includes(itemTypeId)) return;
+  weapon.updateWorldMatrix(true, false);
+  pendingDeathWeapons.set(eid, {
+    itemTypeId,
+    position: weapon.getWorldPosition(new THREE.Vector3()),
+    rotation: weapon.getWorldQuaternion(new THREE.Quaternion()),
+  });
+  weapon.visible = false;
+}
+
+export function takeDeathWeapon(eid: number): DeathWeaponPose | undefined {
+  const pose = pendingDeathWeapons.get(eid);
+  pendingDeathWeapons.delete(eid);
+  return pose;
+}
+
 /**
  * Clones `rig.mesh` (via `SkeletonUtils.clone`, so a shared rig/skeleton can
  * back multiple independently-posed instances) for NPC entity `eid`, wires
@@ -229,6 +263,7 @@ export function triggerAttack(eid: number): void {
  * registered animation state.
  */
 export function triggerDeathCollapse(eid: number): void {
+  captureDeathWeapon(eid);
   if(reactTwoHanded(eid,'death'))return;
   if(reactRangedNpc(eid,'death'))return;
   const state = npcAnimations.get(eid);

@@ -43,7 +43,8 @@ export function beginTwoHandedAttack(eid:number,onContact:(type:'jab'|'swing')=>
 export function reactTwoHanded(eid:number,event:'hit'|'death'|'block'):boolean {
   const s=states.get(eid);if(!s)return false;if(s.mode==='death')return true;
   s.contact=undefined;
-  if(event==='death'||event==='hit') {
+  if(event==='death') {play(eid,'death');}
+  else if(event==='hit') {
     // Non-combat clips have no prop tracks: follow the hand through the fall
     // or flinch rather than leaving a rigid weapon suspended in world space.
     s.rig.mesh.updateMatrixWorld(true);
