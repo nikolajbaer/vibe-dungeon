@@ -27,7 +27,7 @@ try{
     mixer.stopAllAction();const action=mixer.clipAction(clip);action.reset().setLoop(THREE.LoopOnce,1);action.clampWhenFinished=true;action.play();mixer.setTime(t);rig.mesh.updateMatrixWorld(true);rig.skeleton.update();
     if(!(name==='throw'&&t>=rig.releaseTime))for(const side of kind==='crossbow'?['R','L']:['R']){
      const hand=rig.skeleton.bones.find(b=>b.name==='hand.'+side),palm=hand.localToWorld(new THREE.Vector3(0,-.065,.014));
-     const grip=rig.weapon.localToWorld(kind==='crossbow'?new THREE.Vector3(side==='R'?0:.025,-.07,side==='R'?-.15:.20):new THREE.Vector3());
+     const grip=rig.weapon.localToWorld(kind==='crossbow'?new THREE.Vector3(side==='R'?0:.025,-.07,side==='R'?-.15:.20):new THREE.Vector3(0,0,name==='throw'?0:.46));
      maxError=Math.max(maxError,palm.distanceTo(grip));
     }
     const vertices=[];

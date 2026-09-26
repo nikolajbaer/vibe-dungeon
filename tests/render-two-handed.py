@@ -11,7 +11,7 @@ az=-.7;el=.16
 right=np.array([np.cos(az),0,-np.sin(az)])
 up=np.array([-np.sin(az)*np.sin(el),np.cos(el),-np.cos(az)*np.sin(el)])
 view=np.cross(right,up);light=np.array([-.4,.8,1]);light/=np.linalg.norm(light)
-for kind in (['crossbow','javelin'] if '--ranged' in sys.argv else ['greatsword'] if '--greatsword' in sys.argv else ['quarterstaff','greatsword']):
+for kind in (['javelin'] if '--javelin' in sys.argv else ['crossbow','javelin'] if '--ranged' in sys.argv else ['greatsword'] if '--greatsword' in sys.argv else ['quarterstaff','greatsword']):
  data=json.loads((root/f'{kind}.json').read_text());images=[]
  for f in range(72):
   im=Image.new('RGB',(400*len(data),720),(24,31,43));draw=ImageDraw.Draw(im)

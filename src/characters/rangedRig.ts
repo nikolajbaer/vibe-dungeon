@@ -16,13 +16,22 @@ export function createRangedRig(kind:'crossbow'|'javelin') {
  const rest=bones.map(b=>b.position.clone()),palmOffset=new THREE.Vector3(0,-.065,.014);
  const guard:Key={t:0,p:kind==='crossbow'?[-.06,1.20,.28]:[-.30,1.27,.23],aim:[0,0,1],yaw:-.12,step:0};
  const k=(t:number,p:number[],aim:number[],yaw:number,step:number):Key=>({t,p,aim,yaw,step});
+ const lowAim=[0,Math.sin(Math.PI/9),Math.cos(Math.PI/9)];
+ const lowGuard:Key={t:0,p:[-.29,.91,.17],aim:lowAim,yaw:-.12,step:0};
  const sequences:Record<string,Key[]>=kind==='crossbow'?{
   hold:[guard,{...guard,t:2}],
   fire:[guard,k(.35,[-.06,1.28,.31],[0,.02,1],-.12,0),k(.42,[-.06,1.28,.31],[0,.02,1],-.12,0),k(.49,[-.06,1.30,.27],[0,.10,1],-.16,0),k(.70,[-.06,1.28,.31],[0,.02,1],-.12,0),{...guard,t:1.35}],
  }:{
-  hold:[guard,{...guard,t:2}],
-  jab:[guard,k(.18,[-.31,1.24,.13],[0,.05,1],-.32,-.03),k(.40,[-.16,1.29,.54],[0,0,1],.22,.18),k(.5,[-.16,1.29,.54],[0,0,1],.22,.18),{...guard,t:.95}],
-  throw:[guard,k(.38,[-.30,1.47,-.12],[0,.18,1],-.70,-.13),k(.52,[-.18,1.48,.20],[0,.08,1],-.12,.12),k(.62,[-.10,1.45,.51],[0,.04,1],.38,.40),k(.88,[.12,1.05,.32],[0,0,1],.60,.40),{...guard,t:1.65}],
+  hold:[lowGuard,{...lowGuard,t:2}],
+  jab:[lowGuard,k(.18,[-.31,.91,.08],lowAim,-.32,-.03),k(.40,[-.18,1.01,.43],lowAim,.22,.18),k(.5,[-.18,1.01,.43],lowAim,.22,.18),{...lowGuard,t:.95}],
+  throw:[guard,
+   k(.38,[-.32,1.43,-.28],[.12,.18,1],-1.20,-.20),
+   k(.48,[-.34,1.45,-.30],[.10,.12,1],-1.40,-.20),
+   // Lead with the hips; the throwing hand stays back briefly before
+   // accelerating over the shoulder into the existing release frame.
+   k(.54,[-.28,1.46,-.13],[.06,.10,1],-.65,.02),
+   k(.62,[-.10,1.45,.51],[0,.04,1],.48,.40),
+   k(.88,[.12,1.05,.32],[0,0,1],.90,.40),{...guard,t:1.65}],
  };
  function worldQ(b:THREE.Bone,q:THREE.Quaternion){b.quaternion.copy(b.parent!.getWorldQuaternion(new THREE.Quaternion()).invert().multiply(q));mesh.updateMatrixWorld(true);}
  function ik(upper:THREE.Bone,lower:THREE.Bone,tip:THREE.Bone,target:THREE.Vector3,pole:THREE.Vector3){
@@ -54,7 +63,11 @@ export function createRangedRig(kind:'crossbow'|'javelin') {
    // Preview release: the prop leaves the throwing hand on the exact release
    // sample. Gameplay can consume the same releaseTime to spawn physics.
    const released=name==='throw'&&t>=.62;
-   const weaponP=released?new THREE.Vector3(-.10,1.45,.51).add(new THREE.Vector3(0,.4,8).multiplyScalar(t-.62)):p;
+   // Model spans Z=-.18..1.10: center is .46m forward of its authored grip.
+   // Hold/jab keys describe the palm, so offset the prop to put that center
+   // in the hand. The overarm throw retains its separate rear grip.
+   const centered=kind==='javelin'&&name!=='throw';
+   const weaponP=released?new THREE.Vector3(-.10,1.45,.51).add(new THREE.Vector3(0,.4,8).multiplyScalar(t-.62)):p.clone().addScaledVector(aim,centered?-.46:0);
    wp.push(...weaponP.toArray());wq.push(...(released?new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0,0,1),new THREE.Vector3(0,.04,1).normalize()):q).toArray());
    const fired=kind==='crossbow'&&name==='fire'&&t>=.42;
    const boltP=fired?new THREE.Vector3(-.06,1.39,.31+18*(t-.42)):p.clone().add(new THREE.Vector3(0,.10,.10));
