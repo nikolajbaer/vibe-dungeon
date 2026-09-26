@@ -8,6 +8,7 @@ import type { OccupancyIndex } from "./occupancy";
 import { parseWorldCellKey, worldCellKey } from "./occupancy";
 import type { LockedDoorSpec } from "./placementTypes";
 import { wallMaterial, floorMaterial, ceilingMaterial, doorMaterial } from "./materials";
+import { applyWorldStoneUV } from "./stoneUV";
 import { addKinematicBox, addStaticBox, type Physics } from "../physics/world";
 
 // Decomposes a validated tile occupancy index into the wall/floor/ceiling/
@@ -32,6 +33,8 @@ const DOOR_SPRING_HEIGHT = 1.72;
 const DOOR_HEIGHT = 2.35; // apex of the arch
 const DOOR_ARCH_RISE = DOOR_HEIGHT - DOOR_SPRING_HEIGHT;
 const DOOR_FRAME_WIDTH = 0.16;
+const DOUBLE_DOOR_WIDTH = 2.2; // leaves .4m of stone on each side of a 3m cell
+const DOUBLE_DOOR_HALF_THICKNESS = .07;
 
 // A `"singleDoor"` (tiles.ts) is a single narrow leaf, inset within the
 // cell's own 3m span rather than spanning all of it — flanked by ordinary
@@ -62,6 +65,7 @@ function addWall(physics: Physics, scene: THREE.Scene, cx: number, cz: number, h
   const centerY = baseY + height / 2;
   const mesh = new THREE.Mesh(new THREE.BoxGeometry(hx * 2, height, hz * 2), wallMaterial());
   mesh.position.set(cx, centerY, cz);
+  applyWorldStoneUV(mesh);
   // Issue #64: lets torch PointLights (see addTorch below) actually cast
   // shadows off walls — the moody "pools of light" look falls flat without
   // them, since a flat-lit wall face reads the same near a torch or far
@@ -113,6 +117,7 @@ function addDoorFrame(scene: THREE.Scene, orientation: "x" | "z", planeCoord: nu
     jamb.position.set(x, DOOR_SPRING_HEIGHT / 2, 0);
     jamb.castShadow = jamb.receiveShadow = true;
     group.add(jamb);
+    applyWorldStoneUV(jamb);
   }
   const archRadius = radius + DOOR_FRAME_WIDTH / 2;
   const archPoints = Array.from({ length: 13 }, (_, i) => {
@@ -125,6 +130,7 @@ function addDoorFrame(scene: THREE.Scene, orientation: "x" | "z", planeCoord: nu
   );
   arch.castShadow = arch.receiveShadow = true;
   group.add(arch);
+  applyWorldStoneUV(arch);
   scene.add(group);
 }
 
@@ -152,6 +158,7 @@ function addArchSpandrels(physics: Physics, scene: THREE.Scene, orientation: "x"
   const mesh = new THREE.Mesh(geometry, wallMaterial());
   mesh.name = "archedDoorSpandrel";
   mesh.position.set(orientation === "x" ? planeCoord : center, floorBase, orientation === "x" ? center : planeCoord);
+  applyWorldStoneUV(mesh);
   mesh.castShadow = mesh.receiveShadow = true;
   scene.add(mesh);
 
@@ -189,6 +196,7 @@ const SLAB_HALF_THICKNESS = 0.1;
 function addSlab(physics: Physics, scene: THREE.Scene, cx: number, cz: number, hx: number, hz: number, y: number, material: THREE.Material, kind: "floor" | "ceiling"): void {
   const mesh = new THREE.Mesh(new THREE.BoxGeometry(hx * 2, SLAB_HALF_THICKNESS * 2, hz * 2), material);
   mesh.position.set(cx, y, cz);
+  applyWorldStoneUV(mesh);
   mesh.userData.slabKind = kind;
   // Issue #64: floors/ceilings receive torch shadows (a ceiling can also
   // receive from anything below it, harmless either way); neither needs to
@@ -328,10 +336,11 @@ function addDoorLeaf(
 
   const group = new THREE.Group();
   group.position.set(hingeX, closedY, hingeZ);
+  group.userData.doubleDoor = true;
   scene.add(group);
 
   const leafWidth = Math.max(hx * 2, hz * 2);
-  const mesh = new THREE.Mesh(createArchedDoorLeafGeometry(leafWidth, WALL_THICKNESS * 2, hingeSign), doorMaterial(!!requiredItemTypeId));
+  const mesh = new THREE.Mesh(createArchedDoorLeafGeometry(leafWidth, DOUBLE_DOOR_HALF_THICKNESS * 2, hingeSign), doorMaterial(!!requiredItemTypeId));
   mesh.userData.surfaceMaterial = "wood";
   if (hz > hx) mesh.rotation.y = -Math.PI / 2;
   mesh.position.set(offsetX, 0, offsetZ);
@@ -355,11 +364,9 @@ function addDoorLeaf(
 }
 
 /**
- * Builds a doorway as **two hinge leaves** (~1.5m each) rather than one
- * 3m slab, hinged on opposite outer edges and swinging outward like double
- * doors — avoids one wide slab sweeping a big arc, and reads more like a
- * real door. Both leaves share a `Door.pairId` so `tryInteract` opens them
- * together (see doors.ts).
+ * Builds a doorway as two 1.1m leaves inset into the 3m cell. Short stone
+ * piers flank the frame, leaving clear swing room at a corridor junction.
+ * Both leaves share a `Door.pairId` and open together.
  *
  * Also emits a **header wall**: a wall segment spanning the same width as
  * the doorway, from `DOOR_HEIGHT` up to `wallHeight` (the room's actual
@@ -373,25 +380,40 @@ function addDoorLeaf(
  * never affects leaf swinging, which still only occupies `0..DOOR_HEIGHT`.
  */
 function addDoorPair(world: World, physics: Physics, scene: THREE.Scene, orientation: "x" | "z", planeCoord: number, rangeStart: number, rangeEnd: number, wallHeight: number, floorBase: number, requiredItemTypeId: string | undefined): void {
-  const leafHalf = (rangeEnd - rangeStart) / 4; // half-width of each ~1.5m leaf
+  const center = (rangeStart + rangeEnd) / 2;
+  const doorwayStart = center - DOUBLE_DOOR_WIDTH / 2;
+  const doorwayEnd = center + DOUBLE_DOOR_WIDTH / 2;
+  const leafHalf = DOUBLE_DOOR_WIDTH / 4;
+  const outerStart = doorwayStart - DOOR_FRAME_WIDTH;
+  const outerEnd = doorwayEnd + DOOR_FRAME_WIDTH;
+
+  // The stone piers stop at the *outside* of the visible jambs, preventing
+  // coplanar wall faces from drawing through the frame's front surface.
+  if (orientation === "x") {
+    addWall(physics, scene, planeCoord, (rangeStart + outerStart) / 2, WALL_THICKNESS, (outerStart - rangeStart) / 2, wallHeight, floorBase);
+    addWall(physics, scene, planeCoord, (outerEnd + rangeEnd) / 2, WALL_THICKNESS, (rangeEnd - outerEnd) / 2, wallHeight, floorBase);
+  } else {
+    addWall(physics, scene, (rangeStart + outerStart) / 2, planeCoord, (outerStart - rangeStart) / 2, WALL_THICKNESS, wallHeight, floorBase);
+    addWall(physics, scene, (outerEnd + rangeEnd) / 2, planeCoord, (rangeEnd - outerEnd) / 2, WALL_THICKNESS, wallHeight, floorBase);
+  }
 
   let eidA: number;
   let eidB: number;
   if (orientation === "x") {
     // Wall plane at constant X (a +x/-x boundary); leaves split the Z span,
     // slab thickness runs along X.
-    eidA = addDoorLeaf(world, physics, scene, planeCoord, rangeStart + leafHalf, WALL_THICKNESS, leafHalf, planeCoord, rangeStart, 1, floorBase, requiredItemTypeId);
-    eidB = addDoorLeaf(world, physics, scene, planeCoord, rangeEnd - leafHalf, WALL_THICKNESS, leafHalf, planeCoord, rangeEnd, -1, floorBase, requiredItemTypeId);
+    eidA = addDoorLeaf(world, physics, scene, planeCoord, doorwayStart + leafHalf, DOUBLE_DOOR_HALF_THICKNESS, leafHalf, planeCoord, doorwayStart, 1, floorBase, requiredItemTypeId);
+    eidB = addDoorLeaf(world, physics, scene, planeCoord, doorwayEnd - leafHalf, DOUBLE_DOOR_HALF_THICKNESS, leafHalf, planeCoord, doorwayEnd, -1, floorBase, requiredItemTypeId);
   } else {
     // Wall plane at constant Z (a +z/-z boundary); leaves split the X span,
     // slab thickness runs along Z.
-    eidA = addDoorLeaf(world, physics, scene, rangeStart + leafHalf, planeCoord, leafHalf, WALL_THICKNESS, rangeStart, planeCoord, 1, floorBase, requiredItemTypeId);
-    eidB = addDoorLeaf(world, physics, scene, rangeEnd - leafHalf, planeCoord, leafHalf, WALL_THICKNESS, rangeEnd, planeCoord, -1, floorBase, requiredItemTypeId);
+    eidA = addDoorLeaf(world, physics, scene, doorwayStart + leafHalf, planeCoord, leafHalf, DOUBLE_DOOR_HALF_THICKNESS, doorwayStart, planeCoord, 1, floorBase, requiredItemTypeId);
+    eidB = addDoorLeaf(world, physics, scene, doorwayEnd - leafHalf, planeCoord, leafHalf, DOUBLE_DOOR_HALF_THICKNESS, doorwayEnd, planeCoord, -1, floorBase, requiredItemTypeId);
   }
   Door.pairId[eidA] = eidA;
   Door.pairId[eidB] = eidA;
-  addArchSpandrels(physics, scene, orientation, planeCoord, rangeStart, rangeEnd, wallHeight, floorBase);
-  addDoorFrame(scene, orientation, planeCoord, rangeStart, rangeEnd, floorBase);
+  addArchSpandrels(physics, scene, orientation, planeCoord, doorwayStart, doorwayEnd, wallHeight, floorBase);
+  addDoorFrame(scene, orientation, planeCoord, doorwayStart, doorwayEnd, floorBase);
 }
 
 /**
@@ -564,19 +586,16 @@ function combineKind(mine: FaceKind, theirs: FaceKind): FaceKind {
   return "opening";
 }
 
-function cornerKey(cellX: number, cellZ: number): string {
-  return `${cellX},${cellZ}`;
+function cornerKey(cellX: number, cellZ: number, floor: number): string {
+  return `${cellX},${cellZ},${floor}`;
 }
 
 /**
  * Turns collected wall segments into actual wall boxes. Where a segment's
- * end meets a perpendicular wall segment (a real 90° corner), that end is
- * extended by `WALL_THICKNESS` past the unit-cell boundary so the two
- * segments fully overlap at the corner instead of only touching in a thin
- * `WALL_THICKNESS`-ish square — the standard "extend into the corner" miter
- * trick, applied per-segment rather than rewriting wall emission into
- * merged per-instance loops. Ends that border an opening/door are never
- * extended, so doorways keep their exact framing.
+ * end meets a perpendicular wall segment, only X-plane walls extend through
+ * the corner. The Z-plane wall's end cap terminates inside that continuous
+ * run. Extending *both* directions made coincident outer faces across the
+ * overlap, which shimmered even though the geometry was watertight.
  *
  * Also decides **torch placement** (issue #41) here, since this is where
  * every wall segment for the whole level is known at once: `pickTorchSegments`
@@ -632,16 +651,12 @@ function pickTorchSegments(segments: Segment[]): Set<Segment> {
 }
 
 function emitWalls(physics: Physics, scene: THREE.Scene, segments: Segment[]): void {
-  const xWallCorners = new Set<string>(); // corners touched by an x-oriented (plane-at-constant-X) wall
   const zWallCorners = new Set<string>(); // corners touched by a z-oriented (plane-at-constant-Z) wall
 
   for (const seg of segments) {
-    if (seg.orientation === "x") {
-      xWallCorners.add(cornerKey(seg.planeCell, seg.rangeStartCell));
-      xWallCorners.add(cornerKey(seg.planeCell, seg.rangeStartCell + 1));
-    } else {
-      zWallCorners.add(cornerKey(seg.rangeStartCell, seg.planeCell));
-      zWallCorners.add(cornerKey(seg.rangeStartCell + 1, seg.planeCell));
+    if (seg.orientation === "z") {
+      zWallCorners.add(cornerKey(seg.rangeStartCell, seg.planeCell, seg.floor));
+      zWallCorners.add(cornerKey(seg.rangeStartCell + 1, seg.planeCell, seg.floor));
     }
   }
 
@@ -659,14 +674,12 @@ function emitWalls(physics: Physics, scene: THREE.Scene, segments: Segment[]): v
     const floorBase = floorBaseline(seg.floor);
 
     if (seg.orientation === "x") {
-      if (zWallCorners.has(cornerKey(seg.planeCell, start))) rangeStart -= WALL_THICKNESS;
-      if (zWallCorners.has(cornerKey(seg.planeCell, end))) rangeEnd += WALL_THICKNESS;
+      if (zWallCorners.has(cornerKey(seg.planeCell, start, seg.floor))) rangeStart -= WALL_THICKNESS;
+      if (zWallCorners.has(cornerKey(seg.planeCell, end, seg.floor))) rangeEnd += WALL_THICKNESS;
       const cz = (rangeStart + rangeEnd) / 2;
       const hz = (rangeEnd - rangeStart) / 2;
       addWall(physics, scene, planeCoord, cz, WALL_THICKNESS, hz, seg.wallHeight, floorBase);
     } else {
-      if (xWallCorners.has(cornerKey(start, seg.planeCell))) rangeStart -= WALL_THICKNESS;
-      if (xWallCorners.has(cornerKey(end, seg.planeCell))) rangeEnd += WALL_THICKNESS;
       const cx = (rangeStart + rangeEnd) / 2;
       const hx = (rangeEnd - rangeStart) / 2;
       addWall(physics, scene, cx, planeCoord, hx, WALL_THICKNESS, seg.wallHeight, floorBase);

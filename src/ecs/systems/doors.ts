@@ -13,6 +13,7 @@ import { doorMaterial } from "../../level/materials";
 const OPEN_DURATION = 0.8; // seconds for a door to fully open
 const INTERACT_RANGE = 3; // meters
 const OPEN_ANGLE = THREE.MathUtils.degToRad(100); // slightly past perpendicular
+const DOUBLE_DOOR_OPEN_ANGLE = Math.PI / 2; // keep inset leaves clear of their stone piers
 
 /** Items are small and, now that they're simulated rigid bodies (see the
  * Rapier physics migration), usually end up resting on the floor rather than
@@ -46,9 +47,8 @@ export function doorAnimationSystem(world: World, dt: number): void {
 
     const direction = state === DoorState.OPENING ? 1 : -1;
     Door.progress[eid] = Math.min(1, Math.max(0, Door.progress[eid] + (direction * dt) / OPEN_DURATION));
-    const angle = Door.hingeSign[eid] * OPEN_ANGLE * easeOutCubic(Door.progress[eid]);
-
     const obj = Object3DRef[eid];
+    const angle = Door.hingeSign[eid] * (obj?.userData.doubleDoor ? DOUBLE_DOOR_OPEN_ANGLE : OPEN_ANGLE) * easeOutCubic(Door.progress[eid]);
     if (obj) obj.rotation.y = angle;
 
     // Rapier takes a quaternion; these leaves only ever rotate about Y, so
