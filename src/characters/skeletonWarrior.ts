@@ -60,6 +60,22 @@ export function createSkeletonWarriorRig(options: Pick<HumanoidOptions, 'weapon'
     if (source !== geometry) source.dispose();
     geometry.clearGroups();
     const positions = geometry.getAttribute('position');
+    // Reshape the visible bones without changing the shared animation rig:
+    // pelvis width -33%, hands 2x about their wrist attachment.
+    if (Array.isArray(weights)) {
+      const name = weights[0][0];
+      if (name === 'hips') {
+        for (let i = 0; i < positions.count; i++) positions.setX(i, positions.getX(i) * .67);
+      } else if (/^(hand|thumb)\./.test(name)) {
+        const wrist = joints[`hand.${name.split('.')[1]}`];
+        for (let i = 0; i < positions.count; i++) {
+          positions.setXYZ(i,
+            wrist.x + (positions.getX(i) - wrist.x) * 2,
+            wrist.y + (positions.getY(i) - wrist.y) * 2,
+            wrist.z + (positions.getZ(i) - wrist.z) * 2);
+        }
+      }
+    }
     const indices: number[] = [], values: number[] = [], colors: number[] = [];
     const c = new THREE.Color(color), point = new THREE.Vector3();
     for (let i = 0; i < positions.count; i++) {
