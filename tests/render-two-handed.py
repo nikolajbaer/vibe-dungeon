@@ -11,10 +11,10 @@ az=-.7;el=.16
 right=np.array([np.cos(az),0,-np.sin(az)])
 up=np.array([-np.sin(az)*np.sin(el),np.cos(el),-np.cos(az)*np.sin(el)])
 view=np.cross(right,up);light=np.array([-.4,.8,1]);light/=np.linalg.norm(light)
-for kind in (['greatsword'] if '--greatsword' in sys.argv else ['quarterstaff','greatsword']):
+for kind in (['crossbow','javelin'] if '--ranged' in sys.argv else ['greatsword'] if '--greatsword' in sys.argv else ['quarterstaff','greatsword']):
  data=json.loads((root/f'{kind}.json').read_text());images=[]
  for f in range(72):
-  im=Image.new('RGB',(1200,720),(24,31,43));draw=ImageDraw.Draw(im)
+  im=Image.new('RGB',(400*len(data),720),(24,31,43));draw=ImageDraw.Draw(im)
   draw.text((30,22),kind.upper()+'  /  NPC ANIMATION STUDY',font=font,fill=(231,236,247))
   draw.text((30,55),'Actual game mesh + weapon | 3/4 view | realtime | forward is toward the right',font=small,fill=(166,186,212))
   for col,d in enumerate(data):
