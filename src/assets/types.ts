@@ -311,7 +311,7 @@ export interface NpcArchetypeDef {
    * block mitigation (`combat.ts`'s `BLOCK_MITIGATION`) when it blocks a
    * hit, since an NPC never actually equips a real weapon item to read
    * either from directly. */
-  weaponClass?: "unarmed" | "dagger" | "oneHanded";
+  weaponClass?: "unarmed" | "dagger" | "oneHanded" | "twoHanded";
   /** Max stamina (RPG groundwork -- see `ecs/components.ts`'s `Stamina`).
    * Omitted archetypes fall back to `DEFAULT_NPC_MAX_STAMINA` in
    * `level/spawning.ts`. */

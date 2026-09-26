@@ -43,7 +43,7 @@ export function createRangedRig(kind:'crossbow'|'javelin') {
  }
  const clips:Record<string,THREE.AnimationClip>={};
  for(const [name,keys]of Object.entries(sequences)) {
-  const duration=keys.at(-1)!.t,count=Math.ceil(duration*60),times:number[]=[],root:number[]=[],wp:number[]=[],wq:number[]=[],ps:number[]=[],pp:number[]=[],rot=bones.map(()=>[]as number[]);
+  const duration=keys[keys.length-1].t,count=Math.ceil(duration*60),times:number[]=[],root:number[]=[],wp:number[]=[],wq:number[]=[],ps:number[]=[],pp:number[]=[],rot=bones.map(()=>[]as number[]);
   for(let i=0;i<=count;i++){
    const t=i*duration/count;times.push(t);let index=0;while(index<keys.length-2&&t>keys[index+1].t)index++;
    const a=keys[index],b=keys[index+1],u=THREE.MathUtils.smoothstep((t-a.t)/(b.t-a.t),0,1),mix=(x:number,y:number)=>THREE.MathUtils.lerp(x,y,u);
@@ -78,5 +78,5 @@ export function createRangedRig(kind:'crossbow'|'javelin') {
   tracks.push(new THREE.VectorKeyframeTrack('hips.position',times,root),new THREE.VectorKeyframeTrack('rangedProp.position',times,wp),new THREE.QuaternionKeyframeTrack('rangedProp.quaternion',times,wq),new THREE.VectorKeyframeTrack('previewBolt.position',times,pp),new THREE.VectorKeyframeTrack('previewBolt.scale',times,ps));
   clips[name]=new THREE.AnimationClip(kind+'_'+name,duration,tracks);
  }
- rig.skeleton.pose();return {...rig,clips,weapon,projectile,releaseTime:kind==='crossbow'?.42:.62};
+ rig.skeleton.pose();return {...rig,baseClips:rig.clips,clips,weapon,projectile,releaseTime:kind==='crossbow'?.42:.62};
 }

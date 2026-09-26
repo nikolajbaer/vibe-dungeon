@@ -1,14 +1,14 @@
 import { useState } from "preact/hooks";
 
 export type OpponentStyle = "aggressive" | "defensive" | "passive";
-export type OpponentWeapon = "unarmed" | "dagger" | "sword" | "wooden_sword" | "quarterstaff" | "greatsword";
+export type OpponentWeapon = "unarmed" | "dagger" | "sword" | "wooden_sword" | "quarterstaff" | "greatsword" | "dagger_javelin" | "crossbow" | "random";
 
 export interface OpponentConfig {
   health: number;
   speed: number;
   weapon: OpponentWeapon;
   style: OpponentStyle;
-  /** How many identical copies of this opponent to spawn -- laid out in a
+  /** How many opponents to spawn -- laid out in a
    * row, spaced so they never start overlapping (see bootstrap.ts's
    * `spawnOpponent`). */
   count: number;
@@ -64,6 +64,9 @@ export function OpponentConfigurator({ onSpawn, onOpenChange }: { onSpawn(config
                 <option value="dagger">Dagger</option>
                 <option value="sword">Sword</option>
                 <option value="quarterstaff">Quarterstaff</option>
+                <option value="dagger_javelin">Dagger and javelin</option>
+                <option value="crossbow">Crossbow</option>
+                <option value="random">Random: dagger/javelin, crossbow, quarterstaff</option>
                 <option value="greatsword">Great sword</option>
                 <option value="wooden_sword">Wooden sword</option>
               </select>

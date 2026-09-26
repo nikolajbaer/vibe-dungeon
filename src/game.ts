@@ -906,7 +906,7 @@ export function startGame(container: HTMLElement, options: StartGameOptions = {}
       while (accumulator >= PHYSICS_DT && steps < MAX_PHYSICS_STEPS_PER_FRAME) {
         accumulator -= PHYSICS_DT;
         steps++;
-        npcSystem(world, PHYSICS_DT, level.sectorAt);
+        npcSystem(world, PHYSICS_DT, level.sectorAt, scene);
         combatSystem(world, PHYSICS_DT);
         characterSystem(world, physics, PHYSICS_DT);
         doorAnimationSystem(world, PHYSICS_DT);

@@ -13,14 +13,21 @@ export { buildCombatTestLevel } from "../level/combatTestLevel";
  * opponent configurator offers without inventory-weight limits getting in the way. */
 export const COMBAT_TEST_CARRY_WEIGHT = 100;
 
-const ARCHETYPE_FOR_WEAPON: Record<OpponentWeapon, string> = {
+const ARCHETYPE_FOR_WEAPON: Record<Exclude<OpponentWeapon, "random">, string> = {
   unarmed: "villager",
   dagger: "bandit",
   sword: "guard",
   wooden_sword: "weapons-master",
   quarterstaff: "quarterstaff-fighter",
   greatsword: "greatsword-fighter",
+  dagger_javelin: "javelin-fighter",
+  crossbow: "crossbow-fighter",
 };
+const RANDOM_WEAPONS = ["dagger_javelin", "crossbow", "quarterstaff"] as const;
+export function opponentArchetype(weapon: OpponentWeapon, random = Math.random): string {
+  const selected = weapon === "random" ? RANDOM_WEAPONS[Math.floor(random() * RANDOM_WEAPONS.length)] : weapon;
+  return ARCHETYPE_FOR_WEAPON[selected];
+}
 
 /** Meters between adjacent opponents in the same spawned batch -- more than
  * twice any archetype's capsule radius (the widest, `guard`/`weapons-master`,
@@ -95,11 +102,13 @@ export class CombatTestSandbox {
     // player per team so a second/third team never spawns on top of the
     // first regardless of how many opponents either batch has.
     const rowZ = -2 - (config.team - 1) * 3;
-    const placements = Array.from({ length: config.count }, (_, i) => ({
-      id: ARCHETYPE_FOR_WEAPON[config.weapon],
-      x: (i - (config.count - 1) / 2) * OPPONENT_ROW_SPACING,
-      z: rowZ,
-    }));
+    const placements = Array.from({ length: config.count }, (_, i) => {
+      const id = opponentArchetype(config.weapon);
+      return {
+        id, x: (i - (config.count - 1) / 2) * OPPONENT_ROW_SPACING, z: rowZ,
+        contents: id === "javelin-fighter" ? ["dagger", "javelin"] : id === "crossbow-fighter" ? ["crossbow"] : undefined,
+      };
+    });
     const eids = spawnNpcs(this.world, this.physics, this.scene, placements);
     for (const eid of eids) {
       Health.current[eid] = config.health;
