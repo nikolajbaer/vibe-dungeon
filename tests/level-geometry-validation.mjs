@@ -31,5 +31,17 @@ try {
   assert.equal(Math.max(...front.map(i=>uv.getX(i)))-Math.min(...front.map(i=>uv.getX(i))),6,'18m wall repeats masonry across six 3m cells');
   const narrowLeaf=createArchedDoorLeafGeometry(1.1,.14,1);
   assert(topAt(narrowLeaf,.55)>topAt(narrowLeaf,-.55)+.5,'inset double door keeps its arched outline');
-  console.log('Arched doors, continuous wall runs, and world-scale masonry passed');
+  const {StoneDressing}=await server.ssrLoadModule('/src/level/stoneDressing.ts');
+  const dressing=new StoneDressing();
+  dressing.wallTrim('x',0,0,6,3,0);
+  dressing.corner(0,0,3,0);
+  dressing.doorFrame('z',0,1.5,1.1,1.72,.63,0);
+  dressing.singleFrame('x',3,1.5,.55,2.2,0);
+  const scene=new THREE.Scene();
+  dressing.flush(scene);
+  const batches=scene.children.filter(child=>child.isInstancedMesh);
+  assert.deepEqual(batches.map(b=>b.userData.stoneDressing).sort(),['arch','corner','jamb','keystone','trim']);
+  assert(batches.find(b=>b.userData.stoneDressing==='trim').count>40,'trim repeats as one instanced batch');
+  assert.equal(batches.find(b=>b.userData.stoneDressing==='keystone').count,1,'one keystone caps the arch');
+  console.log('Arched doors, world-scale masonry, and instanced stone details passed');
 } finally {await server.close();}
